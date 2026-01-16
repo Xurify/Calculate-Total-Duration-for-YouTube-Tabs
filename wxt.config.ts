@@ -6,7 +6,7 @@ export default defineConfig({
     name: "YouTube Totalled",
     description: "Calculate total duration of all open YouTube tabs.",
     permissions: ["tabs", "scripting", "storage"],
-    host_permissions: ["https://www.youtube.com/*", "https://youtube.com/*"],
+    host_permissions: ["*://*.youtube.com/*"],
   },
   dev: {
     server: {

@@ -1,3 +1,5 @@
+import { updateMetadataCache } from "../utils/storage";
+
 export default defineBackground(() => {
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "ping") {
@@ -84,16 +86,21 @@ async function handleStealthSync(tabs: TabToSync[]) {
         }
 
         if (duration > 0 || title || isLive) {
+          const metadata = {
+            seconds: duration,
+            title: title || "Loaded Video",
+            channelName: channel || "Unknown Channel",
+            isLive: isLive,
+            currentTime: 0, // Background sync can't know current time from static HTML
+          };
+
+          await updateMetadataCache(tab.url, metadata);
+
           browser.runtime
             .sendMessage({
               action: "tab-synced",
               tabId: tab.id,
-              metadata: {
-                seconds: duration,
-                title: title || "Loaded Video",
-                channelName: channel || "Unknown Channel",
-                isLive: isLive,
-              },
+              metadata,
             })
             .catch(() => {});
         }

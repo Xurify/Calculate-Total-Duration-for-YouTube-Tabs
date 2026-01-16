@@ -1,20 +1,13 @@
 import "./style.css";
 import packageJson from "../../package.json";
-const VERSION_NUMBER = packageJson.version;
+import {
+  VideoData,
+  loadStorage,
+  saveStorage as saveStorageUtil,
+  updateMetadataCache,
+} from "../../utils/storage";
 
-interface VideoData {
-  id: number;
-  title: string;
-  channelName: string;
-  seconds: number;
-  currentTime: number;
-  excluded: boolean;
-  index: number;
-  url: string;
-  suspended: boolean;
-  active: boolean;
-  isLive: boolean;
-}
+const VERSION_NUMBER = packageJson.version;
 
 let videoData: VideoData[] = [];
 let sortByDuration = false;
@@ -22,50 +15,7 @@ let smartSync = true;
 let currentView: "dashboard" | "settings" = "dashboard";
 
 async function saveStorage(): Promise<void> {
-  if (!browser.storage?.local) return;
-  const excludedUrls = videoData.filter((video) => video.excluded).map((video) => video.url);
-  await browser.storage.local.set({
-    sortByDuration,
-    excludedUrls,
-    smartSync,
-  });
-}
-
-async function loadStorage(): Promise<{ sortByDuration: boolean; excludedUrls: string[]; smartSync: boolean }> {
-  if (!browser.storage?.local) {
-    console.warn("Storage API not available. Please reload the extension in chrome://extensions.");
-    return { sortByDuration: false, excludedUrls: [], smartSync: true };
-  }
-  const data = await browser.storage.local.get(["sortByDuration", "excludedUrls", "smartSync", "metadataCache"]);
-  return {
-    sortByDuration: Boolean(data.sortByDuration),
-    excludedUrls: (data.excludedUrls as string[]) || [],
-    smartSync: data.smartSync !== undefined ? Boolean(data.smartSync) : true,
-    metadataCache: (data.metadataCache as Record<string, any>) || {},
-  } as any;
-}
-
-async function updateMetadataCache(
-  url: string,
-  metadata: { seconds: number; title: string; channelName: string; currentTime: number; isLive: boolean }
-) {
-  if (!url) return;
-  const data = await browser.storage.local.get("metadataCache");
-  const cache = (data.metadataCache as Record<string, any>) || {};
-
-  cache[url] = {
-    ...metadata,
-    timestamp: Date.now(),
-  };
-
-  // Keep cache size reasonable (last 200 videos)
-  const keys = Object.keys(cache);
-  if (keys.length > 200) {
-    const oldestKey = keys.sort((a, b) => cache[a].timestamp - cache[b].timestamp)[0];
-    delete cache[oldestKey];
-  }
-
-  await browser.storage.local.set({ metadataCache: cache });
+  await saveStorageUtil(videoData, sortByDuration, smartSync);
 }
 
 function parseTimeParam(url: string): number {
@@ -468,18 +418,25 @@ async function getYouTubeTabs(): Promise<void> {
   showLoading();
 
   try {
-    const { sortByDuration: savedSort, excludedUrls, smartSync: savedSmartSync, metadataCache } = await (loadStorage() as any);
+    const { sortByDuration: savedSort, excludedUrls, smartSync: savedSmartSync, metadataCache } = await loadStorage();
     sortByDuration = savedSort;
     smartSync = savedSmartSync;
 
     // Query ALL tabs and filter manually to avoid API quirks
     const allTabs = await browser.tabs.query({});
-    const tabs = allTabs.filter(
-      (tab) =>
-        tab.url &&
-        (tab.url.includes("youtube.com/watch") || tab.url.includes("youtube.com/shorts")) &&
-        !tab.url.includes("exclude_blobs") // Safety check
-    );
+    const tabs = allTabs.filter((tab) => {
+      if (!tab.url) return false;
+      try {
+        const url = new URL(tab.url);
+        return (
+          (url.hostname.endsWith("youtube.com") || url.hostname === "youtube.com") &&
+          (url.pathname.startsWith("/watch") || url.pathname.startsWith("/shorts")) &&
+          !tab.url.includes("exclude_blobs")
+        );
+      } catch {
+        return false;
+      }
+    });
 
     // Initialize videoData immediately with basic tab info and cached metadata
     videoData = tabs.map((tab, index) => {
@@ -608,10 +565,20 @@ async function getYouTubeTabs(): Promise<void> {
             render();
           }
         }
-      } catch (error) {
+      } catch (error: any) {
         // If script fails, it might be restricted or unloaded.
+        // We only warn for unexpected errors; permission errors are expected on unrefreshed tabs
+        const errorMsg = error?.message || "";
+        const isExpectedError =
+          errorMsg.includes("permissions") ||
+          errorMsg.includes("Cannot access") ||
+          errorMsg.includes("Extension context invalidated");
+
+        if (!isExpectedError) {
+          console.warn(`Failed to probe tab ${video.id}:`, error);
+        }
+
         // Mark as suspended so it gets picked up by Smart Sync if enabled
-        console.warn(`Failed to probe tab ${video.id}:`, error);
         video.suspended = true;
         render();
 

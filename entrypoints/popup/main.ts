@@ -4,7 +4,8 @@ import {
   VideoData,
   loadStorage,
   saveStorage as saveStorageUtil,
-  updateMetadataCache,
+  requestMetadataUpdate,
+  normalizeYoutubeUrl,
 } from "../../utils/storage";
 
 const VERSION_NUMBER = packageJson.version;
@@ -68,7 +69,7 @@ browser.runtime.onMessage.addListener((message) => {
       video.isLive = message.metadata.isLive || false;
       video.suspended = false;
 
-      updateMetadataCache(video.url, {
+      requestMetadataUpdate(video.url, {
         seconds: video.seconds,
         title: video.title,
         channelName: video.channelName,
@@ -78,12 +79,21 @@ browser.runtime.onMessage.addListener((message) => {
       render();
     }
   }
+  if (message.action === "sync-error") {
+    const syncAllButton = document.getElementById("sync-all") as HTMLButtonElement;
+    if (syncAllButton) {
+      syncAllButton.innerText = "Sync Failed (Rate Limited)";
+      syncAllButton.disabled = true;
+      syncAllButton.classList.add("text-red-500");
+    }
+  }
   if (message.action === "sync-complete") {
     const syncAllButton = document.getElementById("sync-all") as HTMLButtonElement;
     if (syncAllButton) {
       const unsyncedCount = videoData.filter((v) => v.suspended || v.seconds === 0).length;
       syncAllButton.innerText = unsyncedCount > 0 ? `Sync All (${unsyncedCount})` : "Synced";
       syncAllButton.disabled = unsyncedCount === 0;
+      syncAllButton.classList.remove("text-red-500");
     }
     render();
   }
@@ -372,7 +382,7 @@ function render(): void {
               </div>
             </div>
             <div class="mt-8 pt-6 border-t border-border/50 text-center">
-              <div class="text-[10px] text-text-muted font-medium mb-1 opacity-40 uppercase tracking-tighter">YouTube Totalled v${VERSION_NUMBER}</div>
+              <div class="text-[10px] text-text-muted font-medium mb-1 opacity-40 uppercase tracking-tighter">Calculate Total Duration for YouTube Tabs v${VERSION_NUMBER}</div>
             </div>
           </div>
         `;
@@ -441,7 +451,8 @@ async function getYouTubeTabs(): Promise<void> {
     // Initialize videoData immediately with basic tab info and cached metadata
     videoData = tabs.map((tab, index) => {
       const url = tab.url!;
-      const cached = metadataCache[url];
+      const normalizedUrl = normalizeYoutubeUrl(url);
+      const cached = metadataCache[normalizedUrl];
 
       return {
         id: tab.id || 0,
@@ -464,6 +475,7 @@ async function getYouTubeTabs(): Promise<void> {
     // Trigger Smart Sync for any suspended tabs that aren't in cache
     const unsyncedVideos = videoData.filter((v) => v.suspended && v.seconds === 0);
     if (smartSync && unsyncedVideos.length > 0 && currentView === "dashboard") {
+      console.log(`[Popup] Triggering smart sync for ${unsyncedVideos.length} tabs`);
       browser.runtime
         .sendMessage({
           action: "sync-all",
@@ -472,42 +484,45 @@ async function getYouTubeTabs(): Promise<void> {
         .catch(() => {});
     }
 
-    const activeTabPromises = videoData.map(async (video, index) => {
+    const activeTabPromises = videoData.map(async (video) => {
       if (video.suspended) return;
 
+      // STALE-WHILE-REVALIDATE LOGIC
+      // If we have a valid duration and title, we only NEED to probe for currentTime
+      const hasValidMetadata = video.seconds > 0 && video.title !== "YouTube Video";
+      
       try {
+        console.log(`[Popup] Probing tab ${video.id} (Metadata: ${hasValidMetadata ? 'Cached' : 'Missing'})`);
         const results = await browser.scripting.executeScript({
           target: { tabId: video.id },
           world: "MAIN",
-          func: () => {
+          args: [hasValidMetadata],
+          func: (hasMetadata: boolean) => {
             const videoElement = document.querySelector("video");
+            const currentTime = videoElement ? videoElement.currentTime : 0;
 
-            // Try to find the channel name reliably
+            if (hasMetadata) {
+              return { currentTime, skipMetadata: true };
+            }
+
             const channel =
               (document.querySelector("#upload-info #channel-name a") as HTMLElement)?.innerText ||
               (document.querySelector(".ytd-video-owner-renderer #channel-name a") as HTMLElement)?.innerText ||
               "";
 
-            // Priority-based livestream detection using YouTube's authoritative data
             let duration = 0;
             let isLive = false;
 
             try {
-              // @ts-ignore - YouTube internal API
+              // @ts-ignore
               const playerResponse = window.ytInitialPlayerResponse;
               const videoDetails = playerResponse?.videoDetails;
 
               if (videoDetails) {
-                // Priority 1: Direct isLive flag (most authoritative for CURRENTLY live)
                 isLive = videoDetails.isLive === true;
-
-                // Priority 2: Check liveBroadcastDetails - if it has start but no end, it's live
                 const liveDetails = playerResponse?.microformat?.playerMicroformatRenderer?.liveBroadcastDetails;
-                if (liveDetails && !liveDetails.endTimestamp) {
-                  isLive = true;
-                }
+                if (liveDetails && !liveDetails.endTimestamp) isLive = true;
 
-                // Priority 3: If lengthSeconds has a valid value, the stream has ended
                 const lengthSeconds = parseInt(videoDetails.lengthSeconds) || 0;
                 if (lengthSeconds > 0) {
                   isLive = false;
@@ -516,7 +531,6 @@ async function getYouTubeTabs(): Promise<void> {
               }
             } catch {}
 
-            // Priority 3: DOM fallback - check the live badge visibility
             if (!isLive) {
               const liveBadge = document.querySelector(".ytp-live-badge") as HTMLElement;
               if (liveBadge && !liveBadge.hasAttribute("disabled") && getComputedStyle(liveBadge).display !== "none") {
@@ -526,43 +540,47 @@ async function getYouTubeTabs(): Promise<void> {
 
             return {
               duration: isLive ? 0 : duration || videoElement?.duration || 0,
-              currentTime: videoElement ? videoElement.currentTime : 0,
+              currentTime,
               channelName: channel,
               title: document.title.replace(" - YouTube", "").trim(),
               isLive,
+              skipMetadata: false
             };
           },
         });
 
         if (results[0]?.result) {
           const result = results[0].result;
-          const duration = result.duration || 0;
-
-          if (duration === 0 && !result.isLive) {
-            // Script ran but found no duration and not live (e.g. ad, unstarted video).
-            if (smartSync) {
-              browser.runtime
-                .sendMessage({
+          
+          if (result.skipMetadata) {
+            // Only update currentTime
+            video.currentTime = result.currentTime || 0;
+            render();
+          } else {
+            const duration = result.duration || 0;
+            if (duration === 0 && !result.isLive) {
+              if (smartSync) {
+                browser.runtime.sendMessage({
                   action: "sync-all",
                   tabs: [{ id: video.id, url: video.url }],
-                })
-                .catch(() => {});
-            }
-          } else {
-            video.title = result.title || video.title;
-            video.channelName = result.channelName || video.channelName;
-            video.seconds = duration;
-            video.currentTime = result.currentTime || 0;
-            video.isLive = result.isLive || false;
+                }).catch(() => {});
+              }
+            } else {
+              video.title = result.title || video.title;
+              video.channelName = result.channelName || video.channelName;
+              video.seconds = duration;
+              video.currentTime = result.currentTime || 0;
+              video.isLive = result.isLive || false;
 
-            updateMetadataCache(video.url, {
-              seconds: video.seconds,
-              title: video.title,
-              channelName: video.channelName,
-              currentTime: video.currentTime,
-              isLive: video.isLive,
-            });
-            render();
+              requestMetadataUpdate(video.url, {
+                seconds: video.seconds,
+                title: video.title,
+                channelName: video.channelName,
+                currentTime: video.currentTime,
+                isLive: video.isLive,
+              });
+              render();
+            }
           }
         }
       } catch (error: any) {

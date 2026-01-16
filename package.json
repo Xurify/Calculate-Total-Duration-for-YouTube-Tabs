@@ -1,5 +1,5 @@
 {
-  "name": "youtube-totalled",
+  "name": "calculate-total-duration-for-youtube-tabs",
   "description": "Calculate the total duration of all your open YouTube tabs.",
   "private": true,
   "version": "1.0.0",

@@ -21,6 +21,44 @@ export interface CachedMetadata {
   timestamp: number;
 }
 
+export function normalizeYoutubeUrl(url: string): string {
+  try {
+    const urlObj = new URL(url);
+    if (!urlObj.hostname.includes("youtube.com") && !urlObj.hostname.includes("youtu.be")) return url;
+
+    // Handle youtu.be shortlinks
+    if (urlObj.hostname.includes("youtu.be")) {
+      const videoId = urlObj.pathname.slice(1);
+      return videoId ? `https://www.youtube.com/watch?v=${videoId}` : url;
+    }
+
+    // Handle standard watch URLs
+    const videoId = urlObj.searchParams.get("v");
+    if (videoId) return `https://www.youtube.com/watch?v=${videoId}`;
+
+    // Handle shorts (convert to watch URL for unified cache)
+    if (urlObj.pathname.startsWith("/shorts/")) {
+      const shortId = urlObj.pathname.split("/")[2];
+      if (shortId) return `https://www.youtube.com/watch?v=${shortId}`;
+    }
+
+    return url;
+  } catch {
+    return url;
+  }
+}
+
+export async function requestMetadataUpdate(
+  url: string,
+  metadata: Omit<CachedMetadata, "timestamp">
+): Promise<void> {
+  await browser.runtime.sendMessage({
+    action: "update-cache",
+    url,
+    metadata,
+  }).catch(() => {});
+}
+
 export async function saveStorage(
   videoData: VideoData[],
   sortByDuration: boolean,
@@ -58,11 +96,11 @@ export async function updateMetadataCache(
   url: string,
   metadata: Omit<CachedMetadata, "timestamp">
 ) {
-  if (!url) return;
+  const normalizedUrl = normalizeYoutubeUrl(url);
   const data = await browser.storage.local.get("metadataCache");
   const cache = (data.metadataCache as Record<string, CachedMetadata>) || {};
 
-  cache[url] = {
+  cache[normalizedUrl] = {
     ...metadata,
     timestamp: Date.now(),
   };

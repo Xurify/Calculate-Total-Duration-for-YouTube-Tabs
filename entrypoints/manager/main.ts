@@ -16,14 +16,15 @@ interface WindowGroup {
   label: string;
 }
 
-
 let allVideos: VideoData[] = [];
 let windowGroups: WindowGroup[] = [];
 let currentWindowId: number | 'all' = 'all';
 let selectedTabIds = new Set<number>();
 let metadataCache: Record<string, CachedMetadata> = {};
 let searchQuery = "";
-
+let viewMode: 'list' | 'channel' = 'list';
+let sortOption: string = 'duration-desc';
+let collapsedGroups = new Set<string>();
 
 function formatTime(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
@@ -63,7 +64,6 @@ function parseTimeParam(url: string): number {
     return 0;
   }
 }
-
 
 async function fetchTabs() {
   const storage = await loadStorage();
@@ -107,13 +107,12 @@ async function fetchTabs() {
 
 
   const groups = new Map<number, VideoData[]>();
-  allVideos.forEach(v => {
-    const wid = v.windowId;
+  allVideos.forEach(video => {
+    const wid = video.windowId;
     if (wid === undefined) return;
     if (!groups.has(wid)) groups.set(wid, []);
-    groups.get(wid)!.push(v);
+    groups.get(wid)!.push(video);
   });
-
 
   const windows = await browser.windows.getAll();
   windowGroups = windows
@@ -231,7 +230,6 @@ async function probeTabs() {
   await Promise.all(activeTabPromises);
 }
 
-
 function renderSidebar() {
   const container = document.getElementById("window-list");
   if (!container) return;
@@ -270,11 +268,40 @@ function renderSidebar() {
   // Actually, I'll use data attributes and a global click handler for the list.
 }
 
+function sortVideos(videos: VideoData[]): VideoData[] {
+  return [...videos].sort((a, b) => {
+    switch (sortOption) {
+      case 'index-asc': return a.index - b.index;
+      case 'duration-desc': return b.seconds - a.seconds;
+      case 'duration-asc': return a.seconds - b.seconds;
+      case 'title-asc': return a.title.localeCompare(b.title);
+      case 'channel-asc': return a.channelName.localeCompare(b.channelName);
+      default: return 0;
+    }
+  });
+}
+
 function renderMain() {
   const container = document.getElementById("tab-list");
   const headerTitle = document.getElementById("current-view-title");
   const headerStats = document.getElementById("current-view-stats");
   
+  const btnList = document.getElementById('view-list');
+  const btnChannel = document.getElementById('view-channel');
+  if (btnList && btnChannel) {
+    if (viewMode === 'list') {
+        btnList.classList.add('text-accent', 'bg-surface-hover');
+        btnList.classList.remove('text-text-muted');
+        btnChannel.classList.remove('text-accent', 'bg-surface-hover');
+        btnChannel.classList.add('text-text-muted');
+    } else {
+        btnChannel.classList.add('text-accent', 'bg-surface-hover');
+        btnChannel.classList.remove('text-text-muted');
+        btnList.classList.remove('text-accent', 'bg-surface-hover');
+        btnList.classList.add('text-text-muted');
+    }
+  }
+
   if (!container || !headerTitle || !headerStats) return;
 
   let videosToShow: VideoData[] = [];
@@ -289,7 +316,6 @@ function renderMain() {
       videosToShow = group.tabs;
     }
   }
-
 
   if (searchQuery) {
     const q = searchQuery.toLowerCase();
@@ -312,20 +338,95 @@ function renderMain() {
     return;
   }
 
-  container.innerHTML = videosToShow.map(video => {
+  if (viewMode === 'list') {
+      const sortedVideos = sortVideos(videosToShow);
+      container.innerHTML = renderVideoList(sortedVideos);
+  } else {
+      const channels = new Map<string, VideoData[]>();
+      videosToShow.forEach(video => {
+          const name = video.channelName || "Unknown Channel";
+          if (!channels.has(name)) channels.set(name, []);
+          channels.get(name)!.push(video);
+      });
+
+      let sortedGroups = Array.from(channels.entries());
+      
+      if (sortOption === 'channel-asc') {
+          sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
+      } else if (sortOption === 'duration-desc') {
+           sortedGroups.sort((a, b) => {
+               const durA = a[1].reduce((acc, v) => acc + v.seconds, 0);
+               const durB = b[1].reduce((acc, v) => acc + v.seconds, 0);
+               return durB - durA;
+           });
+      } else if (sortOption === 'duration-asc') {
+            sortedGroups.sort((a, b) => {
+               const durA = a[1].reduce((acc, v) => acc + v.seconds, 0);
+               const durB = b[1].reduce((acc, v) => acc + v.seconds, 0);
+               return durA - durB;
+           });
+      }
+      
+      container.innerHTML = sortedGroups.map(([channel, videos]) => {
+          const isCollapsed = collapsedGroups.has(channel);
+          const groupDuration = videos.reduce((acc, v) => acc + v.seconds, 0);
+          const sortedGroupVideos = sortVideos(videos);
+          
+          const allSelected = videos.every(v => selectedTabIds.has(v.id));
+          const someSelected = !allSelected && videos.some(v => selectedTabIds.has(v.id));
+
+          return `
+            <div class="mb-4">
+                <div class="flex items-center gap-3 px-2 py-2 rounded-md hover:bg-surface-hover/30 group/header select-none">
+                    <button class="p-1 rounded hover:bg-surface-hover text-text-muted transition-transform duration-200 group-toggle ${isCollapsed ? '-rotate-90' : ''}" data-group="${channel}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                    </button>
+                    
+                     <!-- Group Checkbox -->
+                    <div class="relative flex items-center justify-center w-4 h-4 cursor-pointer group-selection-toggle" data-group="${channel}">
+                      <input type="checkbox" class="peer appearance-none w-3.5 h-3.5 rounded border border-text-muted/40 checked:bg-accent checked:border-accent transition-colors cursor-pointer" ${allSelected ? 'checked' : ''} ${someSelected ? 'indeterminate' : ''}>
+                       <svg class="absolute w-2 h-2 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                       <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 ${someSelected && !allSelected ? 'opacity-100' : ''}">
+                          <div class="w-2 h-0.5 bg-accent"></div>
+                       </div>
+                    </div>
+
+                    <div class="flex-1 font-medium text-sm text-text-primary truncate cursor-pointer group-toggle" data-group="${channel}">${channel}</div>
+                    <div class="text-[10px] text-text-muted font-mono flex items-center gap-2">
+                        <span>${videos.length} videos</span>
+                        <span class="w-px h-3 bg-border"></span>
+                        <span>${formatTime(groupDuration)}</span>
+                    </div>
+                </div>
+                
+                <div class="space-y-1 ml-4 border-l border-border pl-2 mt-1 ${isCollapsed ? 'hidden' : ''}">
+                    ${renderVideoList(sortedGroupVideos)}
+                </div>
+            </div>
+          `;
+      }).join('');
+      
+      // Fix indeterminate states visually since HTML attribute doesn't set property
+      setTimeout(() => {
+           document.querySelectorAll('input[type="checkbox"]').forEach((el: any) => {
+               if (el.hasAttribute('indeterminate')) el.indeterminate = true;
+           });
+      }, 0);
+  }
+}
+
+function renderVideoList(videos: VideoData[]): string {
+  return videos.map(video => {
     const isSelected = selectedTabIds.has(video.id);
     const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
     
     return `
       <div class="group flex items-center gap-4 p-3 rounded-lg border border-transparent hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? 'bg-surface-hover border-border' : ''}" data-id="${video.id}">
-        <!-- Checkbox -->
         <div class="relative flex items-center justify-center w-5 h-5 cursor-pointer selection-toggle">
           <input type="checkbox" class="peer appearance-none w-4 h-4 rounded border border-text-muted/40 checked:bg-accent checked:border-accent transition-colors cursor-pointer" ${isSelected ? 'checked' : ''}>
           <svg class="absolute w-2.5 h-2.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
         </div>
 
-        <!-- Thumbnail/Icon Placeholder (optional, maybe just favicon or layout) -->
-        <!-- Content -->
         <div class="flex-1 min-w-0 cursor-pointer video-click-target">
            <div class="flex items-baseline gap-2 mb-1">
              <h3 class="text-sm font-medium text-text-primary truncate" title="${video.title}">${video.title}</h3>
@@ -344,7 +445,6 @@ function renderMain() {
            </div>
         </div>
 
-        <!-- Actions -->
         <div class="opacity-0 group-hover:opacity-100 flex items-center gap-2 transition-opacity">
            <button class="p-1.5 hover:bg-surface text-text-muted hover:text-white rounded transition-colors jump-btn" title="Go to Tab">
              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
@@ -418,6 +518,20 @@ function setupListeners() {
     searchQuery = (e.target as HTMLInputElement).value;
     renderMain();
   });
+
+  document.getElementById("view-list")?.addEventListener("click", () => {
+      viewMode = "list";
+      renderMain();
+  });
+  document.getElementById("view-channel")?.addEventListener("click", () => {
+      viewMode = "channel";
+      renderMain();
+  });
+
+  document.getElementById("sort-select")?.addEventListener("change", (e) => {
+      sortOption = (e.target as HTMLSelectElement).value;
+      renderMain();
+  });
 }
 
 // Rewriting renderSidebar to use data-id
@@ -480,7 +594,6 @@ function attachDynamicListeners() {
         });
     });
 
-
     tabList.querySelectorAll('.video-click-target').forEach(el => {
         el.addEventListener('click', async (e) => {
              const row = el.closest('[data-id]') as HTMLElement;
@@ -514,21 +627,55 @@ function attachDynamicListeners() {
              const row = el.closest('[data-id]') as HTMLElement;
              const id = parseInt(row.dataset.id || "0");
              await browser.tabs.remove(id);
-             // Optimistic update
              row.remove();
-             // Full refresh shortly
              setTimeout(fetchTabs, 100);
+        });
+    });
+
+    tabList.querySelectorAll('.group-toggle').forEach(el => {
+        el.addEventListener('click', (e) => {
+             const groupName = (el as HTMLElement).dataset.group;
+             if (groupName) {
+                 if (collapsedGroups.has(groupName)) collapsedGroups.delete(groupName);
+                 else collapsedGroups.add(groupName);
+                 renderMain();
+             }
+        });
+    });
+
+    tabList.querySelectorAll('.group-selection-toggle').forEach(el => {
+        el.addEventListener('click', (e) => {
+             e.stopPropagation();
+             const groupName = (el as HTMLElement).dataset.group;
+             if (groupName) {
+                 let scopeVideos = allVideos;
+                 if (currentWindowId !== 'all') {
+                     scopeVideos = allVideos.filter(v => v.windowId === currentWindowId);
+                 }
+                 
+                 const videosInGroup = scopeVideos.filter(video => 
+                    (video.channelName || "Unknown Channel") === groupName
+                 );
+                 
+                 const allSel = videosInGroup.every(video => selectedTabIds.has(video.id));
+                 
+                 videosInGroup.forEach(v => {
+                     if (allSel) selectedTabIds.delete(v.id);
+                     else selectedTabIds.add(v.id);
+                 });
+                 
+                 updateSelectionUI();
+                 renderMain();
+             }
         });
     });
   }
 }
 
-
 document.addEventListener("DOMContentLoaded", () => {
     setupListeners();
     fetchTabs();
     
-
     browser.tabs.onRemoved.addListener(fetchTabs);
     browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         if (changeInfo.status === 'complete' || changeInfo.title) fetchTabs();

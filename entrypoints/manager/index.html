@@ -29,40 +29,64 @@
     </aside>
 
     <main class="flex-1 flex flex-col h-full overflow-hidden bg-surface relative">
-      <header class="h-16 border-b border-border flex items-center justify-between px-8 bg-surface/80 backdrop-blur-md z-10">
-          <div>
-              <h2 id="current-view-title" class="text-xl font-bold">All Windows</h2>
-              <div id="current-view-stats" class="text-xs text-text-muted mt-0.5 font-medium"></div>
-          </div>
-
-          <div class="flex-1 max-w-md mx-6">
-            <div class="relative group">
-                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-text-muted group-focus-within:text-accent transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
+      <header class="flex flex-col border-b border-border bg-surface/80 backdrop-blur-md z-10">
+          <div class="h-16 flex items-center justify-between px-8">
+              <div>
+                  <h2 id="current-view-title" class="text-xl font-bold">All Windows</h2>
+                  <div id="current-view-stats" class="text-xs text-text-muted mt-0.5 font-medium"></div>
+              </div>
+    
+              <div class="flex-1 max-w-md mx-6">
+                <div class="relative group">
+                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-text-muted group-focus-within:text-accent transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                    </div>
+                    <input 
+                        type="text" 
+                        id="search-input" 
+                        class="block w-full pl-10 pr-3 py-1.5 border border-border rounded-md leading-5 bg-surface-elevated text-text-primary placeholde-text-muted focus:outline-none focus:bg-surface-hover focus:border-text-muted sm:text-sm transition-colors" 
+                        placeholder="Search titles..." 
+                    />
                 </div>
-                <input 
-                    type="text" 
-                    id="search-input" 
-                    class="block w-full pl-10 pr-3 py-1.5 border border-border rounded-md leading-5 bg-surface-elevated text-text-primary placeholde-text-muted focus:outline-none focus:bg-surface-hover focus:border-text-muted sm:text-sm transition-colors" 
-                    placeholder="Search titles..." 
-                />
-            </div>
+              </div>
+    
+              <div class="flex items-center gap-3">
+                   <div id="selection-actions" class="hidden flex items-center gap-2 mr-4 border-r border-border pr-6 animate-in fade-in slide-in-from-right-4 duration-200">
+                       <span id="selection-count" class="text-xs font-bold text-accent">0 selected</span>
+                       <button id="btn-close-selected" class="px-3 py-1.5 bg-surface-hover hover:bg-red-500/10 hover:text-red-500 text-text-secondary text-xs font-medium rounded-md transition-colors border-0 cursor-pointer">
+                           Close Selected
+                       </button>
+                   </div>
+    
+                   <button id="btn-refresh" class="p-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 cursor-pointer" title="Refresh">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+                   </button>
+              </div>
           </div>
 
-          
-          <div class="flex items-center gap-3">
-               <div id="selection-actions" class="hidden flex items-center gap-2 mr-4 border-r border-border pr-6 animate-in fade-in slide-in-from-right-4 duration-200">
-                   <span id="selection-count" class="text-xs font-bold text-accent">0 selected</span>
-                   <button id="btn-close-selected" class="px-3 py-1.5 bg-surface-hover hover:bg-red-500/10 hover:text-red-500 text-text-secondary text-xs font-medium rounded-md transition-colors border-0 cursor-pointer">
-                       Close Selected
-                   </button>
-               </div>
+          <div class="h-10 border-t border-border flex items-center px-8 gap-4 bg-surface-elevated/30">
+              <div class="flex items-center gap-2">
+                  <span class="text-[10px] uppercase font-bold text-text-muted tracking-wider">Group By</span>
+                  <div class="flex bg-surface-elevated rounded-md p-0.5 border border-border">
+                      <button id="view-list" class="px-2 py-0.5 text-xs font-medium rounded hover:bg-surface-hover text-accent bg-surface-hover transition-colors">List</button>
+                      <button id="view-channel" class="px-2 py-0.5 text-xs font-medium rounded hover:bg-surface-hover text-text-muted transition-colors">Channel</button>
+                  </div>
+              </div>
 
-               <button id="btn-refresh" class="p-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 cursor-pointer" title="Refresh">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
-               </button>
+              <div class="h-4 w-px bg-border"></div>
+
+              <div class="flex items-center gap-2">
+                  <span class="text-[10px] uppercase font-bold text-text-muted tracking-wider">Sort By</span>
+                  <select id="sort-select" class="bg-surface-elevated border border-border text-text-secondary text-xs rounded px-2 py-1 outline-none focus:border-text-muted cursor-pointer hover:bg-surface-hover transition-colors">
+                      <option value="index-asc">Original Order</option>
+                      <option value="duration-desc" selected>Duration (High to Low)</option>
+                      <option value="duration-asc">Duration (Low to High)</option>
+                      <option value="title-asc">Title (A-Z)</option>
+                      <option value="channel-asc">Channel (A-Z)</option>
+                  </select>
+              </div>
           </div>
       </header>
       

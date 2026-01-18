@@ -6,6 +6,7 @@ import {
   saveStorage as saveStorageUtil,
   requestMetadataUpdate,
   normalizeYoutubeUrl,
+  clearCache
 } from "../../utils/storage";
 
 const VERSION_NUMBER = packageJson.version;
@@ -145,7 +146,7 @@ function setupApp() {
       
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2">
-          <span id="stat-active-count" class="text-[11px] text-text-muted font-medium">0 active videos</span>
+          <span id="stat-video-count" class="text-[11px] text-text-muted font-medium">0 videos</span>
           <button id="refresh-tabs" class="p-1.5 rounded-full hover:bg-surface-hover text-text-muted hover:text-accent transition-all border-0 cursor-pointer group/refresh" title="Refresh tabs">
             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="group-active/refresh:rotate-180 transition-transform duration-500"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg>
           </button>
@@ -204,7 +205,7 @@ function setupApp() {
   });
 }
 
-function updateHeaderStats(totalSeconds: number, totalRemaining: number, activeCount: number, unsyncedCount: number) {
+function updateHeaderStats(totalSeconds: number, totalRemaining: number, videoCount: number, unsyncedCount: number) {
   const indicator = document.getElementById("smart-sync-indicator");
   const text = document.getElementById("smart-sync-text");
   if (indicator && text) {
@@ -216,7 +217,7 @@ function updateHeaderStats(totalSeconds: number, totalRemaining: number, activeC
 
   document.getElementById("stat-remaining")!.innerText = formatTime(totalRemaining);
   document.getElementById("stat-total")!.innerText = formatTime(totalSeconds);
-  document.getElementById("stat-active-count")!.innerText = `${activeCount} active videos`;
+  document.getElementById("stat-video-count")!.innerText = `${videoCount} videos`;
 
   const banner = document.getElementById("unsynced-banner");
   if (banner) {
@@ -262,14 +263,14 @@ function updateVideoList(videos: VideoData[]) {
       item.id = `video-item-${video.id}`;
       item.dataset.id = video.id.toString();
       item.style.viewTransitionName = `video-${video.id}`;
-      item.className = "group py-4 pr-5 border-b border-border last:border-0 transition-all duration-300";
+      item.className = "group relative py-4 pr-5 border-b border-border last:border-0 transition-all duration-300";
       item.innerHTML = `
            <div class="flex items-start justify-between gap-3 mb-2.5">
             <div class="flex-1 min-w-0">
               <div class="meta-channel text-[10px] text-accent font-semibold mb-0.5 truncate uppercase tracking-tighter"></div>
               <div class="meta-title text-[13px] text-text-primary font-medium leading-tight line-clamp-2 mb-1"></div>
             </div>
-            <div class="meta-controls flex gap-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"></div>
+            <div class="meta-controls absolute top-4 right-5 flex gap-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity bg-surface-elevated/90 backdrop-blur-sm rounded-md p-1 pl-2 shadow-sm border border-border/50"></div>
           </div>
           <div class="flex items-center gap-3">
             <div class="flex-1 h-1 bg-surface-hover rounded-full overflow-hidden">
@@ -283,7 +284,7 @@ function updateVideoList(videos: VideoData[]) {
     }
 
     const activeClasses = video.active ? "bg-accent/[0.03] border-l-4 border-l-accent pl-[17px]" : "pl-5";
-    item.className = `group py-4 pr-5 border-b border-border last:border-0 transition-all duration-300 ${activeClasses} ${
+    item.className = `group relative py-4 pr-5 border-b border-border last:border-0 transition-all duration-300 ${activeClasses} ${
       video.excluded ? "opacity-40 grayscale" : "opacity-100"
     }`;
 
@@ -382,6 +383,18 @@ function render(): void {
                   <div class="w-9 h-5 bg-surface-hover rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-muted peer-checked:after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-accent border border-border"></div>
                 </label>
               </div>
+
+              <div class="pt-4 border-t border-border">
+                <button id="btn-clear-cache" class="w-full text-left p-3 rounded-lg border border-border bg-surface-hover/20 hover:bg-red-500/10 hover:border-red-500 group/clear transition-all cursor-pointer">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <div class="text-[12px] font-semibold group-hover/clear:text-red-500 transition-colors">Clear Metadata Cache</div>
+                      <div class="text-[10px] text-text-muted">Reset all stored titles and durations</div>
+                    </div>
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 text-text-muted group-hover/clear:text-red-500 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                  </div>
+                </button>
+              </div>
             </div>
             <div class="mt-8 pt-6 border-t border-border/50 text-center">
               <div class="text-[10px] text-text-muted font-medium mb-1 opacity-40 uppercase tracking-tighter">Calculate Total Duration for YouTube Tabs v${VERSION_NUMBER}</div>
@@ -396,6 +409,15 @@ function render(): void {
         smartSync = (e.target as HTMLInputElement).checked;
         saveStorage();
         if (smartSync) getYouTubeTabs();
+      });
+
+      document.getElementById("btn-clear-cache")?.addEventListener("click", async () => {
+        if (confirm("Are you sure you want to clear all cached metadata?")) {
+            await clearCache();
+            getYouTubeTabs();
+            currentView = "dashboard";
+            render();
+        }
       });
       return;
     }

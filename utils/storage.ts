@@ -168,3 +168,8 @@ export async function updateMetadataCache(
 
   await browser.storage.local.set({ metadataCache: cache });
 }
+
+export async function clearCache(): Promise<void> {
+  if (!browser.storage?.local) return;
+  await browser.storage.local.set({ metadataCache: {} });
+}

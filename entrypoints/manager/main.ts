@@ -5,7 +5,8 @@ import {
   saveStorage as saveStorageUtil,
   normalizeYoutubeUrl,
   CachedMetadata,
-  requestMetadataUpdate
+  requestMetadataUpdate,
+  clearCache
 } from "../../utils/storage";
 
 interface WindowGroup {
@@ -548,13 +549,13 @@ function renderVideoList(videos: VideoData[]): string {
     const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
     
     return `
-      <div class="group flex items-center gap-4 p-3 rounded-lg border border-transparent hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? 'bg-surface-hover border-border' : ''}" data-id="${video.id}">
+      <div class="group relative flex items-center gap-4 p-3 rounded-lg border border-transparent hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? 'bg-surface-hover border-border' : ''}" data-id="${video.id}">
         <div class="relative flex items-center justify-center w-5 h-5 cursor-pointer selection-toggle">
           <input type="checkbox" class="peer appearance-none w-4 h-4 rounded border border-text-muted/40 checked:bg-accent checked:border-accent transition-colors cursor-pointer" ${isSelected ? 'checked' : ''}>
           <svg class="absolute w-2.5 h-2.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
         </div>
 
-        <div class="flex-1 min-w-0 cursor-pointer video-click-target">
+        <div class="flex-1 min-w-0 cursor-pointer video-click-target pr-16">
            <div class="flex items-baseline gap-2 mb-1">
              <h3 class="text-sm font-medium text-text-primary truncate" title="${video.title}">${video.title}</h3>
              <span class="text-[10px] text-text-muted truncate uppercase tracking-tight">${video.channelName}</span>
@@ -572,7 +573,7 @@ function renderVideoList(videos: VideoData[]): string {
            </div>
         </div>
 
-        <div class="opacity-0 group-hover:opacity-100 flex items-center gap-2 transition-opacity">
+        <div class="absolute right-4 opacity-0 group-hover:opacity-100 flex items-center gap-2 transition-opacity bg-surface-elevated/90 backdrop-blur-sm rounded-md p-1 shadow-sm border border-border/50">
            <button class="p-1.5 hover:bg-surface text-text-muted hover:text-white rounded transition-colors jump-btn" title="Go to Tab">
              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
            </button>
@@ -756,6 +757,16 @@ function setupListeners() {
       sortOption = (event.target as HTMLSelectElement).value;
       saveSettings();
       render();
+  });
+
+  document.getElementById("btn-clear-cache")?.addEventListener("click", async () => {
+      if (confirm("Are you sure you want to clear all cached metadata? This will force the extension to re-probe all tabs.")) {
+          await clearCache();
+          metadataCache = {};
+          fetchTabs();
+          isSettingsOpen = false;
+          document.getElementById("settings-modal")?.classList.add("hidden");
+      }
   });
 }
 

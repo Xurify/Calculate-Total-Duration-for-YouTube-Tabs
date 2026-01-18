@@ -8,7 +8,7 @@ import {
   requestMetadataUpdate
 } from "../../utils/storage";
 
-// Types
+
 interface WindowGroup {
   id: number;
   tabs: VideoData[];
@@ -16,14 +16,15 @@ interface WindowGroup {
   label: string;
 }
 
-// State
+
 let allVideos: VideoData[] = [];
 let windowGroups: WindowGroup[] = [];
 let currentWindowId: number | 'all' = 'all';
 let selectedTabIds = new Set<number>();
 let metadataCache: Record<string, CachedMetadata> = {};
+let searchQuery = "";
 
-// Utils
+
 function formatTime(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -63,7 +64,7 @@ function parseTimeParam(url: string): number {
   }
 }
 
-// Core Logic
+
 async function fetchTabs() {
   const storage = await loadStorage();
   metadataCache = storage.metadataCache;
@@ -104,7 +105,7 @@ async function fetchTabs() {
     };
   });
 
-  // Group by Window
+
   const groups = new Map<number, VideoData[]>();
   allVideos.forEach(v => {
     const wid = v.windowId;
@@ -113,7 +114,7 @@ async function fetchTabs() {
     groups.get(wid)!.push(v);
   });
 
-  // Get Window Metadata (for order and labels)
+
   const windows = await browser.windows.getAll();
   windowGroups = windows
     .filter(w => groups.has(w.id!))
@@ -127,7 +128,7 @@ async function fetchTabs() {
         label: `Window ${i + 1}`
       };
     })
-    .sort((a, b) => b.tabs.length - a.tabs.length); // Sort by tab count desc
+    .sort((a, b) => b.tabs.length - a.tabs.length);
 
   render();
   probeTabs();
@@ -135,7 +136,6 @@ async function fetchTabs() {
 
 async function probeTabs() {
   const activeTabPromises = allVideos.map(async (video) => {
-      // Skip if suspended (discarded)
       if (video.suspended) return;
       
       const hasValidMetadata = video.seconds > 0 && video.title !== "YouTube Video";
@@ -231,7 +231,7 @@ async function probeTabs() {
   await Promise.all(activeTabPromises);
 }
 
-// Rendering
+
 function renderSidebar() {
   const container = document.getElementById("window-list");
   if (!container) return;
@@ -288,6 +288,15 @@ function renderMain() {
       headerTitle.innerText = group.label;
       videosToShow = group.tabs;
     }
+  }
+
+
+  if (searchQuery) {
+    const q = searchQuery.toLowerCase();
+    videosToShow = videosToShow.filter(v => 
+      v.title.toLowerCase().includes(q) || 
+      v.channelName.toLowerCase().includes(q)
+    );
   }
 
   const duration = videosToShow.reduce((acc, v) => acc + v.seconds, 0);
@@ -378,7 +387,7 @@ function updateSelectionUI() {
   });
 }
 
-// Event Listeners
+
 function setupListeners() {
   document.getElementById("btn-refresh")?.addEventListener("click", () => {
     fetchTabs();
@@ -394,7 +403,7 @@ function setupListeners() {
     }
   });
 
-  // Event Delegation for Sidebar
+
   document.getElementById("window-list")?.addEventListener("click", (e) => {
     const btn = (e.target as HTMLElement).closest("button");
     if (!btn) return;
@@ -403,6 +412,11 @@ function setupListeners() {
     // Better to use data attributes.
     // Let's rely on the onclick defined in strict innerHTML if we can, BUT typescript modules might scopes.
     // Better to attach click handler to container and read data-id.
+  });
+
+  document.getElementById("search-input")?.addEventListener("input", (e) => {
+    searchQuery = (e.target as HTMLInputElement).value;
+    renderMain();
   });
 }
 
@@ -437,7 +451,7 @@ function attachDynamicListeners() {
     // Let's assume we use delegation on the container for simplicity
   }
 
-  // Window Selection Delegation
+
   document.querySelectorAll('#window-list button').forEach((btn, idx) => {
       btn.addEventListener('click', () => {
          const isAll = idx === 0;
@@ -451,10 +465,10 @@ function attachDynamicListeners() {
       });
   });
 
-  // Tab List Delegation
+
   const tabList = document.getElementById("tab-list");
   if (tabList) {
-    // Checkbox mapping
+
     tabList.querySelectorAll('.selection-toggle').forEach(el => {
         el.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -466,7 +480,7 @@ function attachDynamicListeners() {
         });
     });
 
-    // Video Click Target (Activate)
+
     tabList.querySelectorAll('.video-click-target').forEach(el => {
         el.addEventListener('click', async (e) => {
              const row = el.closest('[data-id]') as HTMLElement;
@@ -479,7 +493,7 @@ function attachDynamicListeners() {
         });
     });
 
-    // Jump Btn
+
     tabList.querySelectorAll('.jump-btn').forEach(el => {
         el.addEventListener('click', async (e) => {
              e.stopPropagation();
@@ -493,7 +507,7 @@ function attachDynamicListeners() {
         });
     });
 
-    // Close Btn
+
     tabList.querySelectorAll('.close-btn').forEach(el => {
         el.addEventListener('click', async (e) => {
              e.stopPropagation();
@@ -509,12 +523,12 @@ function attachDynamicListeners() {
   }
 }
 
-// Init
+
 document.addEventListener("DOMContentLoaded", () => {
     setupListeners();
     fetchTabs();
     
-    // Poll for updates (tab closing/opening elsewhere)
+
     browser.tabs.onRemoved.addListener(fetchTabs);
     browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         if (changeInfo.status === 'complete' || changeInfo.title) fetchTabs();

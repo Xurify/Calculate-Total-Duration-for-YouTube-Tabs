@@ -76,6 +76,9 @@ async function fetchTabs() {
   metadataCache = storage.metadataCache;
   const excludedUrls = storage.excludedUrls;
   thumbnailQuality = storage.thumbnailQuality;
+  groupingMode = storage.groupingMode;
+  layoutMode = storage.layoutMode;
+  sortOption = storage.sortOption;
 
   const allTabs = await browser.tabs.query({});
   const youtubeTabs = allTabs.filter(tab => {
@@ -237,7 +240,38 @@ async function probeTabs() {
   await Promise.all(activeTabPromises);
 }
 
+// Helper to save current settings state
+async function saveSettings() {
+    // We need to pass all arguments to match signature, but we can rely on current global state
+    // To do this safely without re-reading storage every time (which we do in loadStorage anyway), 
+    // we should ideally keep a local state object.
+    // However, saveStorageUtil needs videoData for excludedUrls. 
+    // We will just pass empty videoData since saveStorage filters it. 
+    // WAIT: saveStorage OVERWRITES excludedUrls if we pass empty list?
+    // Let's check storage.ts.  
+    // "const excludedUrls = videoData.filter((video) => video.excluded).map((video) => video.url);"
+    // "await browser.storage.local.set(data);" - and data includes excludedUrls.
+    // This wipes excluded URLs if we pass []. 
+    // CRITICAL FIX: We need to read current storage or pass allVideos.
+    
+    // Better approach: Update saveStorage in storage.ts to only update provided keys? 
+    // Or just pass allVideos here.
+    
+    const s = await loadStorage(); // Reload to get other fields like smartSync
+    // We save all current global state
+    await saveStorageUtil(
+        allVideos, 
+        s.sortByDuration, 
+        s.smartSync, 
+        thumbnailQuality, 
+        layoutMode, 
+        groupingMode, 
+        sortOption
+    );
+}
+
 function renderSidebar() {
+
   const container = document.getElementById("window-list");
   if (!container) return;
   
@@ -467,11 +501,8 @@ function renderMain() {
                     </div>
                 </div>
                 
-                <div class="space-y-1 ml-4 border-l border-border pl-2 mt-1 ${isCollapsed ? 'hidden' : ''}">
-                <div class="space-y-1 ml-4 border-l border-border pl-2 mt-1 ${isCollapsed ? 'hidden' : ''}">
+                <div class="space-y-1 ml-12 border-l border-border pl-2 mt-1 ${isCollapsed ? 'hidden' : ''}">
                     ${layoutMode === 'grid' ? renderVideoGrid(sortedGroupVideos) : renderVideoList(sortedGroupVideos)}
-                </div>
-
                 </div>
             </div>
           `;
@@ -658,58 +689,59 @@ function setupListeners() {
 
   document.getElementById("search-input")?.addEventListener("input", (e) => {
     searchQuery = (e.target as HTMLInputElement).value;
-    renderMain();
+    render();
   });
 
   document.getElementById("view-list")?.addEventListener("click", () => {
       groupingMode = "none";
-      renderMain();
+      saveSettings();
+      render();
   });
   document.getElementById("view-channel")?.addEventListener("click", () => {
       groupingMode = "channel";
-      renderMain();
+      saveSettings();
+      render();
   });
 
   document.getElementById("layout-list")?.addEventListener("click", () => {
       layoutMode = "list";
-      renderMain();
+      saveSettings();
+      render();
   });
   document.getElementById("layout-grid")?.addEventListener("click", () => {
       layoutMode = "grid";
-      renderMain();
+      saveSettings();
+      render();
   });
 
   document.getElementById("btn-settings")?.addEventListener("click", () => {
       isSettingsOpen = true;
-      renderMain();
+      render();
   });
   document.getElementById("close-settings")?.addEventListener("click", () => {
       isSettingsOpen = false;
-      renderMain();
+      render();
   });
 
   document.getElementById("quality-standard")?.addEventListener("click", () => {
       thumbnailQuality = "standard";
-      saveStorageUtil([], true, true, thumbnailQuality).catch(console.error);
-      loadStorage().then(s => {
-          saveStorageUtil(allVideos, s.sortByDuration, s.smartSync, "standard");
-      });
-      renderMain();
+      saveSettings();
+      render();
   });
 
   document.getElementById("quality-high")?.addEventListener("click", () => {
       thumbnailQuality = "high";
-      loadStorage().then(s => {
-          saveStorageUtil(allVideos, s.sortByDuration, s.smartSync, "high");
-      });
-      renderMain();
+      saveSettings();
+      render();
   });
 
   document.getElementById("sort-select")?.addEventListener("change", (e) => {
       sortOption = (e.target as HTMLSelectElement).value;
-      renderMain();
+      saveSettings();
+      render();
   });
 }
+
 
 function render() {
   renderSidebar();
@@ -799,10 +831,11 @@ function attachDynamicListeners() {
              if (groupName) {
                  if (collapsedGroups.has(groupName)) collapsedGroups.delete(groupName);
                  else collapsedGroups.add(groupName);
-                 renderMain();
+                 render();
              }
         });
     });
+
 
     tabList.querySelectorAll('.group-selection-toggle').forEach(el => {
         el.addEventListener('click', (e) => {
@@ -826,7 +859,7 @@ function attachDynamicListeners() {
                  });
                  
                  updateSelectionUI();
-                 renderMain();
+                 render();
              }
         });
     });

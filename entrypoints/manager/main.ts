@@ -26,6 +26,8 @@ let metadataCache: Record<string, CachedMetadata> = {};
 let searchQuery = "";
 let groupingMode: 'none' | 'channel' = 'none';
 let layoutMode: 'list' | 'grid' = 'list';
+let thumbnailQuality: 'standard' | 'high' = 'high';
+let isSettingsOpen = false;
 
 let sortOption: string = 'duration-desc';
 let collapsedGroups = new Set<string>();
@@ -73,6 +75,7 @@ async function fetchTabs() {
   const storage = await loadStorage();
   metadataCache = storage.metadataCache;
   const excludedUrls = storage.excludedUrls;
+  thumbnailQuality = storage.thumbnailQuality;
 
   const allTabs = await browser.tabs.query({});
   const youtubeTabs = allTabs.filter(tab => {
@@ -223,10 +226,11 @@ async function probeTabs() {
                 });
              }
           }
-
+          // Re-render (could be debounced)
           render();
         }
       } catch (e) {
+        // Ignore errors (permissions, closed tabs, etc)
       }
   });
 
@@ -265,6 +269,8 @@ function renderSidebar() {
   });
 
   container.innerHTML = html;
+  
+  container.innerHTML = html;
 }
 
 function sortVideos(videos: VideoData[]): VideoData[] {
@@ -286,15 +292,47 @@ function extractVideoId(url: string): string | null {
 }
 
 
+
 function renderMain() {
   const container = document.getElementById("tab-list");
   const headerTitle = document.getElementById("current-view-title");
   const headerStats = document.getElementById("current-view-stats");
-  
-  
-  const btnGroupNone = document.getElementById('view-list');
-  const btnGroupChannel = document.getElementById('view-channel');
 
+  const btnSettings = document.getElementById("btn-settings");
+  if (btnSettings) {
+      if (isSettingsOpen) btnSettings.classList.add('text-accent', 'bg-surface-hover');
+      else btnSettings.classList.remove('text-accent', 'bg-surface-hover');
+  }
+
+  const settingsModal = document.getElementById("settings-modal");
+  if (settingsModal) {
+      if (isSettingsOpen) {
+          settingsModal.classList.remove("hidden", "fade-out");
+          settingsModal.classList.add("flex", "animate-in", "fade-in");
+      } else {
+          settingsModal.classList.add("hidden");
+          settingsModal.classList.remove("flex", "animate-in", "fade-in");
+      }
+      
+      const btnQualityStd = document.getElementById("quality-standard");
+      const btnQualityHigh = document.getElementById("quality-high");
+      
+      if (btnQualityStd && btnQualityHigh) {
+          if (thumbnailQuality === 'standard') {
+              btnQualityStd.classList.add('text-accent', 'bg-surface-hover');
+              btnQualityStd.classList.remove('text-text-muted');
+              btnQualityHigh.classList.remove('text-accent', 'bg-surface-hover');
+              btnQualityHigh.classList.add('text-text-muted');
+          } else {
+              btnQualityHigh.classList.add('text-accent', 'bg-surface-hover');
+              btnQualityHigh.classList.remove('text-text-muted');
+              btnQualityStd.classList.remove('text-accent', 'bg-surface-hover');
+              btnQualityStd.classList.add('text-text-muted');
+          }
+      }
+  }
+  const btnGroupNone = document.getElementById('view-list'); // "None" button
+  const btnGroupChannel = document.getElementById('view-channel');
   
   if (btnGroupNone && btnGroupChannel) {
     if (groupingMode === 'none') {
@@ -310,10 +348,9 @@ function renderMain() {
     }
   }
 
-
+  // Layout Toggles
   const btnLayoutList = document.getElementById('layout-list');
   const btnLayoutGrid = document.getElementById('layout-grid');
-
   
   if (btnLayoutList && btnLayoutGrid) {
       if (layoutMode === 'list') {
@@ -440,7 +477,7 @@ function renderMain() {
           `;
       }).join('');
       
-
+      // Fix indeterminate states visually since HTML attribute doesn't set property
       setTimeout(() => {
            document.querySelectorAll('input[type="checkbox"]').forEach((el: any) => {
                if (el.hasAttribute('indeterminate')) el.indeterminate = true;
@@ -499,31 +536,37 @@ function renderVideoGrid(videos: VideoData[]): string {
         const isSelected = selectedTabIds.has(video.id);
         const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
         const videoId = extractVideoId(video.url);
-        const thumbnailUrl = videoId ? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` : '';
+        const thumbQuality = thumbnailQuality === 'high' ? 'hqdefault.jpg' : 'mqdefault.jpg';
+        const thumbnailUrl = videoId ? `https://i.ytimg.com/vi/${videoId}/${thumbQuality}` : '';
 
         return `
             <div class="group relative flex flex-col rounded-lg border border-transparent overflow-hidden hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? 'bg-surface-hover border-border ring-1 ring-accent/50' : ''}" data-id="${video.id}">
                 
+                <!-- Thumbnail Area -->
                 <div class="relative w-full aspect-video bg-surface-elevated/50 overflow-hidden video-click-target cursor-pointer">
                     ${thumbnailUrl 
                         ? `<img src="${thumbnailUrl}" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" alt="" />`
                         : `<div class="w-full h-full flex items-center justify-center text-text-muted/20"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="12" cy="12" r="3"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>`
                     }
                     
+                    <!-- Duration Badge -->
                     <div class="absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-mono font-medium text-white backdrop-blur-sm">
                         ${video.isLive ? 'LIVE' : formatCompact(video.seconds)}
                     </div>
 
+                    <!-- Progress Bar (Overlay at bottom of thumb) -->
                     ${watchedPercent > 0 ? `
                     <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-surface/30">
                         <div class="h-full bg-accent" style="width: ${watchedPercent}%"></div>
                     </div>` : ''}
 
+                    <!-- Selection Checkbox (Top Left) -->
                     <div class="absolute top-2 left-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity ${isSelected ? 'opacity-100' : ''} selection-toggle">
                         <input type="checkbox" class="appearance-none w-4 h-4 rounded border border-white/60 checked:bg-accent checked:border-accent bg-black/40 backdrop-blur-sm transition-colors cursor-pointer" ${isSelected ? 'checked' : ''}>
                         ${isSelected ? `<svg class="absolute top-0 left-0 w-4 h-4 text-white pointer-events-none p-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>` : ''}
                     </div>
 
+                    <!-- Hover Actions (Top Right) -->
                     <div class="absolute top-1 right-1 flex gap-1 transform translate-x-2 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 transition-all duration-200">
                          <button class="p-1.5 hover:bg-black/60 bg-black/40 text-white rounded-md backdrop-blur-sm transition-colors jump-btn" title="Go to Tab">
                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
@@ -534,12 +577,14 @@ function renderVideoGrid(videos: VideoData[]): string {
                     </div>
                 </div>
 
+                <!-- Info Area -->
                 <div class="p-2 video-click-target cursor-pointer">
                     <h3 class="text-xs font-medium text-text-primary line-clamp-2 leading-snug mb-1 min-h-[2.5em]" title="${video.title}">${video.title}</h3>
                     <div class="flex items-center justify-between text-[10px] text-text-muted">
                         <span class="truncate hover:text-text-secondary transition-colors">${video.channelName}</span>
                     </div>
                 </div>
+            </div>
         `;
     }).join('');
 
@@ -568,10 +613,12 @@ function updateSelectionUI() {
     const isSel = selectedTabIds.has(id);
     if (checkbox) checkbox.checked = isSel;
     
+
     if (layoutMode === 'list') {
        if (isSel) el.classList.add('bg-surface-hover', 'border-border');
        else el.classList.remove('bg-surface-hover', 'border-border');
     } else {
+       // Grid mode selection styling
        if (isSel) el.classList.add('bg-surface-hover', 'border-border', 'ring-1', 'ring-accent/50');
        else el.classList.remove('bg-surface-hover', 'border-border', 'ring-1', 'ring-accent/50');
        
@@ -605,6 +652,8 @@ function setupListeners() {
   document.getElementById("window-list")?.addEventListener("click", (e) => {
     const btn = (e.target as HTMLElement).closest("button");
     if (!btn) return;
+    
+
   });
 
   document.getElementById("search-input")?.addEventListener("input", (e) => {
@@ -620,13 +669,39 @@ function setupListeners() {
       groupingMode = "channel";
       renderMain();
   });
-  
+
   document.getElementById("layout-list")?.addEventListener("click", () => {
       layoutMode = "list";
       renderMain();
   });
   document.getElementById("layout-grid")?.addEventListener("click", () => {
       layoutMode = "grid";
+      renderMain();
+  });
+
+  document.getElementById("btn-settings")?.addEventListener("click", () => {
+      isSettingsOpen = true;
+      renderMain();
+  });
+  document.getElementById("close-settings")?.addEventListener("click", () => {
+      isSettingsOpen = false;
+      renderMain();
+  });
+
+  document.getElementById("quality-standard")?.addEventListener("click", () => {
+      thumbnailQuality = "standard";
+      saveStorageUtil([], true, true, thumbnailQuality).catch(console.error);
+      loadStorage().then(s => {
+          saveStorageUtil(allVideos, s.sortByDuration, s.smartSync, "standard");
+      });
+      renderMain();
+  });
+
+  document.getElementById("quality-high")?.addEventListener("click", () => {
+      thumbnailQuality = "high";
+      loadStorage().then(s => {
+          saveStorageUtil(allVideos, s.sortByDuration, s.smartSync, "high");
+      });
       renderMain();
   });
 
@@ -644,14 +719,9 @@ function render() {
 }
 
 function attachDynamicListeners() {
+  // Sidebar clicks
   const winList = document.getElementById("window-list");
   if (winList) {
-    Array.from(winList.children).forEach((child, index) => {
-       if (child.tagName === 'BUTTON') {
-       }
-    });
-
-  }
 
 
   document.querySelectorAll('#window-list button').forEach((btn, idx) => {
@@ -666,6 +736,9 @@ function attachDynamicListeners() {
          render();
       });
   });
+
+
+  }
 
 
   const tabList = document.getElementById("tab-list");

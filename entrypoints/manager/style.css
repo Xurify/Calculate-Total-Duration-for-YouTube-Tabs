@@ -13,6 +13,12 @@
   --color-success: #2e7d32;
 }
 
+@layer base {
+  button {
+    cursor: pointer;
+  }
+}
+
 html {
   scroll-behavior: smooth;
   height: 100%;

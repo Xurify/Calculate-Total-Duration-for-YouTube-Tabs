@@ -24,6 +24,10 @@ html {
 }
 
 @layer base {
+  button {
+    cursor: pointer;
+  }
+
   .custom-scrollbar {
     contain: paint;
   }

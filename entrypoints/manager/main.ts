@@ -21,8 +21,12 @@ let windowGroups: WindowGroup[] = [];
 let currentWindowId: number | 'all' = 'all';
 let selectedTabIds = new Set<number>();
 let metadataCache: Record<string, CachedMetadata> = {};
+
+
 let searchQuery = "";
-let viewMode: 'list' | 'channel' = 'list';
+let groupingMode: 'none' | 'channel' = 'none';
+let layoutMode: 'list' | 'grid' = 'list';
+
 let sortOption: string = 'duration-desc';
 let collapsedGroups = new Set<string>();
 
@@ -219,11 +223,10 @@ async function probeTabs() {
                 });
              }
           }
-          // Re-render (could be debounced)
+
           render();
         }
       } catch (e) {
-        // Ignore errors (permissions, closed tabs, etc)
       }
   });
 
@@ -262,10 +265,6 @@ function renderSidebar() {
   });
 
   container.innerHTML = html;
-  
-  // Attach listeners manually since inline onclick is CSP restricted usually, but for WXT vanilla it might work if configured. 
-  // Safest to delegate or attach. I wll attach globally or use event delegation.
-  // Actually, I'll use data attributes and a global click handler for the list.
 }
 
 function sortVideos(videos: VideoData[]): VideoData[] {
@@ -281,25 +280,53 @@ function sortVideos(videos: VideoData[]): VideoData[] {
   });
 }
 
+function extractVideoId(url: string): string | null {
+  const match = url.match(/(?:v=|\/)([\w-]{11})(?:&|\?|\/|$)/);
+  return match ? match[1] : null;
+}
+
+
 function renderMain() {
   const container = document.getElementById("tab-list");
   const headerTitle = document.getElementById("current-view-title");
   const headerStats = document.getElementById("current-view-stats");
   
-  const btnList = document.getElementById('view-list');
-  const btnChannel = document.getElementById('view-channel');
-  if (btnList && btnChannel) {
-    if (viewMode === 'list') {
-        btnList.classList.add('text-accent', 'bg-surface-hover');
-        btnList.classList.remove('text-text-muted');
-        btnChannel.classList.remove('text-accent', 'bg-surface-hover');
-        btnChannel.classList.add('text-text-muted');
+  
+  const btnGroupNone = document.getElementById('view-list');
+  const btnGroupChannel = document.getElementById('view-channel');
+
+  
+  if (btnGroupNone && btnGroupChannel) {
+    if (groupingMode === 'none') {
+        btnGroupNone.classList.add('text-accent', 'bg-surface-hover');
+        btnGroupNone.classList.remove('text-text-muted');
+        btnGroupChannel.classList.remove('text-accent', 'bg-surface-hover');
+        btnGroupChannel.classList.add('text-text-muted');
     } else {
-        btnChannel.classList.add('text-accent', 'bg-surface-hover');
-        btnChannel.classList.remove('text-text-muted');
-        btnList.classList.remove('text-accent', 'bg-surface-hover');
-        btnList.classList.add('text-text-muted');
+        btnGroupChannel.classList.add('text-accent', 'bg-surface-hover');
+        btnGroupChannel.classList.remove('text-text-muted');
+        btnGroupNone.classList.remove('text-accent', 'bg-surface-hover');
+        btnGroupNone.classList.add('text-text-muted');
     }
+  }
+
+
+  const btnLayoutList = document.getElementById('layout-list');
+  const btnLayoutGrid = document.getElementById('layout-grid');
+
+  
+  if (btnLayoutList && btnLayoutGrid) {
+      if (layoutMode === 'list') {
+          btnLayoutList.classList.add('text-accent', 'bg-surface-hover');
+          btnLayoutList.classList.remove('text-text-muted');
+          btnLayoutGrid.classList.remove('text-accent', 'bg-surface-hover');
+          btnLayoutGrid.classList.add('text-text-muted');
+      } else {
+          btnLayoutGrid.classList.add('text-accent', 'bg-surface-hover');
+          btnLayoutGrid.classList.remove('text-text-muted');
+          btnLayoutList.classList.remove('text-accent', 'bg-surface-hover');
+          btnLayoutList.classList.add('text-text-muted');
+      }
   }
 
   if (!container || !headerTitle || !headerStats) return;
@@ -338,9 +365,13 @@ function renderMain() {
     return;
   }
 
-  if (viewMode === 'list') {
+  if (groupingMode === 'none') {
       const sortedVideos = sortVideos(videosToShow);
-      container.innerHTML = renderVideoList(sortedVideos);
+      if (layoutMode === 'grid') {
+          container.innerHTML = renderVideoGrid(sortedVideos);
+      } else {
+          container.innerHTML = renderVideoList(sortedVideos);
+      }
   } else {
       const channels = new Map<string, VideoData[]>();
       videosToShow.forEach(video => {
@@ -400,13 +431,16 @@ function renderMain() {
                 </div>
                 
                 <div class="space-y-1 ml-4 border-l border-border pl-2 mt-1 ${isCollapsed ? 'hidden' : ''}">
-                    ${renderVideoList(sortedGroupVideos)}
+                <div class="space-y-1 ml-4 border-l border-border pl-2 mt-1 ${isCollapsed ? 'hidden' : ''}">
+                    ${layoutMode === 'grid' ? renderVideoGrid(sortedGroupVideos) : renderVideoList(sortedGroupVideos)}
+                </div>
+
                 </div>
             </div>
           `;
       }).join('');
       
-      // Fix indeterminate states visually since HTML attribute doesn't set property
+
       setTimeout(() => {
            document.querySelectorAll('input[type="checkbox"]').forEach((el: any) => {
                if (el.hasAttribute('indeterminate')) el.indeterminate = true;
@@ -458,6 +492,60 @@ function renderVideoList(videos: VideoData[]): string {
   }).join('');
 }
 
+function renderVideoGrid(videos: VideoData[]): string {
+    if (videos.length === 0) return '';
+
+    const cardsHtml = videos.map(video => {
+        const isSelected = selectedTabIds.has(video.id);
+        const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
+        const videoId = extractVideoId(video.url);
+        const thumbnailUrl = videoId ? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` : '';
+
+        return `
+            <div class="group relative flex flex-col rounded-lg border border-transparent overflow-hidden hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? 'bg-surface-hover border-border ring-1 ring-accent/50' : ''}" data-id="${video.id}">
+                
+                <div class="relative w-full aspect-video bg-surface-elevated/50 overflow-hidden video-click-target cursor-pointer">
+                    ${thumbnailUrl 
+                        ? `<img src="${thumbnailUrl}" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" alt="" />`
+                        : `<div class="w-full h-full flex items-center justify-center text-text-muted/20"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="12" cy="12" r="3"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>`
+                    }
+                    
+                    <div class="absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-mono font-medium text-white backdrop-blur-sm">
+                        ${video.isLive ? 'LIVE' : formatCompact(video.seconds)}
+                    </div>
+
+                    ${watchedPercent > 0 ? `
+                    <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-surface/30">
+                        <div class="h-full bg-accent" style="width: ${watchedPercent}%"></div>
+                    </div>` : ''}
+
+                    <div class="absolute top-2 left-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity ${isSelected ? 'opacity-100' : ''} selection-toggle">
+                        <input type="checkbox" class="appearance-none w-4 h-4 rounded border border-white/60 checked:bg-accent checked:border-accent bg-black/40 backdrop-blur-sm transition-colors cursor-pointer" ${isSelected ? 'checked' : ''}>
+                        ${isSelected ? `<svg class="absolute top-0 left-0 w-4 h-4 text-white pointer-events-none p-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>` : ''}
+                    </div>
+
+                    <div class="absolute top-1 right-1 flex gap-1 transform translate-x-2 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 transition-all duration-200">
+                         <button class="p-1.5 hover:bg-black/60 bg-black/40 text-white rounded-md backdrop-blur-sm transition-colors jump-btn" title="Go to Tab">
+                             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                         </button>
+                         <button class="p-1.5 hover:bg-red-500/80 bg-black/40 text-white rounded-md backdrop-blur-sm transition-colors close-btn" title="Close Tab">
+                             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>
+                         </button>
+                    </div>
+                </div>
+
+                <div class="p-2 video-click-target cursor-pointer">
+                    <h3 class="text-xs font-medium text-text-primary line-clamp-2 leading-snug mb-1 min-h-[2.5em]" title="${video.title}">${video.title}</h3>
+                    <div class="flex items-center justify-between text-[10px] text-text-muted">
+                        <span class="truncate hover:text-text-secondary transition-colors">${video.channelName}</span>
+                    </div>
+                </div>
+        `;
+    }).join('');
+
+    return `<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 p-1">${cardsHtml}</div>`;
+}
+
 function updateSelectionUI() {
   const bar = document.getElementById("selection-actions");
   const count = document.getElementById("selection-count");
@@ -471,20 +559,30 @@ function updateSelectionUI() {
     bar?.classList.remove('flex');
   }
 
-  // Also update checkbox states in DOM without full re-render if possible, or just let re-render handle it?
-  // Re-render is expensive for many items. We will update DOM classes.
-  document.querySelectorAll('#tab-list > div').forEach(el => {
+
+
+
+  document.querySelectorAll('#tab-list [data-id]').forEach(el => {
     const id = parseInt((el as HTMLElement).dataset.id || "0");
     const checkbox = el.querySelector('input[type="checkbox"]') as HTMLInputElement;
     const isSel = selectedTabIds.has(id);
     if (checkbox) checkbox.checked = isSel;
     
-    if (isSel) {
-      el.classList.add('bg-surface-hover', 'border-border');
+    if (layoutMode === 'list') {
+       if (isSel) el.classList.add('bg-surface-hover', 'border-border');
+       else el.classList.remove('bg-surface-hover', 'border-border');
     } else {
-      el.classList.remove('bg-surface-hover', 'border-border');
+       if (isSel) el.classList.add('bg-surface-hover', 'border-border', 'ring-1', 'ring-accent/50');
+       else el.classList.remove('bg-surface-hover', 'border-border', 'ring-1', 'ring-accent/50');
+       
+       const selToggle = el.querySelector('.selection-toggle');
+       if (selToggle) {
+          if (isSel) selToggle.classList.add('opacity-100');
+          else selToggle.classList.remove('opacity-100');
+       }
     }
   });
+
 }
 
 
@@ -507,11 +605,6 @@ function setupListeners() {
   document.getElementById("window-list")?.addEventListener("click", (e) => {
     const btn = (e.target as HTMLElement).closest("button");
     if (!btn) return;
-    
-    // Hacky way to get ID since we didn't use data attributes in renderSidebar string
-    // Better to use data attributes.
-    // Let's rely on the onclick defined in strict innerHTML if we can, BUT typescript modules might scopes.
-    // Better to attach click handler to container and read data-id.
   });
 
   document.getElementById("search-input")?.addEventListener("input", (e) => {
@@ -520,11 +613,20 @@ function setupListeners() {
   });
 
   document.getElementById("view-list")?.addEventListener("click", () => {
-      viewMode = "list";
+      groupingMode = "none";
       renderMain();
   });
   document.getElementById("view-channel")?.addEventListener("click", () => {
-      viewMode = "channel";
+      groupingMode = "channel";
+      renderMain();
+  });
+  
+  document.getElementById("layout-list")?.addEventListener("click", () => {
+      layoutMode = "list";
+      renderMain();
+  });
+  document.getElementById("layout-grid")?.addEventListener("click", () => {
+      layoutMode = "grid";
       renderMain();
   });
 
@@ -534,9 +636,6 @@ function setupListeners() {
   });
 }
 
-// Rewriting renderSidebar to use data-id
-// (Done in the Render function below for clarity)
-
 function render() {
   renderSidebar();
   renderMain();
@@ -545,24 +644,13 @@ function render() {
 }
 
 function attachDynamicListeners() {
-  // Sidebar clicks
   const winList = document.getElementById("window-list");
   if (winList) {
-    // Clear old listeners by cloning or just assume re-render replaces them?
-    // innerHTML replaces elements so we need to re-attach if we attach to specific elements.
-    // Delegation is better.
-    // Let's just use the fact that I'm re-rendering innerHTML, so I can attach to new elements.
     Array.from(winList.children).forEach((child, index) => {
        if (child.tagName === 'BUTTON') {
-         // The first one is 'all'
-         // The rest are windows
-         // We can infer from index or text. 
-         // Let's assume order matches renderSidebar logic: All, Divider, Windows...
-         // Actually, let's fix renderSidebar to add data-id
        }
     });
 
-    // Let's assume we use delegation on the container for simplicity
   }
 
 

@@ -8,7 +8,6 @@ import {
   requestMetadataUpdate
 } from "../../utils/storage";
 
-
 interface WindowGroup {
   id: number;
   tabs: VideoData[];
@@ -21,7 +20,6 @@ let windowGroups: WindowGroup[] = [];
 let currentWindowId: number | 'all' = 'all';
 let selectedTabIds = new Set<number>();
 let metadataCache: Record<string, CachedMetadata> = {};
-
 
 let searchQuery = "";
 let groupingMode: 'none' | 'channel' = 'none';
@@ -99,9 +97,14 @@ async function fetchTabs() {
     const normalizedUrl = normalizeYoutubeUrl(url);
     const cached = metadataCache[normalizedUrl];
     
+    // Clean "(1030) " notification count from tab title if present
+    let initialTitle = tab.title || "YouTube Video";
+    initialTitle = initialTitle.replace(/^\(\d+\)\s*/g, "");
+    initialTitle = initialTitle.replace(" - YouTube", "").trim();
+
     return {
       id: tab.id || 0,
-      title: cached?.title || tab.title?.replace(" - YouTube", "") || "YouTube Video",
+      title: cached?.title || initialTitle,
       channelName: cached?.channelName || "",
       seconds: cached?.seconds || 0,
       currentTime: cached?.currentTime || parseTimeParam(url),
@@ -115,26 +118,25 @@ async function fetchTabs() {
     };
   });
 
-
   const groups = new Map<number, VideoData[]>();
   allVideos.forEach(video => {
-    const wid = video.windowId;
-    if (wid === undefined) return;
-    if (!groups.has(wid)) groups.set(wid, []);
-    groups.get(wid)!.push(video);
+    const windowId = video.windowId;
+    if (windowId === undefined) return;
+    if (!groups.has(windowId)) groups.set(windowId, []);
+    groups.get(windowId)!.push(video);
   });
 
   const windows = await browser.windows.getAll();
   windowGroups = windows
-    .filter(w => groups.has(w.id!))
-    .map((w, i) => {
-      const tabs = groups.get(w.id!) || [];
-      const duration = tabs.reduce((acc, v) => acc + v.seconds, 0);
+    .filter(window => groups.has(window.id!))
+    .map((window, windowIndex) => {
+      const tabs = groups.get(window.id!) || [];
+      const duration = tabs.reduce((acc, video) => acc + video.seconds, 0);
       return {
-        id: w.id!,
+        id: window.id!,
         tabs,
         duration,
-        label: `Window ${i + 1}`
+        label: `Window ${windowIndex + 1}`
       };
     })
     .sort((a, b) => b.tabs.length - a.tabs.length);
@@ -147,7 +149,10 @@ async function probeTabs() {
   const activeTabPromises = allVideos.map(async (video) => {
       if (video.suspended) return;
       
-      const hasValidMetadata = video.seconds > 0 && video.title !== "YouTube Video";
+      const hasValidMetadata = video.seconds > 0 && 
+                               video.title !== "YouTube Video" && 
+                               video.title !== "YouTube" && 
+                               !/^\(\d+\)\s*/.test(video.title);
 
       try {
         const results = await browser.scripting.executeScript({
@@ -186,23 +191,45 @@ async function probeTabs() {
                   duration = lengthSeconds;
                 }
               }
-            } catch {}
 
-            if (!isLive) {
-              const liveBadge = document.querySelector(".ytp-live-badge") as HTMLElement;
-              if (liveBadge && !liveBadge.hasAttribute("disabled") && getComputedStyle(liveBadge).display !== "none") {
-                isLive = true;
+              if (!isLive) {
+                const liveBadge = document.querySelector(".ytp-live-badge") as HTMLElement;
+                if (liveBadge && !liveBadge.hasAttribute("disabled") && getComputedStyle(liveBadge).display !== "none") {
+                  isLive = true;
+                }
               }
-            }
 
-            return {
-              duration: isLive ? 0 : duration || videoElement?.duration || 0,
-              currentTime,
-              channelName: channel,
-              title: document.title.replace(" - YouTube", "").trim(),
-              isLive,
-              skipMetadata: false
-            };
+              // Consolidate title extraction
+              let title = videoDetails?.title || 
+                (document.querySelector("h1.ytd-video-primary-info-renderer") as HTMLElement)?.innerText ||
+                (document.querySelector("h1.title.ytd-video-primary-info-renderer") as HTMLElement)?.innerText ||
+                (document.querySelector(".ytd-video-primary-info-renderer h1") as HTMLElement)?.innerText ||
+                (document.querySelector("ytd-video-primary-info-renderer #container h1") as HTMLElement)?.innerText ||
+                document.title;
+
+              // Clean title: remove any notification prefixes like "(1) " or "(1030) "
+              title = title.replace(/^\(\d+\)\s*/g, "");
+              title = title.replace(" - YouTube", "").trim();
+
+              return {
+                duration: isLive ? 0 : duration || videoElement?.duration || 0,
+                currentTime,
+                channelName: channel || videoDetails?.author || "",
+                title: title || "YouTube Video",
+                isLive,
+                skipMetadata: false
+              };
+            } catch (error) {
+               // Fallback if playerResponse access fails or other error
+               return {
+                 duration: videoElement?.duration || 0,
+                 currentTime,
+                 channelName: channel,
+                 title: document.title.replace(/^\(\d+\)\s*/g, "").replace(" - YouTube", "").trim() || "YouTube Video",
+                 isLive: false,
+                 skipMetadata: false
+               };
+            }
           },
         });
 
@@ -232,7 +259,7 @@ async function probeTabs() {
           // Re-render (could be debounced)
           render();
         }
-      } catch (e) {
+      } catch (error) {
         // Ignore errors (permissions, closed tabs, etc)
       }
   });
@@ -257,12 +284,12 @@ async function saveSettings() {
     // Better approach: Update saveStorage in storage.ts to only update provided keys? 
     // Or just pass allVideos here.
     
-    const s = await loadStorage(); // Reload to get other fields like smartSync
+    const storage = await loadStorage(); // Reload to get other fields like smartSync
     // We save all current global state
     await saveStorageUtil(
         allVideos, 
-        s.sortByDuration, 
-        s.smartSync, 
+        storage.sortByDuration, 
+        storage.smartSync, 
         thumbnailQuality, 
         layoutMode, 
         groupingMode, 
@@ -275,7 +302,7 @@ function renderSidebar() {
   const container = document.getElementById("window-list");
   if (!container) return;
   
-  const totalDuration = allVideos.reduce((acc, v) => acc + v.seconds, 0);
+  const totalDuration = allVideos.reduce((acc, video) => acc + video.seconds, 0);
   const totalTabs = allVideos.length;
 
   document.getElementById("global-stats-count")!.innerText = 
@@ -302,8 +329,6 @@ function renderSidebar() {
     `;
   });
 
-  container.innerHTML = html;
-  
   container.innerHTML = html;
 }
 
@@ -408,7 +433,7 @@ function renderMain() {
     headerTitle.innerText = "All Windows";
     videosToShow = allVideos;
   } else {
-    const group = windowGroups.find(g => g.id === currentWindowId);
+    const group = windowGroups.find(windowGroup => windowGroup.id === currentWindowId);
     if (group) {
       headerTitle.innerText = group.label;
       videosToShow = group.tabs;
@@ -416,14 +441,14 @@ function renderMain() {
   }
 
   if (searchQuery) {
-    const q = searchQuery.toLowerCase();
-    videosToShow = videosToShow.filter(v => 
-      v.title.toLowerCase().includes(q) || 
-      v.channelName.toLowerCase().includes(q)
+    const searchQueryLower = searchQuery.toLowerCase();
+    videosToShow = videosToShow.filter(video => 
+      video.title.toLowerCase().includes(searchQueryLower) || 
+      video.channelName.toLowerCase().includes(searchQueryLower)
     );
   }
 
-  const duration = videosToShow.reduce((acc, v) => acc + v.seconds, 0);
+  const duration = videosToShow.reduce((acc, video) => acc + video.seconds, 0);
   headerStats.innerText = `${videosToShow.length} videos · ${formatTime(duration)} total duration`;
 
   if (videosToShow.length === 0) {
@@ -457,25 +482,25 @@ function renderMain() {
           sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
       } else if (sortOption === 'duration-desc') {
            sortedGroups.sort((a, b) => {
-               const durA = a[1].reduce((acc, v) => acc + v.seconds, 0);
-               const durB = b[1].reduce((acc, v) => acc + v.seconds, 0);
-               return durB - durA;
+               const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
+               const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
+               return durationB - durationA;
            });
       } else if (sortOption === 'duration-asc') {
             sortedGroups.sort((a, b) => {
-               const durA = a[1].reduce((acc, v) => acc + v.seconds, 0);
-               const durB = b[1].reduce((acc, v) => acc + v.seconds, 0);
-               return durA - durB;
+               const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
+               const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
+               return durationA - durationB;
            });
       }
       
       container.innerHTML = sortedGroups.map(([channel, videos]) => {
           const isCollapsed = collapsedGroups.has(channel);
-          const groupDuration = videos.reduce((acc, v) => acc + v.seconds, 0);
+          const groupDuration = videos.reduce((acc, video) => acc + video.seconds, 0);
           const sortedGroupVideos = sortVideos(videos);
           
-          const allSelected = videos.every(v => selectedTabIds.has(v.id));
-          const someSelected = !allSelected && videos.some(v => selectedTabIds.has(v.id));
+          const allSelected = videos.every(video => selectedTabIds.has(video.id));
+          const someSelected = !allSelected && videos.some(video => selectedTabIds.has(video.id));
 
           return `
             <div class="mb-4">
@@ -510,8 +535,8 @@ function renderMain() {
       
       // Fix indeterminate states visually since HTML attribute doesn't set property
       setTimeout(() => {
-           document.querySelectorAll('input[type="checkbox"]').forEach((el: any) => {
-               if (el.hasAttribute('indeterminate')) el.indeterminate = true;
+           document.querySelectorAll('input[type="checkbox"]').forEach((element: any) => {
+               if (element.hasAttribute('indeterminate')) element.indeterminate = true;
            });
       }, 0);
   }
@@ -592,9 +617,9 @@ function renderVideoGrid(videos: VideoData[]): string {
                     </div>` : ''}
 
                     <!-- Selection Checkbox (Top Left) -->
-                    <div class="absolute top-2 left-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity ${isSelected ? 'opacity-100' : ''} selection-toggle">
-                        <input type="checkbox" class="appearance-none w-4 h-4 rounded border border-white/60 checked:bg-accent checked:border-accent bg-black/40 backdrop-blur-sm transition-colors cursor-pointer" ${isSelected ? 'checked' : ''}>
-                        ${isSelected ? `<svg class="absolute top-0 left-0 w-4 h-4 text-white pointer-events-none p-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>` : ''}
+                    <div class="absolute top-2 left-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity ${isSelected ? 'opacity-100' : ''} selection-toggle flex items-center justify-center w-5 h-5">
+                        <input type="checkbox" class="peer appearance-none w-4 h-4 rounded border border-white/60 checked:bg-accent checked:border-accent bg-black/40 backdrop-blur-sm transition-colors cursor-pointer" ${isSelected ? 'checked' : ''}>
+                        <svg class="absolute w-2.5 h-2.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                     </div>
 
                     <!-- Hover Actions (Top Right) -->
@@ -635,32 +660,27 @@ function updateSelectionUI() {
     bar?.classList.remove('flex');
   }
 
-
-
-
-  document.querySelectorAll('#tab-list [data-id]').forEach(el => {
-    const id = parseInt((el as HTMLElement).dataset.id || "0");
-    const checkbox = el.querySelector('input[type="checkbox"]') as HTMLInputElement;
-    const isSel = selectedTabIds.has(id);
-    if (checkbox) checkbox.checked = isSel;
+  document.querySelectorAll('#tab-list [data-id]').forEach(element => {
+    const id = parseInt((element as HTMLElement).dataset.id || "0");
+    const checkbox = element.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const isSelected = selectedTabIds.has(id);
+    if (checkbox) checkbox.checked = isSelected;
     
-
     if (layoutMode === 'list') {
-       if (isSel) el.classList.add('bg-surface-hover', 'border-border');
-       else el.classList.remove('bg-surface-hover', 'border-border');
+       if (isSelected) element.classList.add('bg-surface-hover', 'border-border');
+       else element.classList.remove('bg-surface-hover', 'border-border');
     } else {
        // Grid mode selection styling
-       if (isSel) el.classList.add('bg-surface-hover', 'border-border', 'ring-1', 'ring-accent/50');
-       else el.classList.remove('bg-surface-hover', 'border-border', 'ring-1', 'ring-accent/50');
+       if (isSelected) element.classList.add('bg-surface-hover', 'border-border', 'ring-1', 'ring-accent/50');
+       else element.classList.remove('bg-surface-hover', 'border-border', 'ring-1', 'ring-accent/50');
        
-       const selToggle = el.querySelector('.selection-toggle');
-       if (selToggle) {
-          if (isSel) selToggle.classList.add('opacity-100');
-          else selToggle.classList.remove('opacity-100');
+       const selectionToggle = element.querySelector('.selection-toggle');
+       if (selectionToggle) {
+          if (isSelected) selectionToggle.classList.add('opacity-100');
+          else selectionToggle.classList.remove('opacity-100');
        }
     }
   });
-
 }
 
 
@@ -679,16 +699,13 @@ function setupListeners() {
     }
   });
 
-
-  document.getElementById("window-list")?.addEventListener("click", (e) => {
-    const btn = (e.target as HTMLElement).closest("button");
-    if (!btn) return;
-    
-
+  document.getElementById("window-list")?.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest("button");
+    if (!button) return;
   });
 
-  document.getElementById("search-input")?.addEventListener("input", (e) => {
-    searchQuery = (e.target as HTMLInputElement).value;
+  document.getElementById("search-input")?.addEventListener("input", (event) => {
+    searchQuery = (event.target as HTMLInputElement).value;
     render();
   });
 
@@ -735,13 +752,12 @@ function setupListeners() {
       render();
   });
 
-  document.getElementById("sort-select")?.addEventListener("change", (e) => {
-      sortOption = (e.target as HTMLSelectElement).value;
+  document.getElementById("sort-select")?.addEventListener("change", (event) => {
+      sortOption = (event.target as HTMLSelectElement).value;
       saveSettings();
       render();
   });
 }
-
 
 function render() {
   renderSidebar();
@@ -752,34 +768,28 @@ function render() {
 
 function attachDynamicListeners() {
   // Sidebar clicks
-  const winList = document.getElementById("window-list");
-  if (winList) {
-
-
-  document.querySelectorAll('#window-list button').forEach((btn, idx) => {
-      btn.addEventListener('click', () => {
-         const isAll = idx === 0;
-         if (isAll) {
-             currentWindowId = 'all';
-         } else {
-             const winGroup = windowGroups[idx - 1]; // -1 because of All button
-             if (winGroup) currentWindowId = winGroup.id;
-         }
-         render();
+  const windowListElement = document.getElementById("window-list");
+  if (windowListElement) {
+    document.querySelectorAll('#window-list button').forEach((button, index) => {
+      button.addEventListener('click', () => {
+        const isAll = index === 0;
+        if (isAll) {
+          currentWindowId = 'all';
+        } else {
+          const windowGroup = windowGroups[index - 1]; // -1 because of All button
+          if (windowGroup) currentWindowId = windowGroup.id;
+        }
+        render();
       });
-  });
-
-
+    });
   }
-
 
   const tabList = document.getElementById("tab-list");
   if (tabList) {
-
-    tabList.querySelectorAll('.selection-toggle').forEach(el => {
-        el.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const row = el.closest('[data-id]') as HTMLElement;
+    tabList.querySelectorAll('.selection-toggle').forEach(element => {
+        element.addEventListener('click', (event) => {
+            event.stopPropagation();
+            const row = element.closest('[data-id]') as HTMLElement;
             const id = parseInt(row.dataset.id || "0");
             if (selectedTabIds.has(id)) selectedTabIds.delete(id);
             else selectedTabIds.add(id);
@@ -787,11 +797,22 @@ function attachDynamicListeners() {
         });
     });
 
-    tabList.querySelectorAll('.video-click-target').forEach(el => {
-        el.addEventListener('click', async (e) => {
-             const row = el.closest('[data-id]') as HTMLElement;
+    tabList.querySelectorAll('.video-click-target').forEach(element => {
+        element.addEventListener('click', (event) => {
+             const row = element.closest('[data-id]') as HTMLElement;
              const id = parseInt(row.dataset.id || "0");
-             const video = allVideos.find(v => v.id === id);
+             if (selectedTabIds.has(id)) selectedTabIds.delete(id);
+             else selectedTabIds.add(id);
+             updateSelectionUI();
+        });
+    });
+
+    tabList.querySelectorAll('.jump-btn').forEach(element => {
+        element.addEventListener('click', async (event) => {
+             event.stopPropagation();
+             const row = element.closest('[data-id]') as HTMLElement;
+             const id = parseInt(row.dataset.id || "0");
+             const video = allVideos.find(videoItem => videoItem.id === id);
              if (video) {
                  await browser.tabs.update(video.id, { active: true });
                  await browser.windows.update(video.windowId as number, { focused: true });
@@ -799,25 +820,10 @@ function attachDynamicListeners() {
         });
     });
 
-
-    tabList.querySelectorAll('.jump-btn').forEach(el => {
-        el.addEventListener('click', async (e) => {
-             e.stopPropagation();
-             const row = el.closest('[data-id]') as HTMLElement;
-             const id = parseInt(row.dataset.id || "0");
-             const video = allVideos.find(v => v.id === id);
-             if (video) {
-                 await browser.tabs.update(video.id, { active: true });
-                 await browser.windows.update(video.windowId as number, { focused: true });
-             }
-        });
-    });
-
-
-    tabList.querySelectorAll('.close-btn').forEach(el => {
-        el.addEventListener('click', async (e) => {
-             e.stopPropagation();
-             const row = el.closest('[data-id]') as HTMLElement;
+    tabList.querySelectorAll('.close-btn').forEach(element => {
+        element.addEventListener('click', async (event) => {
+             event.stopPropagation();
+             const row = element.closest('[data-id]') as HTMLElement;
              const id = parseInt(row.dataset.id || "0");
              await browser.tabs.remove(id);
              row.remove();
@@ -825,9 +831,9 @@ function attachDynamicListeners() {
         });
     });
 
-    tabList.querySelectorAll('.group-toggle').forEach(el => {
-        el.addEventListener('click', (e) => {
-             const groupName = (el as HTMLElement).dataset.group;
+    tabList.querySelectorAll('.group-toggle').forEach(element => {
+        element.addEventListener('click', (event) => {
+             const groupName = (element as HTMLElement).dataset.group;
              if (groupName) {
                  if (collapsedGroups.has(groupName)) collapsedGroups.delete(groupName);
                  else collapsedGroups.add(groupName);
@@ -836,26 +842,25 @@ function attachDynamicListeners() {
         });
     });
 
-
-    tabList.querySelectorAll('.group-selection-toggle').forEach(el => {
-        el.addEventListener('click', (e) => {
-             e.stopPropagation();
-             const groupName = (el as HTMLElement).dataset.group;
+    tabList.querySelectorAll('.group-selection-toggle').forEach(element => {
+        element.addEventListener('click', (event) => {
+             event.stopPropagation();
+             const groupName = (element as HTMLElement).dataset.group;
              if (groupName) {
                  let scopeVideos = allVideos;
                  if (currentWindowId !== 'all') {
-                     scopeVideos = allVideos.filter(v => v.windowId === currentWindowId);
+                     scopeVideos = allVideos.filter(video => video.windowId === currentWindowId);
                  }
                  
                  const videosInGroup = scopeVideos.filter(video => 
                     (video.channelName || "Unknown Channel") === groupName
                  );
                  
-                 const allSel = videosInGroup.every(video => selectedTabIds.has(video.id));
+                 const allSelected = videosInGroup.every(video => selectedTabIds.has(video.id));
                  
-                 videosInGroup.forEach(v => {
-                     if (allSel) selectedTabIds.delete(v.id);
-                     else selectedTabIds.add(v.id);
+                 videosInGroup.forEach(video => {
+                     if (allSelected) selectedTabIds.delete(video.id);
+                     else selectedTabIds.add(video.id);
                  });
                  
                  updateSelectionUI();

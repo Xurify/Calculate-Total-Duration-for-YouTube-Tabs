@@ -456,19 +456,23 @@ async function getYouTubeTabs(): Promise<void> {
       const normalizedUrl = normalizeYoutubeUrl(url);
       const cached = metadataCache[normalizedUrl];
 
-      return {
-        id: tab.id || 0,
-        title: cached?.title || tab.title?.replace(" - YouTube", "") || "YouTube Video",
-        channelName: cached?.channelName || "",
-        seconds: cached?.seconds || 0,
-        currentTime: cached?.currentTime || parseTimeParam(url),
-        excluded: excludedUrls.includes(url),
-        index: index,
-        url: url,
-        suspended: tab.discarded || false,
-        active: tab.active,
-        isLive: cached?.isLive || false,
-      };
+        let initialTitle = tab.title || "YouTube Video";
+        initialTitle = initialTitle.replace(/^\(\d+\)\s*/g, "");
+        initialTitle = initialTitle.replace(" - YouTube", "").trim();
+
+        return {
+          id: tab.id || 0,
+          title: cached?.title || initialTitle,
+          channelName: cached?.channelName || "",
+          seconds: cached?.seconds || 0,
+          currentTime: cached?.currentTime || parseTimeParam(url),
+          excluded: excludedUrls.includes(url),
+          index: index,
+          url: url,
+          suspended: tab.discarded || false,
+          active: tab.active,
+          isLive: cached?.isLive || false,
+        };
     });
 
     // Render immediately so user sees the list with whatever we have (cached or basic)
@@ -491,7 +495,10 @@ async function getYouTubeTabs(): Promise<void> {
 
       // STALE-WHILE-REVALIDATE LOGIC
       // If we have a valid duration and title, we only NEED to probe for currentTime
-      const hasValidMetadata = video.seconds > 0 && video.title !== "YouTube Video";
+      const hasValidMetadata = video.seconds > 0 && 
+                               video.title !== "YouTube Video" && 
+                               video.title !== "YouTube" && 
+                               !/^\(\d+\)\s*/.test(video.title);
       
       try {
         console.log(`[Popup] Probing tab ${video.id} (Metadata: ${hasValidMetadata ? 'Cached' : 'Missing'})`);
@@ -531,23 +538,45 @@ async function getYouTubeTabs(): Promise<void> {
                   duration = lengthSeconds;
                 }
               }
-            } catch {}
 
-            if (!isLive) {
-              const liveBadge = document.querySelector(".ytp-live-badge") as HTMLElement;
-              if (liveBadge && !liveBadge.hasAttribute("disabled") && getComputedStyle(liveBadge).display !== "none") {
-                isLive = true;
+              if (!isLive) {
+                const liveBadge = document.querySelector(".ytp-live-badge") as HTMLElement;
+                if (liveBadge && !liveBadge.hasAttribute("disabled") && getComputedStyle(liveBadge).display !== "none") {
+                  isLive = true;
+                }
               }
-            }
 
-            return {
-              duration: isLive ? 0 : duration || videoElement?.duration || 0,
-              currentTime,
-              channelName: channel,
-              title: document.title.replace(" - YouTube", "").trim(),
-              isLive,
-              skipMetadata: false
-            };
+              // Consolidate title extraction
+              let title = videoDetails?.title || 
+                (document.querySelector("h1.ytd-video-primary-info-renderer") as HTMLElement)?.innerText ||
+                (document.querySelector("h1.title.ytd-video-primary-info-renderer") as HTMLElement)?.innerText ||
+                (document.querySelector(".ytd-video-primary-info-renderer h1") as HTMLElement)?.innerText ||
+                (document.querySelector("ytd-video-primary-info-renderer #container h1") as HTMLElement)?.innerText ||
+                document.title;
+
+              // Clean title: remove any notification prefixes like "(1) " or "(1030) "
+              title = title.replace(/^\(\d+\)\s*/g, "");
+              title = title.replace(" - YouTube", "").trim();
+
+              return {
+                duration: isLive ? 0 : duration || videoElement?.duration || 0,
+                currentTime,
+                channelName: channel || videoDetails?.author || "",
+                title: title || "YouTube Video",
+                isLive,
+                skipMetadata: false
+              };
+            } catch (error) {
+               // Fallback if playerResponse access fails or other error
+               return {
+                 duration: videoElement?.duration || 0,
+                 currentTime,
+                 channelName: channel,
+                 title: document.title.replace(/^\(\d+\)\s*/g, "").replace(" - YouTube", "").trim() || "YouTube Video",
+                 isLive: false,
+                 skipMetadata: false
+               };
+            }
           },
         });
 

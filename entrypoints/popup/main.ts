@@ -122,9 +122,14 @@ function setupApp() {
           <div id="smart-sync-indicator" class="w-2 h-2 rounded-full transition-colors duration-300"></div>
           <span id="smart-sync-text" class="text-[10px] font-bold uppercase tracking-[0.2em] text-text-muted"></span>
         </div>
-        <button id="go-to-settings" class="p-2 -mr-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-all border-0 bg-transparent cursor-pointer group/settings">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="group-hover/settings:rotate-90 transition-transform duration-500"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-        </button>
+        <div class="flex items-center -mr-2">
+          <button id="open-manager" class="p-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-all border-0 bg-transparent cursor-pointer" title="Open Dashboard">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
+          </button>
+          <button id="go-to-settings" class="p-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-all border-0 bg-transparent cursor-pointer group/settings">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="group-hover/settings:rotate-90 transition-transform duration-500"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+          </button>
+        </div>
       </div>
 
       <div class="grid grid-cols-2 gap-4 mb-4">
@@ -168,10 +173,12 @@ function setupApp() {
     <div class="max-h-[340px] overflow-y-auto custom-scrollbar" id="video-list"></div>
   `;
 
-  // Attach global listeners once
   document.getElementById("go-to-settings")?.addEventListener("click", () => {
     currentView = "settings";
     render();
+  });
+  document.getElementById("open-manager")?.addEventListener("click", () => {
+    browser.tabs.create({ url: browser.runtime.getURL("/manager.html") });
   });
   document.getElementById("refresh-tabs")?.addEventListener("click", getYouTubeTabs);
   document.getElementById("sort-order")?.addEventListener("click", () => {
@@ -211,7 +218,6 @@ function updateHeaderStats(totalSeconds: number, totalRemaining: number, activeC
   document.getElementById("stat-total")!.innerText = formatTime(totalSeconds);
   document.getElementById("stat-active-count")!.innerText = `${activeCount} active videos`;
 
-  // Banner logic
   const banner = document.getElementById("unsynced-banner");
   if (banner) {
     if (unsyncedCount > 0 && !smartSync) {
@@ -224,7 +230,6 @@ function updateHeaderStats(totalSeconds: number, totalRemaining: number, activeC
     }
   }
 
-  // Sort buttons state
   const btnTab = document.getElementById("sort-order");
   const btnLen = document.getElementById("sort-duration");
   if (btnTab && btnLen) {
@@ -277,7 +282,6 @@ function updateVideoList(videos: VideoData[]) {
       container.appendChild(item);
     }
 
-    // DOM Updates
     const activeClasses = video.active ? "bg-accent/[0.03] border-l-4 border-l-accent pl-[17px]" : "pl-5";
     item.className = `group py-4 pr-5 border-b border-border last:border-0 transition-all duration-300 ${activeClasses} ${
       video.excluded ? "opacity-40 grayscale" : "opacity-100"
@@ -337,7 +341,6 @@ function updateVideoList(videos: VideoData[]) {
       setTimeout(getYouTubeTabs, 1500);
     });
 
-    // Reorder if needed
     container.appendChild(item);
   });
 }
@@ -348,7 +351,6 @@ function render(): void {
   renderTimeout = setTimeout(() => {
     renderTimeout = null;
 
-    // Check if empty
     if (videoData.length === 0) {
       app.innerHTML = `
           <div class="p-8 text-center">

@@ -10,6 +10,7 @@ export interface VideoData {
   suspended: boolean;
   active: boolean;
   isLive: boolean;
+  windowId?: number;
 }
 
 export interface CachedMetadata {

@@ -4,7 +4,7 @@ export default defineConfig({
   manifestVersion: 3,
   manifest: {
     name: "Calculate Total Duration for YouTube Tabs",
-    description: "Calculate total duration of all open YouTube tabs.",
+    description: "Calculate the total duration of all your open YouTube tabs.",
     permissions: ["tabs", "scripting", "storage"],
     host_permissions: ["*://*.youtube.com/*"],
   },

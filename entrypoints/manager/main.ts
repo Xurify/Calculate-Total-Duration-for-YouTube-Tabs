@@ -179,7 +179,13 @@ async function probeTabs() {
             try {
               // @ts-ignore
               const playerResponse = window.ytInitialPlayerResponse;
-              const videoDetails = playerResponse?.videoDetails;
+              let videoDetails = playerResponse?.videoDetails;
+
+              // Check for stale data (SPA navigation)
+              const currentVideoId = new URLSearchParams(window.location.search).get("v");
+              if (videoDetails && currentVideoId && videoDetails.videoId !== currentVideoId) {
+                  videoDetails = null; // Force fallback to DOM
+              }
 
               if (videoDetails) {
                 isLive = videoDetails.isLive === true;
@@ -888,6 +894,6 @@ document.addEventListener("DOMContentLoaded", () => {
     
     browser.tabs.onRemoved.addListener(fetchTabs);
     browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-        if (changeInfo.status === 'complete' || changeInfo.title) fetchTabs();
+        if (changeInfo.status === 'complete' || changeInfo.title || changeInfo.url) fetchTabs();
     });
 });

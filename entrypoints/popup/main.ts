@@ -547,7 +547,13 @@ async function getYouTubeTabs(): Promise<void> {
             try {
               // @ts-ignore
               const playerResponse = window.ytInitialPlayerResponse;
-              const videoDetails = playerResponse?.videoDetails;
+              let videoDetails = playerResponse?.videoDetails;
+
+              // Check for stale data (SPA navigation)
+              const currentVideoId = new URLSearchParams(window.location.search).get("v");
+              if (videoDetails && currentVideoId && videoDetails.videoId !== currentVideoId) {
+                  videoDetails = null; // Force fallback to DOM
+              }
 
               if (videoDetails) {
                 isLive = videoDetails.isLive === true;

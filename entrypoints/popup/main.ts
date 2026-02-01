@@ -549,8 +549,12 @@ async function getYouTubeTabs(): Promise<void> {
               const playerResponse = window.ytInitialPlayerResponse;
               let videoDetails = playerResponse?.videoDetails;
 
-              // Check for stale data (SPA navigation)
-              const currentVideoId = new URLSearchParams(window.location.search).get("v");
+              // Current video ID: watch ?v= or Shorts /shorts/VIDEO_ID
+              const shortsMatch = window.location.pathname.match(/^\/shorts\/([^/?]+)/);
+              const currentVideoId =
+                new URLSearchParams(window.location.search).get("v") ||
+                (shortsMatch ? shortsMatch[1] : null) ||
+                null;
               if (videoDetails && currentVideoId && videoDetails.videoId !== currentVideoId) {
                   videoDetails = null; // Force fallback to DOM
               }
@@ -565,6 +569,27 @@ async function getYouTubeTabs(): Promise<void> {
                   isLive = false;
                   duration = lengthSeconds;
                 }
+              }
+
+              // Shorts fallback 1: duration from ytInitialPlayerResponse.streamingData (formats/adaptiveFormats)
+              if (duration === 0 && window.location.pathname.startsWith("/shorts/")) {
+                try {
+                  const sd = playerResponse && playerResponse.streamingData;
+                  const formats = sd && sd.formats;
+                  const adaptive = sd && sd.adaptiveFormats;
+                  const firstFormat = (formats && formats[0]) || (adaptive && adaptive[0]);
+                  const ms = firstFormat && firstFormat.approxDurationMs;
+                  if (ms != null && !isNaN(ms)) duration = Number(ms) / 1000;
+                } catch (_) {}
+              }
+              // Shorts fallback 2: duration from ytInitialData (reelWatchEndpoint or other path)
+              if (duration === 0 && window.location.pathname.startsWith("/shorts/")) {
+                try {
+                  // @ts-ignore
+                  const d = window.ytInitialData;
+                  const ms = d && d.contents && d.contents.reelWatchEndpoint && d.contents.reelWatchEndpoint.approxDurationMs;
+                  if (ms != null && !isNaN(ms)) duration = Number(ms) / 1000;
+                } catch (_) {}
               }
 
               if (!isLive) {

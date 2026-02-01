@@ -24,7 +24,7 @@ let metadataCache: Record<string, CachedMetadata> = {};
 
 let searchQuery = "";
 let groupingMode: 'none' | 'channel' = 'none';
-let layoutMode: 'list' | 'grid' = 'list';
+let layoutMode: 'list' | 'grid' = 'grid';
 let thumbnailQuality: 'standard' | 'high' = 'high';
 let isSettingsOpen = false;
 
@@ -35,7 +35,7 @@ function formatTime(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = Math.floor(totalSeconds % 60);
-  
+
   if (hours > 0) {
     return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
   }
@@ -97,7 +97,7 @@ async function fetchTabs() {
     const url = tab.url!;
     const normalizedUrl = normalizeYoutubeUrl(url);
     const cached = metadataCache[normalizedUrl];
-    
+
     // Clean "(1030) " notification count from tab title if present
     let initialTitle = tab.title || "YouTube Video";
     initialTitle = initialTitle.replace(/^\(\d+\)\s*/g, "");
@@ -148,127 +148,152 @@ async function fetchTabs() {
 
 async function probeTabs() {
   const activeTabPromises = allVideos.map(async (video) => {
-      if (video.suspended) return;
-      
-      const hasValidMetadata = video.seconds > 0 && 
-                               video.title !== "YouTube Video" && 
-                               video.title !== "YouTube" && 
-                               !/^\(\d+\)\s*/.test(video.title);
+    if (video.suspended) return;
 
-      try {
-        const results = await browser.scripting.executeScript({
-          target: { tabId: video.id },
-          world: "MAIN",
-          args: [hasValidMetadata],
-          func: (hasMetadata: boolean) => {
-            const videoElement = document.querySelector("video");
-            const currentTime = videoElement ? videoElement.currentTime : 0;
+    const hasValidMetadata = video.seconds > 0 &&
+      video.title !== "YouTube Video" &&
+      video.title !== "YouTube" &&
+      !/^\(\d+\)\s*/.test(video.title);
 
-            if (hasMetadata) {
-              return { currentTime, skipMetadata: true };
-            }
+    try {
+      const results = await browser.scripting.executeScript({
+        target: { tabId: video.id },
+        world: "MAIN",
+        args: [hasValidMetadata],
+        func: (hasMetadata: boolean) => {
+          const videoElement = document.querySelector("video");
+          const currentTime = videoElement ? videoElement.currentTime : 0;
 
-            const channel =
-              (document.querySelector("#upload-info #channel-name a") as HTMLElement)?.innerText ||
-              (document.querySelector(".ytd-video-owner-renderer #channel-name a") as HTMLElement)?.innerText ||
-              "";
-
-            let duration = 0;
-            let isLive = false;
-
-            try {
-              // @ts-ignore
-              const playerResponse = window.ytInitialPlayerResponse;
-              let videoDetails = playerResponse?.videoDetails;
-
-              // Check for stale data (SPA navigation)
-              const currentVideoId = new URLSearchParams(window.location.search).get("v");
-              if (videoDetails && currentVideoId && videoDetails.videoId !== currentVideoId) {
-                  videoDetails = null; // Force fallback to DOM
-              }
-
-              if (videoDetails) {
-                isLive = videoDetails.isLive === true;
-                const liveDetails = playerResponse?.microformat?.playerMicroformatRenderer?.liveBroadcastDetails;
-                if (liveDetails && !liveDetails.endTimestamp) isLive = true;
-
-                const lengthSeconds = parseInt(videoDetails.lengthSeconds) || 0;
-                if (lengthSeconds > 0) {
-                  isLive = false;
-                  duration = lengthSeconds;
-                }
-              }
-
-              if (!isLive) {
-                const liveBadge = document.querySelector(".ytp-live-badge") as HTMLElement;
-                if (liveBadge && !liveBadge.hasAttribute("disabled") && getComputedStyle(liveBadge).display !== "none") {
-                  isLive = true;
-                }
-              }
-
-              // Consolidate title extraction
-              let title = videoDetails?.title || 
-                (document.querySelector("h1.ytd-video-primary-info-renderer") as HTMLElement)?.innerText ||
-                (document.querySelector("h1.title.ytd-video-primary-info-renderer") as HTMLElement)?.innerText ||
-                (document.querySelector(".ytd-video-primary-info-renderer h1") as HTMLElement)?.innerText ||
-                (document.querySelector("ytd-video-primary-info-renderer #container h1") as HTMLElement)?.innerText ||
-                document.title;
-
-              // Clean title: remove any notification prefixes like "(1) " or "(1030) "
-              title = title.replace(/^\(\d+\)\s*/g, "");
-              title = title.replace(" - YouTube", "").trim();
-
-              return {
-                duration: isLive ? 0 : duration || videoElement?.duration || 0,
-                currentTime,
-                channelName: channel || videoDetails?.author || "",
-                title: title || "YouTube Video",
-                isLive,
-                skipMetadata: false
-              };
-            } catch (error) {
-               // Fallback if playerResponse access fails or other error
-               return {
-                 duration: videoElement?.duration || 0,
-                 currentTime,
-                 channelName: channel,
-                 title: document.title.replace(/^\(\d+\)\s*/g, "").replace(" - YouTube", "").trim() || "YouTube Video",
-                 isLive: false,
-                 skipMetadata: false
-               };
-            }
-          },
-        });
-
-        if (results[0]?.result) {
-          const result = results[0].result;
-          
-          if (result.skipMetadata) {
-             video.currentTime = result.currentTime || 0;
-          } else {
-             const duration = result.duration || 0;
-             if (duration > 0 || result.isLive) {
-                video.title = result.title || video.title;
-                video.channelName = result.channelName || video.channelName;
-                video.seconds = duration;
-                video.currentTime = result.currentTime || 0;
-                video.isLive = result.isLive || false;
-
-                requestMetadataUpdate(video.url, {
-                  seconds: video.seconds,
-                  title: video.title,
-                  channelName: video.channelName,
-                  currentTime: video.currentTime,
-                  isLive: video.isLive,
-                });
-             }
+          if (hasMetadata) {
+            return { currentTime, skipMetadata: true };
           }
-          // Re-render (could be debounced)
-          render();
+
+          const channel =
+            (document.querySelector("#upload-info #channel-name a") as HTMLElement)?.innerText ||
+            (document.querySelector(".ytd-video-owner-renderer #channel-name a") as HTMLElement)?.innerText ||
+            "";
+
+          let duration = 0;
+          let isLive = false;
+
+          try {
+            // @ts-ignore
+            const playerResponse = window.ytInitialPlayerResponse;
+            let videoDetails = playerResponse?.videoDetails;
+
+            // Current video ID: watch ?v= or Shorts /shorts/VIDEO_ID
+            const shortsMatch = window.location.pathname.match(/^\/shorts\/([^/?]+)/);
+            const currentVideoId =
+              new URLSearchParams(window.location.search).get("v") ||
+              (shortsMatch ? shortsMatch[1] : null) ||
+              null;
+            if (videoDetails && currentVideoId && videoDetails.videoId !== currentVideoId) {
+              videoDetails = null; // Force fallback to DOM
+            }
+
+            if (videoDetails) {
+              isLive = videoDetails.isLive === true;
+              const liveDetails = playerResponse?.microformat?.playerMicroformatRenderer?.liveBroadcastDetails;
+              if (liveDetails && !liveDetails.endTimestamp) isLive = true;
+
+              const lengthSeconds = parseInt(videoDetails.lengthSeconds) || 0;
+              if (lengthSeconds > 0) {
+                isLive = false;
+                duration = lengthSeconds;
+              }
+            }
+
+            // Shorts fallback 1: duration from ytInitialPlayerResponse.streamingData (formats/adaptiveFormats)
+            if (duration === 0 && window.location.pathname.startsWith("/shorts/")) {
+              try {
+                const sd = playerResponse && playerResponse.streamingData;
+                const formats = sd && sd.formats;
+                const adaptive = sd && sd.adaptiveFormats;
+                const firstFormat = (formats && formats[0]) || (adaptive && adaptive[0]);
+                const ms = firstFormat && firstFormat.approxDurationMs;
+                if (ms != null && !isNaN(ms)) duration = Number(ms) / 1000;
+              } catch (_) { }
+            }
+            // Shorts fallback 2: duration from ytInitialData (reelWatchEndpoint or other path)
+            if (duration === 0 && window.location.pathname.startsWith("/shorts/")) {
+              try {
+                // @ts-ignore
+                const d = window.ytInitialData;
+                const ms = d && d.contents && d.contents.reelWatchEndpoint && d.contents.reelWatchEndpoint.approxDurationMs;
+                if (ms != null && !isNaN(ms)) duration = Number(ms) / 1000;
+              } catch (_) { }
+            }
+
+            if (!isLive) {
+              const liveBadge = document.querySelector(".ytp-live-badge") as HTMLElement;
+              if (liveBadge && !liveBadge.hasAttribute("disabled") && getComputedStyle(liveBadge).display !== "none") {
+                isLive = true;
+              }
+            }
+
+            // Consolidate title extraction
+            let title = videoDetails?.title ||
+              (document.querySelector("h1.ytd-video-primary-info-renderer") as HTMLElement)?.innerText ||
+              (document.querySelector("h1.title.ytd-video-primary-info-renderer") as HTMLElement)?.innerText ||
+              (document.querySelector(".ytd-video-primary-info-renderer h1") as HTMLElement)?.innerText ||
+              (document.querySelector("ytd-video-primary-info-renderer #container h1") as HTMLElement)?.innerText ||
+              document.title;
+
+            // Clean title: remove any notification prefixes like "(1) " or "(1030) "
+            title = title.replace(/^\(\d+\)\s*/g, "");
+            title = title.replace(" - YouTube", "").trim();
+
+            return {
+              duration: isLive ? 0 : duration || videoElement?.duration || 0,
+              currentTime,
+              channelName: channel || videoDetails?.author || "",
+              title: title || "YouTube Video",
+              isLive,
+              skipMetadata: false
+            };
+          } catch (error) {
+            // Fallback if playerResponse access fails or other error
+            return {
+              duration: videoElement?.duration || 0,
+              currentTime,
+              channelName: channel,
+              title: document.title.replace(/^\(\d+\)\s*/g, "").replace(" - YouTube", "").trim() || "YouTube Video",
+              isLive: false,
+              skipMetadata: false
+            };
+          }
+        },
+      });
+
+      if (results[0]?.result) {
+        const result = results[0].result;
+
+        if (result.skipMetadata) {
+          video.currentTime = result.currentTime || 0;
+        } else {
+          const duration = result.duration || 0;
+          if (duration > 0 || result.isLive) {
+            video.title = result.title || video.title;
+            video.channelName = result.channelName || video.channelName;
+            video.seconds = duration;
+            video.currentTime = result.currentTime || 0;
+            video.isLive = result.isLive || false;
+
+            requestMetadataUpdate(video.url, {
+              seconds: video.seconds,
+              title: video.title,
+              channelName: video.channelName,
+              currentTime: video.currentTime,
+              isLive: video.isLive,
+            });
+          }
         }
-      } catch (error) {
-        // Ignore errors (permissions, closed tabs, etc)
+        // Re-render (could be debounced)
+        render();
       }
+    } catch (error) {
+      // Ignore errors (permissions, closed tabs, etc)
+    }
   });
 
   await Promise.all(activeTabPromises);
@@ -276,43 +301,43 @@ async function probeTabs() {
 
 // Helper to save current settings state
 async function saveSettings() {
-    // We need to pass all arguments to match signature, but we can rely on current global state
-    // To do this safely without re-reading storage every time (which we do in loadStorage anyway), 
-    // we should ideally keep a local state object.
-    // However, saveStorageUtil needs videoData for excludedUrls. 
-    // We will just pass empty videoData since saveStorage filters it. 
-    // WAIT: saveStorage OVERWRITES excludedUrls if we pass empty list?
-    // Let's check storage.ts.  
-    // "const excludedUrls = videoData.filter((video) => video.excluded).map((video) => video.url);"
-    // "await browser.storage.local.set(data);" - and data includes excludedUrls.
-    // This wipes excluded URLs if we pass []. 
-    // CRITICAL FIX: We need to read current storage or pass allVideos.
-    
-    // Better approach: Update saveStorage in storage.ts to only update provided keys? 
-    // Or just pass allVideos here.
-    
-    const storage = await loadStorage(); // Reload to get other fields like smartSync
-    // We save all current global state
-    await saveStorageUtil(
-        allVideos, 
-        storage.sortByDuration, 
-        storage.smartSync, 
-        thumbnailQuality, 
-        layoutMode, 
-        groupingMode, 
-        sortOption
-    );
+  // We need to pass all arguments to match signature, but we can rely on current global state
+  // To do this safely without re-reading storage every time (which we do in loadStorage anyway), 
+  // we should ideally keep a local state object.
+  // However, saveStorageUtil needs videoData for excludedUrls. 
+  // We will just pass empty videoData since saveStorage filters it. 
+  // WAIT: saveStorage OVERWRITES excludedUrls if we pass empty list?
+  // Let's check storage.ts.  
+  // "const excludedUrls = videoData.filter((video) => video.excluded).map((video) => video.url);"
+  // "await browser.storage.local.set(data);" - and data includes excludedUrls.
+  // This wipes excluded URLs if we pass []. 
+  // CRITICAL FIX: We need to read current storage or pass allVideos.
+
+  // Better approach: Update saveStorage in storage.ts to only update provided keys? 
+  // Or just pass allVideos here.
+
+  const storage = await loadStorage(); // Reload to get other fields like smartSync
+  // We save all current global state
+  await saveStorageUtil(
+    allVideos,
+    storage.sortByDuration,
+    storage.smartSync,
+    thumbnailQuality,
+    layoutMode,
+    groupingMode,
+    sortOption
+  );
 }
 
 function renderSidebar() {
 
   const container = document.getElementById("window-list");
   if (!container) return;
-  
+
   const totalDuration = allVideos.reduce((acc, video) => acc + video.seconds, 0);
   const totalTabs = allVideos.length;
 
-  document.getElementById("global-stats-count")!.innerText = 
+  document.getElementById("global-stats-count")!.innerText =
     `${totalTabs} videos · ${formatTime(totalDuration)}`;
 
   let html = `
@@ -366,76 +391,76 @@ function renderMain() {
 
   const btnSettings = document.getElementById("btn-settings");
   if (btnSettings) {
-      if (isSettingsOpen) btnSettings.classList.add('text-accent', 'bg-surface-hover');
-      else btnSettings.classList.remove('text-accent', 'bg-surface-hover');
+    if (isSettingsOpen) btnSettings.classList.add('text-accent', 'bg-surface-hover');
+    else btnSettings.classList.remove('text-accent', 'bg-surface-hover');
   }
 
   const settingsModal = document.getElementById("settings-modal");
   if (settingsModal) {
-      if (isSettingsOpen) {
-          settingsModal.classList.remove("hidden", "fade-out");
-          settingsModal.classList.add("flex", "animate-in", "fade-in");
+    if (isSettingsOpen) {
+      settingsModal.classList.remove("hidden", "fade-out");
+      settingsModal.classList.add("flex", "animate-in", "fade-in");
+    } else {
+      settingsModal.classList.add("hidden");
+      settingsModal.classList.remove("flex", "animate-in", "fade-in");
+    }
+
+    const btnQualityStd = document.getElementById("quality-standard");
+    const btnQualityHigh = document.getElementById("quality-high");
+
+    if (btnQualityStd && btnQualityHigh) {
+      if (thumbnailQuality === 'standard') {
+        btnQualityStd.classList.add('text-accent', 'bg-surface-hover');
+        btnQualityStd.classList.remove('text-text-muted');
+        btnQualityHigh.classList.remove('text-accent', 'bg-surface-hover');
+        btnQualityHigh.classList.add('text-text-muted');
       } else {
-          settingsModal.classList.add("hidden");
-          settingsModal.classList.remove("flex", "animate-in", "fade-in");
+        btnQualityHigh.classList.add('text-accent', 'bg-surface-hover');
+        btnQualityHigh.classList.remove('text-text-muted');
+        btnQualityStd.classList.remove('text-accent', 'bg-surface-hover');
+        btnQualityStd.classList.add('text-text-muted');
       }
-      
-      const btnQualityStd = document.getElementById("quality-standard");
-      const btnQualityHigh = document.getElementById("quality-high");
-      
-      if (btnQualityStd && btnQualityHigh) {
-          if (thumbnailQuality === 'standard') {
-              btnQualityStd.classList.add('text-accent', 'bg-surface-hover');
-              btnQualityStd.classList.remove('text-text-muted');
-              btnQualityHigh.classList.remove('text-accent', 'bg-surface-hover');
-              btnQualityHigh.classList.add('text-text-muted');
-          } else {
-              btnQualityHigh.classList.add('text-accent', 'bg-surface-hover');
-              btnQualityHigh.classList.remove('text-text-muted');
-              btnQualityStd.classList.remove('text-accent', 'bg-surface-hover');
-              btnQualityStd.classList.add('text-text-muted');
-          }
-      }
+    }
   }
   const btnGroupNone = document.getElementById('view-list'); // "None" button
   const btnGroupChannel = document.getElementById('view-channel');
-  
+
   if (btnGroupNone && btnGroupChannel) {
     if (groupingMode === 'none') {
-        btnGroupNone.classList.add('text-accent', 'bg-surface-hover');
-        btnGroupNone.classList.remove('text-text-muted');
-        btnGroupChannel.classList.remove('text-accent', 'bg-surface-hover');
-        btnGroupChannel.classList.add('text-text-muted');
+      btnGroupNone.classList.add('text-accent', 'bg-surface-hover');
+      btnGroupNone.classList.remove('text-text-muted');
+      btnGroupChannel.classList.remove('text-accent', 'bg-surface-hover');
+      btnGroupChannel.classList.add('text-text-muted');
     } else {
-        btnGroupChannel.classList.add('text-accent', 'bg-surface-hover');
-        btnGroupChannel.classList.remove('text-text-muted');
-        btnGroupNone.classList.remove('text-accent', 'bg-surface-hover');
-        btnGroupNone.classList.add('text-text-muted');
+      btnGroupChannel.classList.add('text-accent', 'bg-surface-hover');
+      btnGroupChannel.classList.remove('text-text-muted');
+      btnGroupNone.classList.remove('text-accent', 'bg-surface-hover');
+      btnGroupNone.classList.add('text-text-muted');
     }
   }
 
   // Layout Toggles
   const btnLayoutList = document.getElementById('layout-list');
   const btnLayoutGrid = document.getElementById('layout-grid');
-  
+
   if (btnLayoutList && btnLayoutGrid) {
-      if (layoutMode === 'list') {
-          btnLayoutList.classList.add('text-accent', 'bg-surface-hover');
-          btnLayoutList.classList.remove('text-text-muted');
-          btnLayoutGrid.classList.remove('text-accent', 'bg-surface-hover');
-          btnLayoutGrid.classList.add('text-text-muted');
-      } else {
-          btnLayoutGrid.classList.add('text-accent', 'bg-surface-hover');
-          btnLayoutGrid.classList.remove('text-text-muted');
-          btnLayoutList.classList.remove('text-accent', 'bg-surface-hover');
-          btnLayoutList.classList.add('text-text-muted');
-      }
+    if (layoutMode === 'list') {
+      btnLayoutList.classList.add('text-accent', 'bg-surface-hover');
+      btnLayoutList.classList.remove('text-text-muted');
+      btnLayoutGrid.classList.remove('text-accent', 'bg-surface-hover');
+      btnLayoutGrid.classList.add('text-text-muted');
+    } else {
+      btnLayoutGrid.classList.add('text-accent', 'bg-surface-hover');
+      btnLayoutGrid.classList.remove('text-text-muted');
+      btnLayoutList.classList.remove('text-accent', 'bg-surface-hover');
+      btnLayoutList.classList.add('text-text-muted');
+    }
   }
 
   if (!container || !headerTitle || !headerStats) return;
 
   let videosToShow: VideoData[] = [];
-  
+
   if (currentWindowId === 'all') {
     headerTitle.innerText = "All Windows";
     videosToShow = allVideos;
@@ -449,8 +474,8 @@ function renderMain() {
 
   if (searchQuery) {
     const searchQueryLower = searchQuery.toLowerCase();
-    videosToShow = videosToShow.filter(video => 
-      video.title.toLowerCase().includes(searchQueryLower) || 
+    videosToShow = videosToShow.filter(video =>
+      video.title.toLowerCase().includes(searchQueryLower) ||
       video.channelName.toLowerCase().includes(searchQueryLower)
     );
   }
@@ -469,47 +494,47 @@ function renderMain() {
   }
 
   if (groupingMode === 'none') {
-      const sortedVideos = sortVideos(videosToShow);
-      if (layoutMode === 'grid') {
-          container.innerHTML = renderVideoGrid(sortedVideos);
-      } else {
-          container.innerHTML = renderVideoList(sortedVideos);
-      }
+    const sortedVideos = sortVideos(videosToShow);
+    if (layoutMode === 'grid') {
+      container.innerHTML = renderVideoGrid(sortedVideos);
+    } else {
+      container.innerHTML = renderVideoList(sortedVideos);
+    }
   } else {
-      const channels = new Map<string, VideoData[]>();
-      videosToShow.forEach(video => {
-          const name = video.channelName || "Unknown Channel";
-          if (!channels.has(name)) channels.set(name, []);
-          channels.get(name)!.push(video);
+    const channels = new Map<string, VideoData[]>();
+    videosToShow.forEach(video => {
+      const name = video.channelName || "Unknown Channel";
+      if (!channels.has(name)) channels.set(name, []);
+      channels.get(name)!.push(video);
+    });
+
+    let sortedGroups = Array.from(channels.entries());
+
+    if (sortOption === 'channel-asc') {
+      sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
+    } else if (sortOption === 'duration-desc') {
+      sortedGroups.sort((a, b) => {
+        const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
+        const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
+        return durationB - durationA;
       });
+    } else if (sortOption === 'duration-asc') {
+      sortedGroups.sort((a, b) => {
+        const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
+        const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
+        return durationA - durationB;
+      });
+    }
 
-      let sortedGroups = Array.from(channels.entries());
-      
-      if (sortOption === 'channel-asc') {
-          sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
-      } else if (sortOption === 'duration-desc') {
-           sortedGroups.sort((a, b) => {
-               const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
-               const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
-               return durationB - durationA;
-           });
-      } else if (sortOption === 'duration-asc') {
-            sortedGroups.sort((a, b) => {
-               const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
-               const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
-               return durationA - durationB;
-           });
-      }
-      
-      container.innerHTML = sortedGroups.map(([channel, videos]) => {
-          const isCollapsed = collapsedGroups.has(channel);
-          const groupDuration = videos.reduce((acc, video) => acc + video.seconds, 0);
-          const sortedGroupVideos = sortVideos(videos);
-          
-          const allSelected = videos.every(video => selectedTabIds.has(video.id));
-          const someSelected = !allSelected && videos.some(video => selectedTabIds.has(video.id));
+    container.innerHTML = sortedGroups.map(([channel, videos]) => {
+      const isCollapsed = collapsedGroups.has(channel);
+      const groupDuration = videos.reduce((acc, video) => acc + video.seconds, 0);
+      const sortedGroupVideos = sortVideos(videos);
 
-          return `
+      const allSelected = videos.every(video => selectedTabIds.has(video.id));
+      const someSelected = !allSelected && videos.some(video => selectedTabIds.has(video.id));
+
+      return `
             <div class="mb-4">
                 <div class="flex items-center gap-3 px-2 py-2 rounded-md hover:bg-surface-hover/30 group/header select-none">
                     <button class="p-1 rounded hover:bg-surface-hover text-text-muted transition-transform duration-200 group-toggle ${isCollapsed ? '-rotate-90' : ''}" data-group="${channel}">
@@ -538,14 +563,14 @@ function renderMain() {
                 </div>
             </div>
           `;
-      }).join('');
-      
-      // Fix indeterminate states visually since HTML attribute doesn't set property
-      setTimeout(() => {
-           document.querySelectorAll('input[type="checkbox"]').forEach((element: any) => {
-               if (element.hasAttribute('indeterminate')) element.indeterminate = true;
-           });
-      }, 0);
+    }).join('');
+
+    // Fix indeterminate states visually since HTML attribute doesn't set property
+    setTimeout(() => {
+      document.querySelectorAll('input[type="checkbox"]').forEach((element: any) => {
+        if (element.hasAttribute('indeterminate')) element.indeterminate = true;
+      });
+    }, 0);
   }
 }
 
@@ -553,7 +578,7 @@ function renderVideoList(videos: VideoData[]): string {
   return videos.map(video => {
     const isSelected = selectedTabIds.has(video.id);
     const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
-    
+
     return `
       <div class="group relative flex items-center gap-4 p-3 rounded-lg border border-transparent hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? 'bg-surface-hover border-border' : ''}" data-id="${video.id}">
         <div class="relative flex items-center justify-center w-5 h-5 cursor-pointer selection-toggle">
@@ -593,24 +618,24 @@ function renderVideoList(videos: VideoData[]): string {
 }
 
 function renderVideoGrid(videos: VideoData[]): string {
-    if (videos.length === 0) return '';
+  if (videos.length === 0) return '';
 
-    const cardsHtml = videos.map(video => {
-        const isSelected = selectedTabIds.has(video.id);
-        const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
-        const videoId = extractVideoId(video.url);
-        const thumbQuality = thumbnailQuality === 'high' ? 'hqdefault.jpg' : 'mqdefault.jpg';
-        const thumbnailUrl = videoId ? `https://i.ytimg.com/vi/${videoId}/${thumbQuality}` : '';
+  const cardsHtml = videos.map(video => {
+    const isSelected = selectedTabIds.has(video.id);
+    const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
+    const videoId = extractVideoId(video.url);
+    const thumbQuality = thumbnailQuality === 'high' ? 'hqdefault.jpg' : 'mqdefault.jpg';
+    const thumbnailUrl = videoId ? `https://i.ytimg.com/vi/${videoId}/${thumbQuality}` : '';
 
-        return `
+    return `
             <div class="group relative flex flex-col rounded-lg border border-transparent overflow-hidden hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? 'bg-surface-hover border-border ring-1 ring-accent/50' : ''}" data-id="${video.id}">
                 
                 <!-- Thumbnail Area -->
                 <div class="relative w-full aspect-video bg-surface-elevated/50 overflow-hidden video-click-target cursor-pointer">
-                    ${thumbnailUrl 
-                        ? `<img src="${thumbnailUrl}" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" alt="" />`
-                        : `<div class="w-full h-full flex items-center justify-center text-text-muted/20"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="12" cy="12" r="3"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>`
-                    }
+                    ${thumbnailUrl
+        ? `<img src="${thumbnailUrl}" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" alt="" />`
+        : `<div class="w-full h-full flex items-center justify-center text-text-muted/20"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="12" cy="12" r="3"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>`
+      }
                     
                     <!-- Duration Badge -->
                     <div class="absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-mono font-medium text-white backdrop-blur-sm">
@@ -649,15 +674,15 @@ function renderVideoGrid(videos: VideoData[]): string {
                 </div>
             </div>
         `;
-    }).join('');
+  }).join('');
 
-    return `<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 p-1">${cardsHtml}</div>`;
+  return `<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 p-1">${cardsHtml}</div>`;
 }
 
 function updateSelectionUI() {
   const bar = document.getElementById("selection-actions");
   const count = document.getElementById("selection-count");
-  
+
   if (selectedTabIds.size > 0) {
     bar?.classList.remove('hidden');
     bar?.classList.add('flex');
@@ -672,20 +697,20 @@ function updateSelectionUI() {
     const checkbox = element.querySelector('input[type="checkbox"]') as HTMLInputElement;
     const isSelected = selectedTabIds.has(id);
     if (checkbox) checkbox.checked = isSelected;
-    
+
     if (layoutMode === 'list') {
-       if (isSelected) element.classList.add('bg-surface-hover', 'border-border');
-       else element.classList.remove('bg-surface-hover', 'border-border');
+      if (isSelected) element.classList.add('bg-surface-hover', 'border-border');
+      else element.classList.remove('bg-surface-hover', 'border-border');
     } else {
-       // Grid mode selection styling
-       if (isSelected) element.classList.add('bg-surface-hover', 'border-border', 'ring-1', 'ring-accent/50');
-       else element.classList.remove('bg-surface-hover', 'border-border', 'ring-1', 'ring-accent/50');
-       
-       const selectionToggle = element.querySelector('.selection-toggle');
-       if (selectionToggle) {
-          if (isSelected) selectionToggle.classList.add('opacity-100');
-          else selectionToggle.classList.remove('opacity-100');
-       }
+      // Grid mode selection styling
+      if (isSelected) element.classList.add('bg-surface-hover', 'border-border', 'ring-1', 'ring-accent/50');
+      else element.classList.remove('bg-surface-hover', 'border-border', 'ring-1', 'ring-accent/50');
+
+      const selectionToggle = element.querySelector('.selection-toggle');
+      if (selectionToggle) {
+        if (isSelected) selectionToggle.classList.add('opacity-100');
+        else selectionToggle.classList.remove('opacity-100');
+      }
     }
   });
 }
@@ -717,62 +742,62 @@ function setupListeners() {
   });
 
   document.getElementById("view-list")?.addEventListener("click", () => {
-      groupingMode = "none";
-      saveSettings();
-      render();
+    groupingMode = "none";
+    saveSettings();
+    render();
   });
   document.getElementById("view-channel")?.addEventListener("click", () => {
-      groupingMode = "channel";
-      saveSettings();
-      render();
+    groupingMode = "channel";
+    saveSettings();
+    render();
   });
 
   document.getElementById("layout-list")?.addEventListener("click", () => {
-      layoutMode = "list";
-      saveSettings();
-      render();
+    layoutMode = "list";
+    saveSettings();
+    render();
   });
   document.getElementById("layout-grid")?.addEventListener("click", () => {
-      layoutMode = "grid";
-      saveSettings();
-      render();
+    layoutMode = "grid";
+    saveSettings();
+    render();
   });
 
   document.getElementById("btn-settings")?.addEventListener("click", () => {
-      isSettingsOpen = true;
-      render();
+    isSettingsOpen = true;
+    render();
   });
   document.getElementById("close-settings")?.addEventListener("click", () => {
-      isSettingsOpen = false;
-      render();
+    isSettingsOpen = false;
+    render();
   });
 
   document.getElementById("quality-standard")?.addEventListener("click", () => {
-      thumbnailQuality = "standard";
-      saveSettings();
-      render();
+    thumbnailQuality = "standard";
+    saveSettings();
+    render();
   });
 
   document.getElementById("quality-high")?.addEventListener("click", () => {
-      thumbnailQuality = "high";
-      saveSettings();
-      render();
+    thumbnailQuality = "high";
+    saveSettings();
+    render();
   });
 
   document.getElementById("sort-select")?.addEventListener("change", (event) => {
-      sortOption = (event.target as HTMLSelectElement).value;
-      saveSettings();
-      render();
+    sortOption = (event.target as HTMLSelectElement).value;
+    saveSettings();
+    render();
   });
 
   document.getElementById("btn-clear-cache")?.addEventListener("click", async () => {
-      if (confirm("Are you sure you want to clear all cached metadata? This will force the extension to re-probe all tabs.")) {
-          await clearCache();
-          metadataCache = {};
-          fetchTabs();
-          isSettingsOpen = false;
-          document.getElementById("settings-modal")?.classList.add("hidden");
-      }
+    if (confirm("Are you sure you want to clear all cached metadata? This will force the extension to re-probe all tabs.")) {
+      await clearCache();
+      metadataCache = {};
+      fetchTabs();
+      isSettingsOpen = false;
+      document.getElementById("settings-modal")?.classList.add("hidden");
+    }
   });
 }
 
@@ -804,96 +829,96 @@ function attachDynamicListeners() {
   const tabList = document.getElementById("tab-list");
   if (tabList) {
     tabList.querySelectorAll('.selection-toggle').forEach(element => {
-        element.addEventListener('click', (event) => {
-            event.stopPropagation();
-            const row = element.closest('[data-id]') as HTMLElement;
-            const id = parseInt(row.dataset.id || "0");
-            if (selectedTabIds.has(id)) selectedTabIds.delete(id);
-            else selectedTabIds.add(id);
-            updateSelectionUI();
-        });
+      element.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const row = element.closest('[data-id]') as HTMLElement;
+        const id = parseInt(row.dataset.id || "0");
+        if (selectedTabIds.has(id)) selectedTabIds.delete(id);
+        else selectedTabIds.add(id);
+        updateSelectionUI();
+      });
     });
 
     tabList.querySelectorAll('.video-click-target').forEach(element => {
-        element.addEventListener('click', (event) => {
-             const row = element.closest('[data-id]') as HTMLElement;
-             const id = parseInt(row.dataset.id || "0");
-             if (selectedTabIds.has(id)) selectedTabIds.delete(id);
-             else selectedTabIds.add(id);
-             updateSelectionUI();
-        });
+      element.addEventListener('click', (event) => {
+        const row = element.closest('[data-id]') as HTMLElement;
+        const id = parseInt(row.dataset.id || "0");
+        if (selectedTabIds.has(id)) selectedTabIds.delete(id);
+        else selectedTabIds.add(id);
+        updateSelectionUI();
+      });
     });
 
     tabList.querySelectorAll('.jump-btn').forEach(element => {
-        element.addEventListener('click', async (event) => {
-             event.stopPropagation();
-             const row = element.closest('[data-id]') as HTMLElement;
-             const id = parseInt(row.dataset.id || "0");
-             const video = allVideos.find(videoItem => videoItem.id === id);
-             if (video) {
-                 await browser.tabs.update(video.id, { active: true });
-                 await browser.windows.update(video.windowId as number, { focused: true });
-             }
-        });
+      element.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        const row = element.closest('[data-id]') as HTMLElement;
+        const id = parseInt(row.dataset.id || "0");
+        const video = allVideos.find(videoItem => videoItem.id === id);
+        if (video) {
+          await browser.tabs.update(video.id, { active: true });
+          await browser.windows.update(video.windowId as number, { focused: true });
+        }
+      });
     });
 
     tabList.querySelectorAll('.close-btn').forEach(element => {
-        element.addEventListener('click', async (event) => {
-             event.stopPropagation();
-             const row = element.closest('[data-id]') as HTMLElement;
-             const id = parseInt(row.dataset.id || "0");
-             await browser.tabs.remove(id);
-             row.remove();
-             setTimeout(fetchTabs, 100);
-        });
+      element.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        const row = element.closest('[data-id]') as HTMLElement;
+        const id = parseInt(row.dataset.id || "0");
+        await browser.tabs.remove(id);
+        row.remove();
+        setTimeout(fetchTabs, 100);
+      });
     });
 
     tabList.querySelectorAll('.group-toggle').forEach(element => {
-        element.addEventListener('click', (event) => {
-             const groupName = (element as HTMLElement).dataset.group;
-             if (groupName) {
-                 if (collapsedGroups.has(groupName)) collapsedGroups.delete(groupName);
-                 else collapsedGroups.add(groupName);
-                 render();
-             }
-        });
+      element.addEventListener('click', (event) => {
+        const groupName = (element as HTMLElement).dataset.group;
+        if (groupName) {
+          if (collapsedGroups.has(groupName)) collapsedGroups.delete(groupName);
+          else collapsedGroups.add(groupName);
+          render();
+        }
+      });
     });
 
     tabList.querySelectorAll('.group-selection-toggle').forEach(element => {
-        element.addEventListener('click', (event) => {
-             event.stopPropagation();
-             const groupName = (element as HTMLElement).dataset.group;
-             if (groupName) {
-                 let scopeVideos = allVideos;
-                 if (currentWindowId !== 'all') {
-                     scopeVideos = allVideos.filter(video => video.windowId === currentWindowId);
-                 }
-                 
-                 const videosInGroup = scopeVideos.filter(video => 
-                    (video.channelName || "Unknown Channel") === groupName
-                 );
-                 
-                 const allSelected = videosInGroup.every(video => selectedTabIds.has(video.id));
-                 
-                 videosInGroup.forEach(video => {
-                     if (allSelected) selectedTabIds.delete(video.id);
-                     else selectedTabIds.add(video.id);
-                 });
-                 
-                 updateSelectionUI();
-                 render();
-             }
-        });
+      element.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const groupName = (element as HTMLElement).dataset.group;
+        if (groupName) {
+          let scopeVideos = allVideos;
+          if (currentWindowId !== 'all') {
+            scopeVideos = allVideos.filter(video => video.windowId === currentWindowId);
+          }
+
+          const videosInGroup = scopeVideos.filter(video =>
+            (video.channelName || "Unknown Channel") === groupName
+          );
+
+          const allSelected = videosInGroup.every(video => selectedTabIds.has(video.id));
+
+          videosInGroup.forEach(video => {
+            if (allSelected) selectedTabIds.delete(video.id);
+            else selectedTabIds.add(video.id);
+          });
+
+          updateSelectionUI();
+          render();
+        }
+      });
     });
   }
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-    setupListeners();
-    fetchTabs();
-    
-    browser.tabs.onRemoved.addListener(fetchTabs);
-    browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-        if (changeInfo.status === 'complete' || changeInfo.title || changeInfo.url) fetchTabs();
-    });
+  setupListeners();
+  fetchTabs();
+
+  browser.tabs.onRemoved.addListener(fetchTabs);
+  browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.status === 'complete' || changeInfo.title || changeInfo.url) fetchTabs();
+  });
 });

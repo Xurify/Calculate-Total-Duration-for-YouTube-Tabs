@@ -116,7 +116,7 @@ export async function loadStorage(): Promise<{
       excludedUrls: [], 
       smartSync: true, 
       thumbnailQuality: 'high', 
-      layoutMode: 'list', 
+      layoutMode: 'grid', 
       groupingMode: 'none', 
       sortOption: 'duration-desc', 
       metadataCache: {} 
@@ -137,7 +137,7 @@ export async function loadStorage(): Promise<{
     excludedUrls: (data.excludedUrls as string[]) || [],
     smartSync: data.smartSync !== undefined ? Boolean(data.smartSync) : true,
     thumbnailQuality: (data.thumbnailQuality as 'standard' | 'high') || 'high',
-    layoutMode: (data.layoutMode as 'list' | 'grid') || 'list',
+    layoutMode: (data.layoutMode as 'list' | 'grid') || 'grid',
     groupingMode: (data.groupingMode as 'none' | 'channel') || 'none',
     sortOption: (data.sortOption as string) || 'duration-desc',
     metadataCache: (data.metadataCache as Record<string, CachedMetadata>) || {},

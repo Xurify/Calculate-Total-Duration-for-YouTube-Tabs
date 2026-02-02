@@ -63,7 +63,6 @@ export async function requestMetadataUpdate(
 export async function saveStorage(
   videoData: VideoData[],
   sortByDuration: boolean,
-  smartSync: boolean,
   thumbnailQuality?: 'standard' | 'high',
   layoutMode?: 'list' | 'grid',
   groupingMode?: 'none' | 'channel',
@@ -71,25 +70,16 @@ export async function saveStorage(
 ): Promise<void> {
   if (!browser.storage?.local) return;
   
-  // If videoData is empty, we risk checking 'excludedUrls' against nothing and losing them?
-  // Actually the logic is: excludedUrls = videoData.filter(v => v.excluded).
-  // If we pass an empty list, excludedUrls becomes []. This is dangerous if we just want to update settings.
-  // We should fetch existing excludedUrls if we don't intend to update them.
-  // BUT the signature implies we are saving the state of videoData.
-  
-  // Let's modify logic: fetch current storage first to merge.
   const current = await browser.storage.local.get(["excludedUrls"]);
   let excludedUrls = (current.excludedUrls as string[]) || [];
   
-  // Only update excludedUrls from videoData if videoData is actually populated with items
   if (videoData.length > 0) {
-      excludedUrls = videoData.filter((video) => video.excluded).map((video) => video.url);
+    excludedUrls = videoData.filter((video) => video.excluded).map((video) => video.url);
   }
 
   const data: any = {
     sortByDuration,
     excludedUrls,
-    smartSync,
   };
   if (thumbnailQuality) data.thumbnailQuality = thumbnailQuality;
   if (layoutMode) data.layoutMode = layoutMode;
@@ -102,7 +92,6 @@ export async function saveStorage(
 export async function loadStorage(): Promise<{
   sortByDuration: boolean;
   excludedUrls: string[];
-  smartSync: boolean;
   thumbnailQuality: 'standard' | 'high';
   layoutMode: 'list' | 'grid';
   groupingMode: 'none' | 'channel';
@@ -114,7 +103,6 @@ export async function loadStorage(): Promise<{
     return { 
       sortByDuration: false, 
       excludedUrls: [], 
-      smartSync: true, 
       thumbnailQuality: 'high', 
       layoutMode: 'grid', 
       groupingMode: 'none', 
@@ -125,7 +113,6 @@ export async function loadStorage(): Promise<{
   const data = await browser.storage.local.get([
     "sortByDuration", 
     "excludedUrls", 
-    "smartSync", 
     "thumbnailQuality", 
     "layoutMode", 
     "groupingMode", 
@@ -135,7 +122,6 @@ export async function loadStorage(): Promise<{
   return {
     sortByDuration: Boolean(data.sortByDuration),
     excludedUrls: (data.excludedUrls as string[]) || [],
-    smartSync: data.smartSync !== undefined ? Boolean(data.smartSync) : true,
     thumbnailQuality: (data.thumbnailQuality as 'standard' | 'high') || 'high',
     layoutMode: (data.layoutMode as 'list' | 'grid') || 'grid',
     groupingMode: (data.groupingMode as 'none' | 'channel') || 'none',

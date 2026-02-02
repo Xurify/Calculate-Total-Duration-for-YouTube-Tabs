@@ -9,6 +9,7 @@ import {
   requestMetadataUpdate,
   clearCache
 } from "../../utils/storage";
+import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl } from "../../utils/format";
 
 interface WindowGroup {
   id: number;
@@ -28,52 +29,10 @@ let groupingMode: 'none' | 'channel' = 'none';
 let layoutMode: 'list' | 'grid' = 'grid';
 let thumbnailQuality: 'standard' | 'high' = 'high';
 let isSettingsOpen = false;
-let smartSync = true;
 
 let sortOption: string = 'duration-desc';
 let collapsedGroups = new Set<string>();
-let hasScheduledDelayedFetch = false;
-const SYNC_ALL_COOLDOWN_MS = 30_000; // Don't trigger Smart Sync more than once per 30s
-let lastSyncAllTime = 0;
-
-function formatTime(totalSeconds: number): string {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = Math.floor(totalSeconds % 60);
-
-  if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-  }
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-}
-
-function formatCompact(totalSeconds: number): string {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = Math.floor(totalSeconds % 60);
-
-  if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-  }
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-}
-
-function parseTimeParam(url: string): number {
-  try {
-    const urlObj = new URL(url);
-    const timeParam = urlObj.searchParams.get("t") || urlObj.searchParams.get("time_continue");
-    if (!timeParam) return 0;
-    if (timeParam.match(/[hms]/)) {
-      const h = parseInt(timeParam.match(/(\d+)h/)?.[1] || "0");
-      const m = parseInt(timeParam.match(/(\d+)m/)?.[1] || "0");
-      const s = parseInt(timeParam.match(/(\d+)s/)?.[1] || "0");
-      return h * 3600 + m * 60 + s;
-    }
-    return parseInt(timeParam) || 0;
-  } catch {
-    return 0;
-  }
-}
+let renderTimeout: ReturnType<typeof setTimeout> | null = null;
 
 async function fetchTabs() {
   const storage = await loadStorage();
@@ -83,7 +42,6 @@ async function fetchTabs() {
   groupingMode = storage.groupingMode;
   layoutMode = storage.layoutMode;
   sortOption = storage.sortOption;
-  smartSync = storage.smartSync;
 
   const allTabs = await browser.tabs.query({});
   const youtubeTabs = allTabs.filter(tab => {
@@ -149,27 +107,18 @@ async function fetchTabs() {
     .sort((a, b) => b.tabs.length - a.tabs.length);
 
   render();
-  probeTabs();
+  await probeTabs();
 
-  // Only fetch for suspended tabs (we can't probe them). Active tabs get metadata from content script or injection.
-  const needsSync = allVideos.filter((v) => v.suspended && v.seconds === 0 && !v.isLive && smartSync);
-  const now = Date.now();
-  if (needsSync.length > 0 && now - lastSyncAllTime >= SYNC_ALL_COOLDOWN_MS) {
-    lastSyncAllTime = now;
+  // After probing: auto-fetch durations for any tab still missing it (suspended or probe failed). Background skips when cache is fresh.
+  const tabsWithoutDuration = allVideos.filter((v) => v.seconds === 0 && !v.isLive);
+  if (tabsWithoutDuration.length > 0 && Date.now() - lastSyncTime >= SYNC_COOLDOWN_MS) {
+    lastSyncTime = Date.now();
     browser.runtime
       .sendMessage({
         action: "sync-all",
-        tabs: needsSync.map((v) => ({ id: v.id, url: v.url })),
+        tabs: tabsWithoutDuration.map((v) => ({ id: v.id, url: v.url })),
       })
       .catch(() => {});
-  }
-
-  // Delayed re-fetch once: restored tabs may load after manager; retry so content script / DOM can be ready
-  if (!hasScheduledDelayedFetch) {
-    hasScheduledDelayedFetch = true;
-    setTimeout(() => {
-      fetchTabs();
-    }, 2500);
   }
 }
 
@@ -177,7 +126,7 @@ async function probeTabs() {
   const activeTabPromises = allVideos.map(async (video) => {
     if (video.suspended) return;
 
-    const expectedVideoId = extractVideoId(video.url);
+    const expectedVideoId = getVideoIdFromUrl(video.url);
 
     try {
       const contentMeta = await browser.tabs.sendMessage(video.id, { action: "get-metadata" }).catch(() => null);
@@ -336,119 +285,28 @@ async function probeTabs() {
       if (results[0]?.result) {
         const result = results[0].result;
 
-        // Handle SPA transition - the page has navigated but ytInitialPlayerResponse is stale
+        // SPA transition: content script observer will have updated; ask it for metadata (retry once after 500ms)
         if (result.spaTransition) {
-          console.log(`[Manager] SPA transition detected for tab ${video.id}, fetching from DOM...`);
           video.currentTime = result.currentTime || 0;
-          
-          // During SPA navigation, ytInitialPlayerResponse is NOT updated.
-          // We need to get data from the DOM/player UI which IS updated.
-          const delay = 800; // Wait for YouTube to update the DOM
-          await new Promise(resolve => setTimeout(resolve, delay));
-          
-          try {
-            const domResults = await browser.scripting.executeScript({
-              target: { tabId: video.id },
-              world: "MAIN",
-              func: () => {
-                const videoElement = document.querySelector("video");
-                const currentTime = videoElement ? videoElement.currentTime : 0;
-                
-                // Get duration from video element
-                const videoDuration = videoElement?.duration;
-                let duration = (videoDuration && isFinite(videoDuration) && videoDuration > 0) ? videoDuration : 0;
-                
-                // Fallback: Get duration from YouTube player UI (most reliable during SPA)
-                if (duration === 0) {
-                  const durationEl = document.querySelector('.ytp-time-duration');
-                  if (durationEl) {
-                    const durationText = durationEl.textContent || '';
-                    const parts = durationText.split(':').map(p => parseInt(p) || 0);
-                    if (parts.length === 3) {
-                      duration = parts[0] * 3600 + parts[1] * 60 + parts[2];
-                    } else if (parts.length === 2) {
-                      duration = parts[0] * 60 + parts[1];
-                    }
-                  }
-                }
-                
-                // Fallback: Try YouTube player API
-                if (duration === 0) {
-                  try {
-                    const player = document.querySelector('#movie_player') as any;
-                    if (player && typeof player.getDuration === 'function') {
-                      const playerDuration = player.getDuration();
-                      if (playerDuration && isFinite(playerDuration) && playerDuration > 0) {
-                        duration = playerDuration;
-                      }
-                    }
-                  } catch (_) {}
-                }
-                
-                // Get title from DOM (h1 is updated during SPA)
-                let title = 
-                  (document.querySelector('h1.ytd-watch-metadata yt-formatted-string') as HTMLElement)?.innerText ||
-                  (document.querySelector("h1.ytd-video-primary-info-renderer") as HTMLElement)?.innerText ||
-                  (document.querySelector("ytd-watch-metadata h1") as HTMLElement)?.innerText ||
-                  document.title;
-                title = title.replace(/^\(\d+\)\s*/g, "").replace(" - YouTube", "").trim();
-                
-                // Get channel from DOM
-                const channel =
-                  (document.querySelector("ytd-watch-metadata ytd-channel-name a") as HTMLElement)?.innerText ||
-                  (document.querySelector("#upload-info #channel-name a") as HTMLElement)?.innerText ||
-                  (document.querySelector(".ytd-video-owner-renderer #channel-name a") as HTMLElement)?.innerText ||
-                  "";
-                
-                // Check for live
-                let isLive = false;
-                const liveBadge = document.querySelector(".ytp-live-badge") as HTMLElement;
-                if (liveBadge && !liveBadge.hasAttribute("disabled") && getComputedStyle(liveBadge).display !== "none") {
-                  isLive = true;
-                }
-                
-                return { duration, currentTime, title, channelName: channel, isLive };
-              },
-            });
-            
-            const domResult = domResults[0]?.result;
-            if (domResult) {
-              video.title = domResult.title || video.title;
-              video.channelName = domResult.channelName || "";
-              video.seconds = domResult.duration || 0;
-              video.currentTime = domResult.currentTime || 0;
-              video.isLive = domResult.isLive || false;
-              
+          const tryContentScript = async (): Promise<boolean> => {
+            const meta = await browser.tabs.sendMessage(video.id, { action: "get-metadata" }).catch(() => null);
+            if (meta?.videoId === expectedVideoId && meta?.title && (meta.seconds > 0 || meta.isLive)) {
+              video.title = meta.title;
+              video.channelName = meta.channelName ?? "";
+              video.seconds = meta.seconds;
+              video.currentTime = meta.currentTime ?? 0;
+              video.isLive = meta.isLive ?? false;
               if (video.seconds > 0 || video.isLive) {
-                requestMetadataUpdate(video.url, {
-                  seconds: video.seconds,
-                  title: video.title,
-                  channelName: video.channelName,
-                  currentTime: video.currentTime,
-                  isLive: video.isLive,
-                });
+                requestMetadataUpdate(video.url, { seconds: video.seconds, title: video.title, channelName: video.channelName, currentTime: video.currentTime, isLive: video.isLive });
               }
               render();
-              
-              // If still no duration, trigger Smart Sync as last resort
-              if (video.seconds === 0 && !video.isLive && smartSync) {
-                console.log(`[Manager] Tab ${video.id} still has no duration, triggering Smart Sync`);
-                browser.runtime.sendMessage({
-                  action: "sync-all",
-                  tabs: [{ id: video.id, url: video.url }],
-                }).catch(() => {});
-              }
+              return true;
             }
-          } catch (e) {
-            console.warn(`[Manager] DOM probe failed for tab ${video.id}:`, e);
-            // Fallback to Smart Sync
-            if (smartSync) {
-              browser.runtime.sendMessage({
-                action: "sync-all",
-                tabs: [{ id: video.id, url: video.url }],
-              }).catch(() => {});
-            }
-          }
+            return false;
+          };
+          if (await tryContentScript()) return;
+          await new Promise((r) => setTimeout(r, 500));
+          if (await tryContentScript()) return;
           return;
         }
 
@@ -478,15 +336,7 @@ async function probeTabs() {
             }
           }
           
-          // If we still don't have duration, trigger Smart Sync as backup
-          if (duration === 0 && !result.isLive && smartSync) {
-            browser.runtime.sendMessage({
-              action: "sync-all",
-              tabs: [{ id: video.id, url: video.url }],
-            }).catch(() => {});
-          }
         }
-        // Re-render (could be debounced)
         render();
       }
     } catch (error) {
@@ -514,12 +364,10 @@ async function saveSettings() {
   // Better approach: Update saveStorage in storage.ts to only update provided keys? 
   // Or just pass allVideos here.
 
-  const storage = await loadStorage(); // Reload to get other fields like smartSync
-  // We save all current global state
+  const storage = await loadStorage();
   await saveStorageUtil(
     allVideos,
     storage.sortByDuration,
-    storage.smartSync,
     thumbnailQuality,
     layoutMode,
     groupingMode,
@@ -575,12 +423,8 @@ function sortVideos(videos: VideoData[]): VideoData[] {
   });
 }
 
-function extractVideoId(url: string): string | null {
-  const match = url.match(/(?:v=|\/)([\w-]{11})(?:&|\?|\/|$)/);
-  return match ? match[1] : null;
-}
-
-
+const SYNC_COOLDOWN_MS = 30_000;
+let lastSyncTime = 0;
 
 function renderMain() {
   const container = document.getElementById("tab-list");
@@ -823,7 +667,7 @@ function renderVideoGrid(videos: VideoData[]): string {
   const cardsHtml = videos.map(video => {
     const isSelected = selectedTabIds.has(video.id);
     const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
-    const videoId = extractVideoId(video.url);
+    const videoId = getVideoIdFromUrl(video.url);
     const thumbQuality = thumbnailQuality === 'high' ? 'hqdefault.jpg' : 'mqdefault.jpg';
     const thumbnailUrl = videoId ? `https://i.ytimg.com/vi/${videoId}/${thumbQuality}` : '';
 
@@ -995,16 +839,6 @@ function setupListeners() {
       await clearCache();
       metadataCache = {};
       await fetchTabs();
-      // After clearing cache, refill: sync all tabs with no duration (not just suspended) so the list repopulates
-      const needsRefill = allVideos.filter((video) => video.seconds === 0 && !video.isLive && smartSync);
-      if (needsRefill.length > 0) {
-        browser.runtime
-          .sendMessage({
-            action: "sync-all",
-            tabs: needsRefill.map((video) => ({ id: video.id, url: video.url })),
-          })
-          .catch(() => {});
-      }
       isSettingsOpen = false;
       document.getElementById("settings-modal")?.classList.add("hidden");
     }
@@ -1042,10 +876,14 @@ function setupListeners() {
 }
 
 function render() {
-  renderSidebar();
-  renderMain();
-  updateSelectionUI();
-  attachDynamicListeners();
+  if (renderTimeout != null) return;
+  renderTimeout = setTimeout(() => {
+    renderTimeout = null;
+    renderSidebar();
+    renderMain();
+    updateSelectionUI();
+    attachDynamicListeners();
+  }, 0);
 }
 
 function attachDynamicListeners() {
@@ -1166,19 +1004,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (document.visibilityState === "visible") fetchTabs();
   });
 
-  // When background updates metadataCache (Smart Sync), refetch so Manager updates even when tab is throttled
-  let storageDebounce: ReturnType<typeof setTimeout> | null = null;
-  browser.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName === "local" && changes.metadataCache) {
-      if (storageDebounce) clearTimeout(storageDebounce);
-      storageDebounce = setTimeout(() => {
-        storageDebounce = null;
-        fetchTabs();
-      }, 300);
-    }
-  });
-
-  // Listen for Smart Sync updates from background script (immediate update when tab is active)
+  // tab-synced updates in-memory when background fetches suspended tabs; sync-complete refreshes UI
   browser.runtime.onMessage.addListener((message) => {
     if (message.action === "tab-synced") {
       const video = allVideos.find((v) => v.id === message.tabId);
@@ -1187,16 +1013,11 @@ document.addEventListener("DOMContentLoaded", () => {
         video.title = message.metadata.title;
         video.channelName = message.metadata.channelName;
         video.isLive = message.metadata.isLive || false;
-
-        requestMetadataUpdate(video.url, {
-          seconds: video.seconds,
-          title: video.title,
-          channelName: video.channelName,
-          currentTime: video.currentTime,
-          isLive: video.isLive,
-        });
         render();
       }
+    }
+    if (message.action === "sync-complete") {
+      render();
     }
   });
 });

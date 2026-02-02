@@ -8,71 +8,19 @@ import {
   normalizeYoutubeUrl,
   clearCache
 } from "../../utils/storage";
+import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl } from "../../utils/format";
 
 const VERSION_NUMBER = packageJson.version;
 
 let videoData: VideoData[] = [];
 let sortByDuration = false;
-let smartSync = true;
 let currentView: "dashboard" | "settings" = "dashboard";
 
 async function saveStorage(): Promise<void> {
-  await saveStorageUtil(videoData, sortByDuration, smartSync);
+  await saveStorageUtil(videoData, sortByDuration);
 }
 
-function getVideoIdFromUrl(url: string): string | null {
-  try {
-    const urlObj = new URL(url);
-    if (urlObj.pathname.startsWith("/shorts/")) {
-      const m = urlObj.pathname.match(/\/shorts\/([^/?]+)/);
-      return m ? m[1] : null;
-    }
-    return urlObj.searchParams.get("v");
-  } catch {
-    return null;
-  }
-}
-
-function parseTimeParam(url: string): number {
-  try {
-    const urlObj = new URL(url);
-    const timeParam = urlObj.searchParams.get("t") || urlObj.searchParams.get("time_continue");
-    if (!timeParam) return 0;
-
-    // Handle "1h2m3s" format
-    if (timeParam.match(/[hms]/)) {
-      const h = parseInt(timeParam.match(/(\d+)h/)?.[1] || "0");
-      const m = parseInt(timeParam.match(/(\d+)m/)?.[1] || "0");
-      const s = parseInt(timeParam.match(/(\d+)s/)?.[1] || "0");
-      return h * 3600 + m * 60 + s;
-    }
-
-    // Handle simple seconds
-    return parseInt(timeParam) || 0;
-  } catch (e) {
-    return 0;
-  }
-}
-
-function formatTime(totalSeconds: number): string {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = Math.floor(totalSeconds % 60);
-  return [hours, minutes, seconds].map((value) => (value < 10 ? "0" + value : value)).join(":");
-}
-
-function formatCompact(totalSeconds: number): string {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = Math.floor(totalSeconds % 60);
-
-  if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-  }
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-}
-
-// Global listener for background updates
+// Global listener for background cache updates (content script + auto sync for suspended tabs)
 browser.runtime.onMessage.addListener((message) => {
   if (message.action === "tab-synced") {
     const video = videoData.find((v) => v.id === message.tabId);
@@ -82,33 +30,10 @@ browser.runtime.onMessage.addListener((message) => {
       video.channelName = message.metadata.channelName;
       video.isLive = message.metadata.isLive || false;
       video.suspended = false;
-
-      requestMetadataUpdate(video.url, {
-        seconds: video.seconds,
-        title: video.title,
-        channelName: video.channelName,
-        currentTime: video.currentTime,
-        isLive: video.isLive,
-      });
       render();
     }
   }
-  if (message.action === "sync-error") {
-    const syncAllButton = document.getElementById("sync-all") as HTMLButtonElement;
-    if (syncAllButton) {
-      syncAllButton.innerText = "Sync Failed (Rate Limited)";
-      syncAllButton.disabled = true;
-      syncAllButton.classList.add("text-red-500");
-    }
-  }
   if (message.action === "sync-complete") {
-    const syncAllButton = document.getElementById("sync-all") as HTMLButtonElement;
-    if (syncAllButton) {
-      const unsyncedCount = videoData.filter((v) => v.suspended || v.seconds === 0).length;
-      syncAllButton.innerText = unsyncedCount > 0 ? `Sync All (${unsyncedCount})` : "Synced";
-      syncAllButton.disabled = unsyncedCount === 0;
-      syncAllButton.classList.remove("text-red-500");
-    }
     render();
   }
 });
@@ -119,6 +44,9 @@ function getSortedVideos(): VideoData[] {
     return a.index - b.index;
   });
 }
+
+const SYNC_COOLDOWN_MS = 30_000;
+let lastSyncTime = 0;
 
 let renderTimeout: any = null;
 
@@ -131,19 +59,13 @@ function setupApp() {
 
   app.innerHTML = `
     <div data-v-header class="p-5 border-b border-border bg-gradient-to-b from-surface to-surface-elevated">
-      <div class="flex items-center justify-between mb-4">
-        <div class="flex items-center gap-2">
-          <div id="smart-sync-indicator" class="w-2 h-2 rounded-full transition-colors duration-300"></div>
-          <span id="smart-sync-text" class="text-[10px] font-bold uppercase tracking-[0.2em] text-text-muted"></span>
-        </div>
-        <div class="flex items-center -mr-2">
+      <div class="flex items-center justify-end mb-4 -mr-2">
           <button id="open-manager" class="p-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-all border-0 bg-transparent cursor-pointer" title="Open Dashboard">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
           </button>
           <button id="go-to-settings" class="p-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-all border-0 bg-transparent cursor-pointer group/settings">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="group-hover/settings:rotate-90 transition-transform duration-500"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
           </button>
-        </div>
       </div>
 
       <div class="grid grid-cols-2 gap-4 mb-4">
@@ -174,16 +96,6 @@ function setupApp() {
       </div>
     </div>
 
-    <div id="unsynced-banner" class="hidden bg-amber-500/5 border-b border-amber-500/10 px-5 py-2.5 items-center justify-between animate-in slide-in-from-top duration-500">
-      <div class="flex items-center gap-2">
-        <div class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></div>
-        <span id="unsynced-text" class="text-[10px] font-bold text-amber-500 uppercase tracking-wider"></span>
-      </div>
-      <button id="sync-all" class="text-[10px] font-bold text-amber-500 hover:text-amber-400 transition-colors border-0 bg-transparent cursor-pointer p-0 underline decoration-2 underline-offset-4">
-        Sync Now
-      </button>
-    </div>
-
     <div class="max-h-[340px] overflow-y-auto custom-scrollbar" id="video-list"></div>
   `;
 
@@ -205,44 +117,12 @@ function setupApp() {
     saveStorage();
     render();
   });
-  document.getElementById("sync-all")?.addEventListener("click", () => {
-    const syncAllButton = document.getElementById("sync-all") as HTMLButtonElement;
-    syncAllButton.innerText = "Syncing...";
-    syncAllButton.disabled = true;
-    browser.runtime
-      .sendMessage({
-        action: "sync-all",
-        tabs: videoData.filter((v) => v.suspended || v.seconds === 0).map((v) => ({ id: v.id, url: v.url })),
-      })
-      .catch(() => {});
-  });
 }
 
-function updateHeaderStats(totalSeconds: number, totalRemaining: number, videoCount: number, unsyncedCount: number) {
-  const indicator = document.getElementById("smart-sync-indicator");
-  const text = document.getElementById("smart-sync-text");
-  if (indicator && text) {
-    indicator.className = `w-2 h-2 rounded-full ${
-      smartSync ? "bg-accent animate-pulse shadow-[0_0_8px_rgba(255,0,0,0.5)]" : "bg-text-muted opacity-50"
-    }`;
-    text.innerText = smartSync ? "Smart Sync Active" : "Smart Sync Paused";
-  }
-
+function updateHeaderStats(totalSeconds: number, totalRemaining: number, videoCount: number) {
   document.getElementById("stat-remaining")!.innerText = formatTime(totalRemaining);
   document.getElementById("stat-total")!.innerText = formatTime(totalSeconds);
   document.getElementById("stat-video-count")!.innerText = `${videoCount} videos`;
-
-  const banner = document.getElementById("unsynced-banner");
-  if (banner) {
-    if (unsyncedCount > 0 && !smartSync) {
-      banner.classList.remove("hidden");
-      banner.classList.add("flex");
-      document.getElementById("unsynced-text")!.innerText = `${unsyncedCount} background tabs needing sync`;
-    } else {
-      banner.classList.add("hidden");
-      banner.classList.remove("flex");
-    }
-  }
 
   const btnTab = document.getElementById("sort-order");
   const btnLen = document.getElementById("sort-duration");
@@ -386,17 +266,6 @@ function render(): void {
               <h2 class="text-sm font-bold uppercase tracking-widest text-text-primary m-0">Settings</h2>
             </div>
             <div class="space-y-6">
-              <div class="flex items-center justify-between group">
-                <div>
-                  <div class="text-[13px] font-semibold text-text-primary mb-0.5">Smart Sync</div>
-                  <div class="text-[11px] text-text-muted leading-tight pr-4">Automatically fetch video durations for suspended tabs in the background.</div>
-                </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" id="smart-sync-toggle" class="sr-only peer" ${smartSync ? "checked" : ""}>
-                  <div class="w-9 h-5 bg-surface-hover rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-text-muted peer-checked:after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-accent border border-border"></div>
-                </label>
-              </div>
-
               <div class="pt-4 border-t border-border">
                 <button id="btn-clear-cache" class="w-full text-left p-3 rounded-lg border border-border bg-surface-hover/20 hover:bg-red-500/10 hover:border-red-500 group/clear transition-all cursor-pointer">
                   <div class="flex items-center justify-between">
@@ -418,26 +287,11 @@ function render(): void {
         currentView = "dashboard";
         render();
       });
-      document.getElementById("smart-sync-toggle")!.addEventListener("change", (e) => {
-        smartSync = (e.target as HTMLInputElement).checked;
-        saveStorage();
-        if (smartSync) getYouTubeTabs();
-      });
 
       document.getElementById("btn-clear-cache")?.addEventListener("click", async () => {
         if (confirm("Are you sure you want to clear all cached metadata?")) {
           await clearCache();
           await getYouTubeTabs();
-          // After clearing cache, refill: sync all tabs with no duration so the list repopulates
-          const needsRefill = videoData.filter((v) => v.seconds === 0 && !v.isLive && smartSync);
-          if (needsRefill.length > 0) {
-            browser.runtime
-              .sendMessage({
-                action: "sync-all",
-                tabs: needsRefill.map((v) => ({ id: v.id, url: v.url })),
-              })
-              .catch(() => {});
-          }
           currentView = "dashboard";
           render();
         }
@@ -452,11 +306,7 @@ function render(): void {
     const totalWatched = includedVideos.reduce((sum, video) => sum + video.currentTime, 0);
     const totalRemaining = Math.max(0, totalSeconds - totalWatched);
 
-    // Only count videos that WE HAVE NOT successfully fetched data for yet.
-    // Suspended tabs with 0 seconds are the only ones that truly need a background sync.
-    const pendingSyncCount = videoData.filter((v) => v.suspended && v.seconds === 0).length;
-
-    updateHeaderStats(totalSeconds, totalRemaining, includedVideos.length, pendingSyncCount);
+    updateHeaderStats(totalSeconds, totalRemaining, includedVideos.length);
     updateVideoList(getSortedVideos());
   }, 0);
 }
@@ -475,9 +325,8 @@ async function getYouTubeTabs(): Promise<void> {
   showLoading();
 
   try {
-    const { sortByDuration: savedSort, excludedUrls, smartSync: savedSmartSync, metadataCache } = await loadStorage();
+    const { sortByDuration: savedSort, excludedUrls, metadataCache } = await loadStorage();
     sortByDuration = savedSort;
-    smartSync = savedSmartSync;
 
     // Query ALL tabs and filter manually to avoid API quirks
     const allTabs = await browser.tabs.query({});
@@ -520,20 +369,8 @@ async function getYouTubeTabs(): Promise<void> {
         };
     });
 
-    // Render immediately so user sees the list with whatever we have (cached or basic)
+    // Render immediately so user sees the list with whatever we have (cached or tab title / 0:00 defaults)
     render();
-
-    // Trigger Smart Sync for any suspended tabs that aren't in cache
-    const unsyncedVideos = videoData.filter((v) => v.suspended && v.seconds === 0);
-    if (smartSync && unsyncedVideos.length > 0 && currentView === "dashboard") {
-      console.log(`[Popup] Triggering smart sync for ${unsyncedVideos.length} tabs`);
-      browser.runtime
-        .sendMessage({
-          action: "sync-all",
-          tabs: unsyncedVideos.map((v) => ({ id: v.id, url: v.url })),
-        })
-        .catch(() => {});
-    }
 
     const activeTabPromises = videoData.map(async (video) => {
       if (video.suspended) return;
@@ -576,7 +413,6 @@ async function getYouTubeTabs(): Promise<void> {
                                !/^\(\d+\)\s*/.test(video.title);
 
       try {
-        console.log(`[Popup] Probing tab ${video.id} (Metadata: ${hasValidMetadata ? 'Cached' : 'Missing'})`);
           const results = await browser.scripting.executeScript({
           target: { tabId: video.id },
           world: "MAIN",
@@ -700,119 +536,29 @@ async function getYouTubeTabs(): Promise<void> {
         if (results[0]?.result) {
           const result = results[0].result;
           
-          // Handle SPA transition - the page has navigated but ytInitialPlayerResponse is stale
+          // SPA transition: content script observer will have updated; ask it for metadata (retry once after 500ms)
           if (result.spaTransition) {
-            console.log(`[Popup] SPA transition detected for tab ${video.id}, fetching from DOM...`);
             video.currentTime = result.currentTime || 0;
-            
-            // During SPA navigation, ytInitialPlayerResponse is NOT updated.
-            // We need to get data from the DOM/player UI which IS updated.
-            const delay = 800; // Wait for YouTube to update the DOM
-            await new Promise(resolve => setTimeout(resolve, delay));
-            
-            try {
-              const domResults = await browser.scripting.executeScript({
-                target: { tabId: video.id },
-                world: "MAIN",
-                func: () => {
-                  const videoElement = document.querySelector("video");
-                  const currentTime = videoElement ? videoElement.currentTime : 0;
-                  
-                  // Get duration from video element
-                  const videoDuration = videoElement?.duration;
-                  let duration = (videoDuration && isFinite(videoDuration) && videoDuration > 0) ? videoDuration : 0;
-                  
-                  // Fallback: Get duration from YouTube player UI (most reliable during SPA)
-                  if (duration === 0) {
-                    const durationEl = document.querySelector('.ytp-time-duration');
-                    if (durationEl) {
-                      const durationText = durationEl.textContent || '';
-                      const parts = durationText.split(':').map(p => parseInt(p) || 0);
-                      if (parts.length === 3) {
-                        duration = parts[0] * 3600 + parts[1] * 60 + parts[2];
-                      } else if (parts.length === 2) {
-                        duration = parts[0] * 60 + parts[1];
-                      }
-                    }
-                  }
-                  
-                  // Fallback: Try YouTube player API
-                  if (duration === 0) {
-                    try {
-                      const player = document.querySelector('#movie_player') as any;
-                      if (player && typeof player.getDuration === 'function') {
-                        const playerDuration = player.getDuration();
-                        if (playerDuration && isFinite(playerDuration) && playerDuration > 0) {
-                          duration = playerDuration;
-                        }
-                      }
-                    } catch (_) {}
-                  }
-                  
-                  // Get title from DOM (h1 is updated during SPA)
-                  let title = 
-                    (document.querySelector('h1.ytd-watch-metadata yt-formatted-string') as HTMLElement)?.innerText ||
-                    (document.querySelector("h1.ytd-video-primary-info-renderer") as HTMLElement)?.innerText ||
-                    (document.querySelector("ytd-watch-metadata h1") as HTMLElement)?.innerText ||
-                    document.title;
-                  title = title.replace(/^\(\d+\)\s*/g, "").replace(" - YouTube", "").trim();
-                  
-                  // Get channel from DOM
-                  const channel =
-                    (document.querySelector("ytd-watch-metadata ytd-channel-name a") as HTMLElement)?.innerText ||
-                    (document.querySelector("#upload-info #channel-name a") as HTMLElement)?.innerText ||
-                    (document.querySelector(".ytd-video-owner-renderer #channel-name a") as HTMLElement)?.innerText ||
-                    "";
-                  
-                  // Check for live
-                  let isLive = false;
-                  const liveBadge = document.querySelector(".ytp-live-badge") as HTMLElement;
-                  if (liveBadge && !liveBadge.hasAttribute("disabled") && getComputedStyle(liveBadge).display !== "none") {
-                    isLive = true;
-                  }
-                  
-                  return { duration, currentTime, title, channelName: channel, isLive };
-                },
-              });
-              
-              const domResult = domResults[0]?.result;
-              if (domResult) {
-                video.title = domResult.title || video.title;
-                video.channelName = domResult.channelName || "";
-                video.seconds = domResult.duration || 0;
-                video.currentTime = domResult.currentTime || 0;
-                video.isLive = domResult.isLive || false;
-                
+            const expectedId = getVideoIdFromUrl(video.url);
+            const tryContentScript = async (): Promise<boolean> => {
+              const meta = await browser.tabs.sendMessage(video.id, { action: "get-metadata" }).catch(() => null);
+              if (meta?.videoId === expectedId && meta?.title && (meta.seconds > 0 || meta.isLive)) {
+                video.title = meta.title;
+                video.channelName = meta.channelName ?? "";
+                video.seconds = meta.seconds;
+                video.currentTime = meta.currentTime ?? 0;
+                video.isLive = meta.isLive ?? false;
                 if (video.seconds > 0 || video.isLive) {
-                  requestMetadataUpdate(video.url, {
-                    seconds: video.seconds,
-                    title: video.title,
-                    channelName: video.channelName,
-                    currentTime: video.currentTime,
-                    isLive: video.isLive,
-                  });
+                  requestMetadataUpdate(video.url, { seconds: video.seconds, title: video.title, channelName: video.channelName, currentTime: video.currentTime, isLive: video.isLive });
                 }
                 render();
-                
-                // If still no duration, trigger Smart Sync as last resort
-                if (video.seconds === 0 && !video.isLive && smartSync) {
-                  console.log(`[Popup] Tab ${video.id} still has no duration, triggering Smart Sync`);
-                  browser.runtime.sendMessage({
-                    action: "sync-all",
-                    tabs: [{ id: video.id, url: video.url }],
-                  }).catch(() => {});
-                }
+                return true;
               }
-            } catch (e) {
-              console.warn(`[Popup] DOM probe failed for tab ${video.id}:`, e);
-              // Fallback to Smart Sync
-              if (smartSync) {
-                browser.runtime.sendMessage({
-                  action: "sync-all",
-                  tabs: [{ id: video.id, url: video.url }],
-                }).catch(() => {});
-              }
-            }
+              return false;
+            };
+            if (await tryContentScript()) return;
+            await new Promise((r) => setTimeout(r, 500));
+            if (await tryContentScript()) return;
             return;
           }
           
@@ -844,19 +590,9 @@ async function getYouTubeTabs(): Promise<void> {
               }
               render();
             }
-            
-            // If we still don't have duration, trigger smart sync as backup
-            if (duration === 0 && !result.isLive && smartSync) {
-              browser.runtime.sendMessage({
-                action: "sync-all",
-                tabs: [{ id: video.id, url: video.url }],
-              }).catch(() => {});
-            }
           }
         }
       } catch (error: any) {
-        // If script fails, it might be restricted or unloaded.
-        // We only warn for unexpected errors; permission errors are expected on unrefreshed tabs
         const errorMsg = error?.message || "";
         const isExpectedError =
           errorMsg.includes("permissions") ||
@@ -866,24 +602,23 @@ async function getYouTubeTabs(): Promise<void> {
         if (!isExpectedError) {
           console.warn(`Failed to probe tab ${video.id}:`, error);
         }
-
-        // Mark as suspended so it gets picked up by Smart Sync if enabled
         video.suspended = true;
         render();
-
-        // FAILSAFE: If Smart Sync is on, immediately try to fetch this failed tab in background
-        if (smartSync) {
-          browser.runtime
-            .sendMessage({
-              action: "sync-all",
-              tabs: [{ id: video.id, url: video.url }],
-            })
-            .catch(() => {});
-        }
       }
     });
-    // Wait for active tabs to finish processing (optional, just for cleanup)
     await Promise.all(activeTabPromises);
+
+    // After probing: auto-fetch durations for any tab still missing it (suspended or probe failed). Background skips when cache is fresh.
+    const tabsWithoutDuration = videoData.filter((v) => v.seconds === 0 && !v.isLive);
+    if (tabsWithoutDuration.length > 0 && Date.now() - lastSyncTime >= SYNC_COOLDOWN_MS) {
+      lastSyncTime = Date.now();
+      browser.runtime
+        .sendMessage({
+          action: "sync-all",
+          tabs: tabsWithoutDuration.map((v) => ({ id: v.id, url: v.url })),
+        })
+        .catch(() => {});
+    }
   } catch (error: any) {
     console.error("Error scanning tabs:", error);
     const app = document.getElementById("app")!;

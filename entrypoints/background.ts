@@ -1,4 +1,4 @@
-import { normalizeYoutubeUrl, updateMetadataCache } from "../utils/storage";
+import { normalizeYoutubeUrl } from "../utils/storage";
 
 let cacheUpdateQueue: Promise<void> = Promise.resolve();
 
@@ -14,6 +14,7 @@ export default defineBackground(() => {
       return;
     }
 
+    // On-demand only: fetch durations for given tabs (e.g. suspended tabs). Called from "Refresh durations" button.
     if (message.action === "sync-all" && message.tabs) {
       handleStealthSync(message.tabs);
       sendResponse({ started: true });
@@ -59,7 +60,7 @@ interface TabToSync {
 }
 
 const CACHE_FRESH_MAX_AGE_MS = 10 * 60 * 1000; // 10 min — skip fetch if cache is this fresh
-const SYNC_IN_PROGRESS = new Set<string>(); // normalized URLs we're currently fetching
+const SYNC_IN_PROGRESS = new Set<string>();
 
 async function handleStealthSync(tabs: TabToSync[]) {
   const data = await browser.storage.local.get("metadataCache");
@@ -88,7 +89,6 @@ async function handleStealthSync(tabs: TabToSync[]) {
 
     SYNC_IN_PROGRESS.add(normalizedUrl);
     try {
-      console.log(`[Background] Syncing tab: ${tab.id} (${tab.url})`);
       const response = await fetch(tab.url, {
         headers: {
           "User-Agent":
@@ -96,21 +96,14 @@ async function handleStealthSync(tabs: TabToSync[]) {
         },
       });
 
-      // Check for redirects to CAPTCHA/Sorry page
       if (response.url.includes("google.com/sorry") || response.url.includes("youtube.com/sorry")) {
-        console.error("[Background] Rate limited! Detected CAPTCHA redirect. Stopping sync.");
         browser.runtime.sendMessage({ action: "sync-error", message: "Rate limited by YouTube" }).catch(() => {});
-        break; // Stop syncing to avoid further issues
+        break;
       }
 
       const html = await response.text();
+      if (html.includes("consent.youtube.com")) continue;
 
-      if (html.includes("consent.youtube.com")) {
-        console.warn("[Background] Hit consent page, stealth fetch restricted.");
-        continue;
-      }
-
-      // Try to extract the ytInitialPlayerResponse JSON for absolute reliability
       const playerResponseMatch =
         html.match(/var ytInitialPlayerResponse\s*=\s*({.+?});/s) ||
         html.match(/window\["ytInitialPlayerResponse"\]\s*=\s*({.+?});/s);
@@ -127,29 +120,17 @@ async function handleStealthSync(tabs: TabToSync[]) {
           if (videoDetails) {
             title = videoDetails.title || "";
             channel = videoDetails.author || "";
-
-            // Priority 1: Direct isLive flag
             isLive = videoDetails.isLive === true;
-
-            // Priority 2: Check liveBroadcastDetails
             const liveDetails = playerResponse?.microformat?.playerMicroformatRenderer?.liveBroadcastDetails;
-            if (liveDetails && !liveDetails.endTimestamp) {
-              isLive = true;
-            }
-
-            // Priority 3: lengthSeconds
+            if (liveDetails && !liveDetails.endTimestamp) isLive = true;
             const lengthSeconds = parseInt(videoDetails.lengthSeconds) || 0;
             if (lengthSeconds > 0) {
               isLive = false;
               duration = lengthSeconds;
             }
           }
-        } catch (error) {
-          console.error("[Background] Failed to parse playerResponse JSON", error);
-        }
+        } catch (_) {}
       }
-
-      // Fallbacks
       if (duration === 0) {
         const durationMatch = html.match(/"approxDurationMs"\s*:\s*"?(\d+)"?/);
         duration = durationMatch ? parseInt(durationMatch[1]) / 1000 : 0;
@@ -166,24 +147,15 @@ async function handleStealthSync(tabs: TabToSync[]) {
       if (duration > 0 || title || isLive) {
         const metadata = {
           seconds: duration,
-          title: title || "Loaded Video",
-          channelName: channel || "Unknown Channel",
-          isLive: isLive,
+          title: title || "YouTube Video",
+          channelName: channel || "",
+          isLive,
         };
-        // Use centralized update logic
         await handleCacheUpdateRequest(tab.url, metadata);
-
-        browser.runtime
-          .sendMessage({
-            action: "tab-synced",
-            tabId: tab.id,
-            metadata,
-          })
-          .catch(() => {});
+        browser.runtime.sendMessage({ action: "tab-synced", tabId: tab.id, metadata }).catch(() => {});
       }
 
-      // Delay to avoid rate limiting (2 seconds)
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await new Promise((r) => setTimeout(r, 2000));
     } catch (err) {
       console.error(`[Background] Error fetching ${tab.url}:`, err);
     } finally {

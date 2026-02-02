@@ -58,8 +58,35 @@ interface TabToSync {
   url: string;
 }
 
+const CACHE_FRESH_MAX_AGE_MS = 10 * 60 * 1000; // 10 min — skip fetch if cache is this fresh
+const SYNC_IN_PROGRESS = new Set<string>(); // normalized URLs we're currently fetching
+
 async function handleStealthSync(tabs: TabToSync[]) {
+  const data = await browser.storage.local.get("metadataCache");
+  const cache = (data.metadataCache as Record<string, { seconds?: number; title?: string; channelName?: string; isLive?: boolean; timestamp?: number }>) || {};
+
   for (const tab of tabs) {
+    const normalizedUrl = normalizeYoutubeUrl(tab.url);
+    const cached = cache[normalizedUrl];
+    const hasValidCache = cached && (cached.seconds! > 0 || cached.isLive) && cached.title;
+    const cacheFresh = cached?.timestamp != null && Date.now() - cached.timestamp < CACHE_FRESH_MAX_AGE_MS;
+
+    if (hasValidCache && cacheFresh) {
+      browser.runtime.sendMessage({
+        action: "tab-synced",
+        tabId: tab.id,
+        metadata: {
+          seconds: cached.seconds ?? 0,
+          title: cached.title ?? "",
+          channelName: cached.channelName ?? "",
+          isLive: cached.isLive ?? false,
+        },
+      }).catch(() => {});
+      continue;
+    }
+    if (SYNC_IN_PROGRESS.has(normalizedUrl)) continue;
+
+    SYNC_IN_PROGRESS.add(normalizedUrl);
     try {
       console.log(`[Background] Syncing tab: ${tab.id} (${tab.url})`);
       const response = await fetch(tab.url, {
@@ -159,6 +186,8 @@ async function handleStealthSync(tabs: TabToSync[]) {
       await new Promise((resolve) => setTimeout(resolve, 2000));
     } catch (err) {
       console.error(`[Background] Error fetching ${tab.url}:`, err);
+    } finally {
+      SYNC_IN_PROGRESS.delete(normalizedUrl);
     }
   }
 

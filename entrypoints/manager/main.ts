@@ -1,4 +1,5 @@
 import "./style.css";
+import packageJson from "../../package.json";
 import {
   VideoData,
   loadStorage,
@@ -31,6 +32,9 @@ let smartSync = true;
 
 let sortOption: string = 'duration-desc';
 let collapsedGroups = new Set<string>();
+let hasScheduledDelayedFetch = false;
+const SYNC_ALL_COOLDOWN_MS = 30_000; // Don't trigger Smart Sync more than once per 30s
+let lastSyncAllTime = 0;
 
 function formatTime(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
@@ -146,11 +150,62 @@ async function fetchTabs() {
 
   render();
   probeTabs();
+
+  // Only fetch for suspended tabs (we can't probe them). Active tabs get metadata from content script or injection.
+  const needsSync = allVideos.filter((v) => v.suspended && v.seconds === 0 && !v.isLive && smartSync);
+  const now = Date.now();
+  if (needsSync.length > 0 && now - lastSyncAllTime >= SYNC_ALL_COOLDOWN_MS) {
+    lastSyncAllTime = now;
+    browser.runtime
+      .sendMessage({
+        action: "sync-all",
+        tabs: needsSync.map((v) => ({ id: v.id, url: v.url })),
+      })
+      .catch(() => {});
+  }
+
+  // Delayed re-fetch once: restored tabs may load after manager; retry so content script / DOM can be ready
+  if (!hasScheduledDelayedFetch) {
+    hasScheduledDelayedFetch = true;
+    setTimeout(() => {
+      fetchTabs();
+    }, 2500);
+  }
 }
 
 async function probeTabs() {
   const activeTabPromises = allVideos.map(async (video) => {
     if (video.suspended) return;
+
+    const expectedVideoId = extractVideoId(video.url);
+
+    try {
+      const contentMeta = await browser.tabs.sendMessage(video.id, { action: "get-metadata" }).catch(() => null);
+      if (
+        contentMeta &&
+        contentMeta.videoId != null &&
+        contentMeta.videoId === expectedVideoId &&
+        contentMeta.title &&
+        (contentMeta.seconds > 0 || contentMeta.isLive)
+      ) {
+        video.title = contentMeta.title;
+        video.channelName = contentMeta.channelName || "";
+        video.seconds = contentMeta.seconds;
+        video.currentTime = contentMeta.currentTime;
+        video.isLive = contentMeta.isLive;
+        requestMetadataUpdate(video.url, {
+          seconds: video.seconds,
+          title: video.title,
+          channelName: video.channelName,
+          currentTime: video.currentTime,
+          isLive: video.isLive,
+        });
+        render();
+        return;
+      }
+    } catch {
+      // No content script — fall through to inject
+    }
 
     const hasValidMetadata = video.seconds > 0 &&
       video.title !== "YouTube Video" &&
@@ -543,6 +598,8 @@ function renderMain() {
     if (isSettingsOpen) {
       settingsModal.classList.remove("hidden", "fade-out");
       settingsModal.classList.add("flex", "animate-in", "fade-in");
+      const devVersion = document.getElementById("dev-version");
+      if (devVersion) devVersion.textContent = `v${packageJson.version}`;
     } else {
       settingsModal.classList.add("hidden");
       settingsModal.classList.remove("flex", "animate-in", "fade-in");
@@ -937,9 +994,49 @@ function setupListeners() {
     if (confirm("Are you sure you want to clear all cached metadata? This will force the extension to re-probe all tabs.")) {
       await clearCache();
       metadataCache = {};
-      fetchTabs();
+      await fetchTabs();
+      // After clearing cache, refill: sync all tabs with no duration (not just suspended) so the list repopulates
+      const needsRefill = allVideos.filter((video) => video.seconds === 0 && !video.isLive && smartSync);
+      if (needsRefill.length > 0) {
+        browser.runtime
+          .sendMessage({
+            action: "sync-all",
+            tabs: needsRefill.map((video) => ({ id: video.id, url: video.url })),
+          })
+          .catch(() => {});
+      }
       isSettingsOpen = false;
       document.getElementById("settings-modal")?.classList.add("hidden");
+    }
+  });
+
+  document.getElementById("btn-perf-refresh")?.addEventListener("click", async () => {
+    const container = document.getElementById("dev-perf-list");
+    if (!container) return;
+    container.innerHTML = "<span class='text-text-muted/70'>Fetching…</span>";
+    const rows: string[] = [];
+    for (const video of allVideos) {
+      try {
+        const stats = await browser.tabs.sendMessage(video.id, { action: "get-perf-stats" }) as {
+          totalMutations?: number;
+          totalReads?: number;
+          ratio?: string;
+          debounceMs?: number;
+        } | undefined;
+        if (stats && typeof stats.totalMutations === "number") {
+          const title = video.title.slice(0, 20) + (video.title.length > 20 ? "…" : "");
+          rows.push(`Tab ${video.id} · ${title} · mut: ${stats.totalMutations} read: ${stats.totalReads ?? "—"} ratio: ${stats.ratio ?? "—"}`);
+        } else {
+          rows.push(`Tab ${video.id} · (no content script)`);
+        }
+      } catch {
+        rows.push(`Tab ${video.id} · (unavailable)`);
+      }
+    }
+    if (rows.length === 0) {
+      container.innerHTML = "<span class='text-text-muted/70'>No YouTube tabs open</span>";
+    } else {
+      container.innerHTML = rows.map((r) => `<div class="truncate" title="${r}">${r}</div>`).join("");
     }
   });
 }
@@ -1064,8 +1161,24 @@ document.addEventListener("DOMContentLoaded", () => {
   browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo.status === 'complete' || changeInfo.title || changeInfo.url) fetchTabs();
   });
-  
-  // Listen for Smart Sync updates from background script
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") fetchTabs();
+  });
+
+  // When background updates metadataCache (Smart Sync), refetch so Manager updates even when tab is throttled
+  let storageDebounce: ReturnType<typeof setTimeout> | null = null;
+  browser.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === "local" && changes.metadataCache) {
+      if (storageDebounce) clearTimeout(storageDebounce);
+      storageDebounce = setTimeout(() => {
+        storageDebounce = null;
+        fetchTabs();
+      }, 300);
+    }
+  });
+
+  // Listen for Smart Sync updates from background script (immediate update when tab is active)
   browser.runtime.onMessage.addListener((message) => {
     if (message.action === "tab-synced") {
       const video = allVideos.find((v) => v.id === message.tabId);
@@ -1074,8 +1187,7 @@ document.addEventListener("DOMContentLoaded", () => {
         video.title = message.metadata.title;
         video.channelName = message.metadata.channelName;
         video.isLive = message.metadata.isLive || false;
-        
-        // Update the cache
+
         requestMetadataUpdate(video.url, {
           seconds: video.seconds,
           title: video.title,

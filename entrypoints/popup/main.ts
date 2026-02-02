@@ -20,6 +20,19 @@ async function saveStorage(): Promise<void> {
   await saveStorageUtil(videoData, sortByDuration, smartSync);
 }
 
+function getVideoIdFromUrl(url: string): string | null {
+  try {
+    const urlObj = new URL(url);
+    if (urlObj.pathname.startsWith("/shorts/")) {
+      const m = urlObj.pathname.match(/\/shorts\/([^/?]+)/);
+      return m ? m[1] : null;
+    }
+    return urlObj.searchParams.get("v");
+  } catch {
+    return null;
+  }
+}
+
 function parseTimeParam(url: string): number {
   try {
     const urlObj = new URL(url);
@@ -413,10 +426,20 @@ function render(): void {
 
       document.getElementById("btn-clear-cache")?.addEventListener("click", async () => {
         if (confirm("Are you sure you want to clear all cached metadata?")) {
-            await clearCache();
-            getYouTubeTabs();
-            currentView = "dashboard";
-            render();
+          await clearCache();
+          await getYouTubeTabs();
+          // After clearing cache, refill: sync all tabs with no duration so the list repopulates
+          const needsRefill = videoData.filter((v) => v.seconds === 0 && !v.isLive && smartSync);
+          if (needsRefill.length > 0) {
+            browser.runtime
+              .sendMessage({
+                action: "sync-all",
+                tabs: needsRefill.map((v) => ({ id: v.id, url: v.url })),
+              })
+              .catch(() => {});
+          }
+          currentView = "dashboard";
+          render();
         }
       });
       return;
@@ -515,13 +538,43 @@ async function getYouTubeTabs(): Promise<void> {
     const activeTabPromises = videoData.map(async (video) => {
       if (video.suspended) return;
 
+      const expectedVideoId = getVideoIdFromUrl(video.url);
+
+      try {
+        const contentMeta = await browser.tabs.sendMessage(video.id, { action: "get-metadata" }).catch(() => null);
+        if (
+          contentMeta &&
+          contentMeta.videoId != null &&
+          contentMeta.videoId === expectedVideoId &&
+          contentMeta.title &&
+          (contentMeta.seconds > 0 || contentMeta.isLive)
+        ) {
+          video.title = contentMeta.title;
+          video.channelName = contentMeta.channelName || "";
+          video.seconds = contentMeta.seconds;
+          video.currentTime = contentMeta.currentTime;
+          video.isLive = contentMeta.isLive;
+          requestMetadataUpdate(video.url, {
+            seconds: video.seconds,
+            title: video.title,
+            channelName: video.channelName,
+            currentTime: video.currentTime,
+            isLive: video.isLive,
+          });
+          render();
+          return;
+        }
+      } catch {
+        // No content script (e.g. tab loaded before extension) — fall through to inject
+      }
+
       // STALE-WHILE-REVALIDATE LOGIC
       // If we have a valid duration and title, we only NEED to probe for currentTime
-      const hasValidMetadata = video.seconds > 0 && 
-                               video.title !== "YouTube Video" && 
-                               video.title !== "YouTube" && 
+      const hasValidMetadata = video.seconds > 0 &&
+                               video.title !== "YouTube Video" &&
+                               video.title !== "YouTube" &&
                                !/^\(\d+\)\s*/.test(video.title);
-      
+
       try {
         console.log(`[Popup] Probing tab ${video.id} (Metadata: ${hasValidMetadata ? 'Cached' : 'Missing'})`);
           const results = await browser.scripting.executeScript({

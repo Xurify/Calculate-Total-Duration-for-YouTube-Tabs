@@ -144,6 +144,22 @@
                         </div>
                      </button>
                  </div>
+
+                 <div class="pt-4 border-t border-border">
+                     <div class="text-[10px] uppercase font-bold text-text-muted tracking-wider mb-2">Developer</div>
+                     <div class="space-y-2 text-[11px] font-mono text-text-secondary mb-3">
+                         <div class="flex justify-between gap-4"><span>Extension</span><span id="dev-version">—</span></div>
+                         <div class="flex justify-between gap-4"><span>Content script debounce</span><span id="dev-debounce">150 ms</span></div>
+                         <div class="flex justify-between gap-4"><span>Observer target</span><span class="text-[10px]">#primary / #content</span></div>
+                     </div>
+                     <div class="flex items-center justify-between gap-2 mb-2">
+                         <span class="text-[11px] text-text-muted">Per-tab MutationObserver stats</span>
+                         <button id="btn-perf-refresh" class="px-2 py-1 text-[10px] font-medium rounded bg-surface-hover hover:bg-surface text-text-muted hover:text-text-primary border border-border cursor-pointer transition-colors">Refresh</button>
+                     </div>
+                     <div id="dev-perf-list" class="max-h-32 overflow-y-auto rounded border border-border bg-surface/50 p-2 text-[10px] font-mono text-text-muted space-y-1">
+                         <div class="text-text-muted/70">Open YouTube tabs and click Refresh</div>
+                     </div>
+                 </div>
             </div>
         </div>
     </div>

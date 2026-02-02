@@ -524,7 +524,7 @@ async function getYouTubeTabs(): Promise<void> {
       
       try {
         console.log(`[Popup] Probing tab ${video.id} (Metadata: ${hasValidMetadata ? 'Cached' : 'Missing'})`);
-        const results = await browser.scripting.executeScript({
+          const results = await browser.scripting.executeScript({
           target: { tabId: video.id },
           world: "MAIN",
           args: [hasValidMetadata],
@@ -532,8 +532,32 @@ async function getYouTubeTabs(): Promise<void> {
             const videoElement = document.querySelector("video");
             const currentTime = videoElement ? videoElement.currentTime : 0;
 
-            if (hasMetadata) {
+            // Current video ID: watch ?v= or Shorts /shorts/VIDEO_ID
+            const shortsMatch = window.location.pathname.match(/^\/shorts\/([^/?]+)/);
+            const currentVideoId =
+              new URLSearchParams(window.location.search).get("v") ||
+              (shortsMatch ? shortsMatch[1] : null) ||
+              null;
+
+            // @ts-ignore - Get ytInitialPlayerResponse for SPA detection
+            const playerResponse = window.ytInitialPlayerResponse;
+            const playerVideoId = playerResponse?.videoDetails?.videoId;
+            
+            // CRITICAL: Detect SPA navigation mismatch - ytInitialPlayerResponse has stale video ID
+            const isSpaTransition = playerVideoId && currentVideoId && playerVideoId !== currentVideoId;
+
+            if (hasMetadata && !isSpaTransition) {
               return { currentTime, skipMetadata: true };
+            }
+
+            // If SPA transition detected, return a special flag to invalidate any cached data
+            if (isSpaTransition) {
+              return {
+                currentTime,
+                spaTransition: true,
+                currentVideoId,
+                skipMetadata: false
+              };
             }
 
             const channel =
@@ -543,22 +567,9 @@ async function getYouTubeTabs(): Promise<void> {
 
             let duration = 0;
             let isLive = false;
+            let videoDetails = playerResponse?.videoDetails;
 
             try {
-              // @ts-ignore
-              const playerResponse = window.ytInitialPlayerResponse;
-              let videoDetails = playerResponse?.videoDetails;
-
-              // Current video ID: watch ?v= or Shorts /shorts/VIDEO_ID
-              const shortsMatch = window.location.pathname.match(/^\/shorts\/([^/?]+)/);
-              const currentVideoId =
-                new URLSearchParams(window.location.search).get("v") ||
-                (shortsMatch ? shortsMatch[1] : null) ||
-                null;
-              if (videoDetails && currentVideoId && videoDetails.videoId !== currentVideoId) {
-                  videoDetails = null; // Force fallback to DOM
-              }
-
               if (videoDetails) {
                 isLive = videoDetails.isLive === true;
                 const liveDetails = playerResponse?.microformat?.playerMicroformatRenderer?.liveBroadcastDetails;
@@ -636,34 +647,157 @@ async function getYouTubeTabs(): Promise<void> {
         if (results[0]?.result) {
           const result = results[0].result;
           
-          if (result.skipMetadata) {
-            // Only update currentTime
+          // Handle SPA transition - the page has navigated but ytInitialPlayerResponse is stale
+          if (result.spaTransition) {
+            console.log(`[Popup] SPA transition detected for tab ${video.id}, fetching from DOM...`);
             video.currentTime = result.currentTime || 0;
-            render();
-          } else {
-            const duration = result.duration || 0;
-            if (duration === 0 && !result.isLive) {
+            
+            // During SPA navigation, ytInitialPlayerResponse is NOT updated.
+            // We need to get data from the DOM/player UI which IS updated.
+            const delay = 800; // Wait for YouTube to update the DOM
+            await new Promise(resolve => setTimeout(resolve, delay));
+            
+            try {
+              const domResults = await browser.scripting.executeScript({
+                target: { tabId: video.id },
+                world: "MAIN",
+                func: () => {
+                  const videoElement = document.querySelector("video");
+                  const currentTime = videoElement ? videoElement.currentTime : 0;
+                  
+                  // Get duration from video element
+                  const videoDuration = videoElement?.duration;
+                  let duration = (videoDuration && isFinite(videoDuration) && videoDuration > 0) ? videoDuration : 0;
+                  
+                  // Fallback: Get duration from YouTube player UI (most reliable during SPA)
+                  if (duration === 0) {
+                    const durationEl = document.querySelector('.ytp-time-duration');
+                    if (durationEl) {
+                      const durationText = durationEl.textContent || '';
+                      const parts = durationText.split(':').map(p => parseInt(p) || 0);
+                      if (parts.length === 3) {
+                        duration = parts[0] * 3600 + parts[1] * 60 + parts[2];
+                      } else if (parts.length === 2) {
+                        duration = parts[0] * 60 + parts[1];
+                      }
+                    }
+                  }
+                  
+                  // Fallback: Try YouTube player API
+                  if (duration === 0) {
+                    try {
+                      const player = document.querySelector('#movie_player') as any;
+                      if (player && typeof player.getDuration === 'function') {
+                        const playerDuration = player.getDuration();
+                        if (playerDuration && isFinite(playerDuration) && playerDuration > 0) {
+                          duration = playerDuration;
+                        }
+                      }
+                    } catch (_) {}
+                  }
+                  
+                  // Get title from DOM (h1 is updated during SPA)
+                  let title = 
+                    (document.querySelector('h1.ytd-watch-metadata yt-formatted-string') as HTMLElement)?.innerText ||
+                    (document.querySelector("h1.ytd-video-primary-info-renderer") as HTMLElement)?.innerText ||
+                    (document.querySelector("ytd-watch-metadata h1") as HTMLElement)?.innerText ||
+                    document.title;
+                  title = title.replace(/^\(\d+\)\s*/g, "").replace(" - YouTube", "").trim();
+                  
+                  // Get channel from DOM
+                  const channel =
+                    (document.querySelector("ytd-watch-metadata ytd-channel-name a") as HTMLElement)?.innerText ||
+                    (document.querySelector("#upload-info #channel-name a") as HTMLElement)?.innerText ||
+                    (document.querySelector(".ytd-video-owner-renderer #channel-name a") as HTMLElement)?.innerText ||
+                    "";
+                  
+                  // Check for live
+                  let isLive = false;
+                  const liveBadge = document.querySelector(".ytp-live-badge") as HTMLElement;
+                  if (liveBadge && !liveBadge.hasAttribute("disabled") && getComputedStyle(liveBadge).display !== "none") {
+                    isLive = true;
+                  }
+                  
+                  return { duration, currentTime, title, channelName: channel, isLive };
+                },
+              });
+              
+              const domResult = domResults[0]?.result;
+              if (domResult) {
+                video.title = domResult.title || video.title;
+                video.channelName = domResult.channelName || "";
+                video.seconds = domResult.duration || 0;
+                video.currentTime = domResult.currentTime || 0;
+                video.isLive = domResult.isLive || false;
+                
+                if (video.seconds > 0 || video.isLive) {
+                  requestMetadataUpdate(video.url, {
+                    seconds: video.seconds,
+                    title: video.title,
+                    channelName: video.channelName,
+                    currentTime: video.currentTime,
+                    isLive: video.isLive,
+                  });
+                }
+                render();
+                
+                // If still no duration, trigger Smart Sync as last resort
+                if (video.seconds === 0 && !video.isLive && smartSync) {
+                  console.log(`[Popup] Tab ${video.id} still has no duration, triggering Smart Sync`);
+                  browser.runtime.sendMessage({
+                    action: "sync-all",
+                    tabs: [{ id: video.id, url: video.url }],
+                  }).catch(() => {});
+                }
+              }
+            } catch (e) {
+              console.warn(`[Popup] DOM probe failed for tab ${video.id}:`, e);
+              // Fallback to Smart Sync
               if (smartSync) {
                 browser.runtime.sendMessage({
                   action: "sync-all",
                   tabs: [{ id: video.id, url: video.url }],
                 }).catch(() => {});
               }
-            } else {
+            }
+            return;
+          }
+          
+          if (result.skipMetadata) {
+            // Only update currentTime
+            video.currentTime = result.currentTime || 0;
+            render();
+          } else {
+            const duration = result.duration || 0;
+            
+            // Always update title/channel if we got valid data (not just "Loading...")
+            const hasValidTitle = result.title && result.title !== "Loading..." && result.title !== "YouTube Video";
+            if (hasValidTitle || duration > 0 || result.isLive) {
               video.title = result.title || video.title;
               video.channelName = result.channelName || video.channelName;
               video.seconds = duration;
               video.currentTime = result.currentTime || 0;
               video.isLive = result.isLive || false;
 
-              requestMetadataUpdate(video.url, {
-                seconds: video.seconds,
-                title: video.title,
-                channelName: video.channelName,
-                currentTime: video.currentTime,
-                isLive: video.isLive,
-              });
+              // Only cache if we have meaningful data (duration or live status)
+              if (duration > 0 || result.isLive) {
+                requestMetadataUpdate(video.url, {
+                  seconds: video.seconds,
+                  title: video.title,
+                  channelName: video.channelName,
+                  currentTime: video.currentTime,
+                  isLive: video.isLive,
+                });
+              }
               render();
+            }
+            
+            // If we still don't have duration, trigger smart sync as backup
+            if (duration === 0 && !result.isLive && smartSync) {
+              browser.runtime.sendMessage({
+                action: "sync-all",
+                tabs: [{ id: video.id, url: video.url }],
+              }).catch(() => {});
             }
           }
         }

@@ -59,13 +59,21 @@ function setupApp() {
 
   app.innerHTML = `
     <div data-v-header class="p-5 border-b border-border bg-gradient-to-b from-surface to-surface-elevated">
-      <div class="flex items-center justify-end mb-4 -mr-2">
-          <button id="open-manager" class="p-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-all border-0 bg-transparent cursor-pointer" title="Open Dashboard">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-2">
+          <span id="stat-video-count" class="text-[11px] text-text-muted font-medium">0 videos</span>
+          <button id="refresh-tabs" class="p-1.5 rounded-full hover:bg-surface-hover text-text-muted hover:text-accent transition-all border-0 cursor-pointer group/refresh" title="Refresh tabs">
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="group-active/refresh:rotate-180 transition-transform duration-500"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg>
+          </button>
+        </div>
+        <div class="flex items-center gap-1">
+          <button id="open-manager" class="p-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-all border-0 bg-transparent cursor-pointer" title="Open Manager">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
           </button>
-          <button id="go-to-settings" class="p-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-all border-0 bg-transparent cursor-pointer group/settings">
+          <button id="go-to-settings" class="p-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-all border-0 bg-transparent cursor-pointer group/settings" title="Settings">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="group-hover/settings:rotate-90 transition-transform duration-500"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
           </button>
+        </div>
       </div>
 
       <div class="grid grid-cols-2 gap-4 mb-4">
@@ -78,14 +86,8 @@ function setupApp() {
           <div id="stat-total" class="text-2xl font-bold tabular-nums text-text-primary">--:--</div>
         </div>
       </div>
-      
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <span id="stat-video-count" class="text-[11px] text-text-muted font-medium">0 videos</span>
-          <button id="refresh-tabs" class="p-1.5 rounded-full hover:bg-surface-hover text-text-muted hover:text-accent transition-all border-0 cursor-pointer group/refresh" title="Refresh tabs">
-            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="group-active/refresh:rotate-180 transition-transform duration-500"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg>
-          </button>
-        </div>
+
+      <div class="flex items-center justify-end">
         <div class="flex items-center gap-2">
           <span class="text-[10px] uppercase tracking-wider text-text-muted font-bold opacity-50">Sort by:</span>
           <div class="flex p-0.5 bg-surface-hover rounded-lg border border-border">
@@ -258,15 +260,15 @@ function render(): void {
 
     if (currentView === "settings") {
       app.innerHTML = `
-          <div data-v-header class="p-5 border-b border-border bg-gradient-to-b from-surface to-surface-elevated">
-            <div class="flex items-center gap-3 mb-6">
+          <div data-v-header class="pt-4 px-4 pb-3 border-b border-border bg-gradient-to-b from-surface to-surface-elevated">
+            <div class="flex items-center gap-3 mb-3">
               <button id="back-to-dashboard" class="p-2 -ml-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-all border-0 bg-transparent cursor-pointer">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
               </button>
               <h2 class="text-sm font-bold uppercase tracking-widest text-text-primary m-0">Settings</h2>
             </div>
-            <div class="space-y-6">
-              <div class="pt-4 border-t border-border">
+            <div class="space-y-3">
+              <div class="pt-3 border-t border-border">
                 <button id="btn-clear-cache" class="w-full text-left p-3 rounded-lg border border-border bg-surface-hover/20 hover:bg-red-500/10 hover:border-red-500 group/clear transition-all cursor-pointer">
                   <div class="flex items-center justify-between">
                     <div>
@@ -278,8 +280,8 @@ function render(): void {
                 </button>
               </div>
             </div>
-            <div class="mt-8 pt-6 border-t border-border/50 text-center">
-              <div class="text-[10px] text-text-muted font-medium mb-1 opacity-40 uppercase tracking-tighter">Calculate Total Duration for YouTube Tabs v${VERSION_NUMBER}</div>
+            <div class="mt-3 pt-3 pb-0 border-t border-border/50 text-center">
+              <div class="text-[10px] text-text-muted font-medium opacity-40 uppercase tracking-tighter">Calculate Total Duration for YouTube Tabs v${VERSION_NUMBER}</div>
             </div>
           </div>
         `;

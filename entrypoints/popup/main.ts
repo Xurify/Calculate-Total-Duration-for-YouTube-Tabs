@@ -52,6 +52,40 @@ let renderTimeout: any = null;
 
 const app = document.getElementById("app")!;
 
+function showConfirm(options: { title: string; message: string }): Promise<boolean> {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("popup-confirm-modal");
+    const titleEl = document.getElementById("popup-confirm-title");
+    const messageEl = document.getElementById("popup-confirm-message");
+    const cancelBtn = document.getElementById("popup-confirm-cancel");
+    const okBtn = document.getElementById("popup-confirm-ok");
+    if (!modal || !titleEl || !messageEl || !cancelBtn || !okBtn) {
+      resolve(false);
+      return;
+    }
+    titleEl.textContent = options.title;
+    messageEl.textContent = options.message;
+    const close = (result: boolean) => {
+      modal.classList.add("hidden");
+      modal.classList.remove("flex");
+      resolve(result);
+      cancelBtn.removeEventListener("click", onCancel);
+      okBtn.removeEventListener("click", onOk);
+      modal.removeEventListener("click", onBackdrop);
+    };
+    const onCancel = () => close(false);
+    const onOk = () => close(true);
+    const onBackdrop = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).id === "popup-confirm-modal") close(false);
+    };
+    cancelBtn.addEventListener("click", onCancel);
+    okBtn.addEventListener("click", onOk);
+    modal.addEventListener("click", onBackdrop);
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
+  });
+}
+
 function setupApp() {
   // Check if the dashboard shell is actually present, not just "not empty"
   // logic: if 'stat-total' exists, we are in the dashboard view.
@@ -260,7 +294,7 @@ function render(): void {
 
     if (currentView === "settings") {
       app.innerHTML = `
-          <div data-v-header class="pt-4 px-4 pb-3 border-b border-border bg-gradient-to-b from-surface to-surface-elevated">
+          <div data-v-header class="pt-4 px-4 pb-3 border-b border-border bg-gradient-to-b from-surface to-surface-elevated relative">
             <div class="flex items-center gap-3 mb-3">
               <button id="back-to-dashboard" class="p-2 -ml-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-all border-0 bg-transparent cursor-pointer">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
@@ -284,6 +318,16 @@ function render(): void {
               <div class="text-[10px] text-text-muted font-medium opacity-40 uppercase tracking-tighter">Calculate Total Duration for YouTube Tabs v${VERSION_NUMBER}</div>
             </div>
           </div>
+          <div id="popup-confirm-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" aria-modal="true" role="dialog">
+            <div class="bg-surface-elevated border border-border rounded-lg shadow-xl w-full max-w-[calc(100%-2rem)] mx-4 p-4">
+              <h3 id="popup-confirm-title" class="text-sm font-bold text-text-primary mb-2"></h3>
+              <p id="popup-confirm-message" class="text-xs text-text-secondary mb-4"></p>
+              <div class="flex justify-end gap-2">
+                <button type="button" id="popup-confirm-cancel" class="px-3 py-1.5 text-xs font-medium rounded-md border border-border bg-surface-hover text-text-primary hover:bg-surface cursor-pointer">Cancel</button>
+                <button type="button" id="popup-confirm-ok" class="px-3 py-1.5 text-xs font-medium rounded-md border-0 bg-red-600 text-white hover:bg-red-700 cursor-pointer transition-colors">Clear cache</button>
+              </div>
+            </div>
+          </div>
         `;
       document.getElementById("back-to-dashboard")!.addEventListener("click", () => {
         currentView = "dashboard";
@@ -291,7 +335,11 @@ function render(): void {
       });
 
       document.getElementById("btn-clear-cache")?.addEventListener("click", async () => {
-        if (confirm("Are you sure you want to clear all cached metadata?")) {
+        const confirmed = await showConfirm({
+          title: "Clear metadata cache",
+          message: "Clear all cached titles and durations? Tabs will be re-probed when needed.",
+        });
+        if (confirmed) {
           await clearCache();
           await getYouTubeTabs();
           currentView = "dashboard";

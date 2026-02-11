@@ -159,3 +159,84 @@ export async function clearCache(): Promise<void> {
   if (!browser.storage?.local) return;
   await browser.storage.local.set({ metadataCache: {} });
 }
+
+export interface SavedSessionTab {
+  url: string;
+  title?: string;
+  channelName?: string;
+  seconds?: number;
+}
+
+export interface SavedSession {
+  id: string;
+  name: string;
+  savedAt: number;
+  tabs: SavedSessionTab[];
+  pinned?: boolean;
+}
+
+const SAVED_SESSIONS_KEY = "savedSessions";
+
+export async function getSavedSessions(): Promise<SavedSession[]> {
+  if (!browser.storage?.local) return [];
+  const data = await browser.storage.local.get(SAVED_SESSIONS_KEY);
+  const raw = data[SAVED_SESSIONS_KEY] as SavedSession[] | undefined;
+  if (!Array.isArray(raw)) return [];
+  const normalized = raw.map((s) => ({
+    id: s.id,
+    name: s.name ?? "Untitled",
+    savedAt: typeof s.savedAt === "number" ? s.savedAt : Date.now(),
+    tabs: Array.isArray(s.tabs) ? s.tabs : [],
+    pinned: Boolean(s.pinned),
+  }));
+  return normalized.sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1;
+    if (!a.pinned && b.pinned) return 1;
+    return b.savedAt - a.savedAt;
+  });
+}
+
+export async function saveSession(name: string, tabs: SavedSessionTab[]): Promise<SavedSession> {
+  if (!browser.storage?.local) throw new Error("Storage not available");
+  const tabList = Array.isArray(tabs) ? tabs : [];
+  const sessions = await getSavedSessions();
+  const session: SavedSession = {
+    id: crypto.randomUUID(),
+    name,
+    savedAt: Date.now(),
+    tabs: tabList.map((t) => ({
+      url: t?.url ?? "",
+      title: t?.title,
+      channelName: t?.channelName,
+      seconds: t?.seconds,
+    })),
+    pinned: false,
+  };
+  sessions.unshift(session);
+  await browser.storage.local.set({ [SAVED_SESSIONS_KEY]: sessions });
+  return session;
+}
+
+export async function setSessionPinned(id: string, pinned: boolean): Promise<void> {
+  if (!browser.storage?.local) return;
+  const sessions = await getSavedSessions();
+  const session = sessions.find((s) => s.id === id);
+  if (!session) return;
+  session.pinned = pinned;
+  await browser.storage.local.set({ [SAVED_SESSIONS_KEY]: sessions });
+}
+
+export async function deleteSession(id: string): Promise<void> {
+  if (!browser.storage?.local) return;
+  const sessions = (await getSavedSessions()).filter((s) => s.id !== id);
+  await browser.storage.local.set({ [SAVED_SESSIONS_KEY]: sessions });
+}
+
+export async function updateSessionTabs(sessionId: string, tabs: SavedSessionTab[]): Promise<void> {
+  if (!browser.storage?.local) return;
+  const sessions = await getSavedSessions();
+  const session = sessions.find((s) => s.id === sessionId);
+  if (!session) return;
+  session.tabs = tabs;
+  await browser.storage.local.set({ [SAVED_SESSIONS_KEY]: sessions });
+}

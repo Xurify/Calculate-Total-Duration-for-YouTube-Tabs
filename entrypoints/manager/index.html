@@ -19,7 +19,17 @@
       </div>
       
       <div class="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1" id="window-list">
-        <div id="window-list-windows"></div>
+        <div id="window-list-windows" class="min-h-[7.5rem]">
+          <!-- Placeholder to prevent layout shift when Windows load; replaced by renderSidebar() -->
+          <div class="sidebar-item w-full text-left px-3 py-2 rounded-md mb-1 flex items-center justify-between text-text-muted opacity-60" aria-hidden="true">
+            <span class="text-xs font-semibold">All Windows</span>
+            <span class="text-[10px] bg-surface-elevated border border-border px-1.5 rounded-full">—</span>
+          </div>
+          <div class="w-full px-3 py-2 rounded-md mb-1 flex items-center justify-between text-text-muted opacity-40" aria-hidden="true">
+            <div class="h-4 w-24 rounded bg-surface-elevated/50 animate-pulse"></div>
+            <span class="text-[10px] bg-surface-elevated/50 px-1.5 rounded-full">—</span>
+          </div>
+        </div>
         <div class="h-px bg-border my-2 mx-2"></div>
         <div class="px-2 py-1 text-[10px] uppercase font-bold text-text-muted tracking-wider">Saved</div>
         <div id="saved-sessions-sidebar" class="space-y-1"></div>

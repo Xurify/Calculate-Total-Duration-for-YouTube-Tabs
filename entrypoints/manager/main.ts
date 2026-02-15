@@ -1756,7 +1756,9 @@ function attachDynamicListeners() {
 
 document.addEventListener("DOMContentLoaded", () => {
   setupListeners();
-  fetchTabs().then(() => refreshSavedSessionsSidebar());
+  // Load saved sessions immediately so the SAVED section isn’t empty while fetchTabs runs
+  refreshSavedSessionsSidebar();
+  fetchTabs();
 
   browser.tabs.onRemoved.addListener(scheduleFetchTabsFromEvents);
   browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {

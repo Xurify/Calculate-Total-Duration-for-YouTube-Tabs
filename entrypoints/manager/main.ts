@@ -153,7 +153,8 @@ async function probeTabs() {
         contentMeta.title &&
         (contentMeta.seconds > 0 || contentMeta.isLive)
       ) {
-        video.title = contentMeta.title;
+        const isPlaceholder = (t: string) => !t || t === "YouTube Video" || t === "YouTube";
+        video.title = isPlaceholder(contentMeta.title) ? (video.title || contentMeta.title) : contentMeta.title;
         video.channelName = contentMeta.channelName || "";
         video.seconds = contentMeta.seconds;
         video.currentTime = contentMeta.currentTime;
@@ -264,7 +265,6 @@ async function probeTabs() {
               }
             }
 
-            // Consolidate title extraction
             let title = videoDetails?.title ||
               (document.querySelector("h1.ytd-video-primary-info-renderer") as HTMLElement)?.innerText ||
               (document.querySelector("h1.title.ytd-video-primary-info-renderer") as HTMLElement)?.innerText ||
@@ -332,9 +332,10 @@ async function probeTabs() {
           const duration = result.duration || 0;
           
           // Always update title/channel if we got valid data
-          const hasValidTitle = result.title && result.title !== "Loading..." && result.title !== "YouTube Video";
+          const hasValidTitle = result.title && result.title !== "Loading..." && result.title !== "YouTube Video" && result.title !== "YouTube";
           if (hasValidTitle || duration > 0 || result.isLive) {
-            video.title = result.title || video.title;
+            // Preserve any existing good title rather than overwriting with a placeholder
+            video.title = hasValidTitle ? result.title : (video.title || result.title);
             video.channelName = result.channelName || video.channelName;
             video.seconds = duration;
             video.currentTime = result.currentTime || 0;
@@ -563,7 +564,6 @@ function showConfirm(options: ConfirmOptions): Promise<boolean> {
   });
 }
 
-// Helper to save current settings state
 async function saveSettings() {
   // We need to pass all arguments to match signature, but we can rely on current global state
   // To do this safely without re-reading storage every time (which we do in loadStorage anyway), 
@@ -622,7 +622,6 @@ function renderSidebar() {
   });
 
   container.innerHTML = html;
-  // Saved list is NOT updated here — only on explicit actions (save/delete/pin) and initial load
 }
 
 async function refreshSavedSessionsSidebar() {
@@ -737,7 +736,6 @@ function renderMain() {
     }
   }
 
-  // Layout Toggles
   const btnLayoutList = document.getElementById('layout-list');
   const btnLayoutGrid = document.getElementById('layout-grid');
 
@@ -1756,7 +1754,6 @@ function attachDynamicListeners() {
 
 document.addEventListener("DOMContentLoaded", () => {
   setupListeners();
-  // Load saved sessions immediately so the SAVED section isn’t empty while fetchTabs runs
   refreshSavedSessionsSidebar();
   fetchTabs();
 

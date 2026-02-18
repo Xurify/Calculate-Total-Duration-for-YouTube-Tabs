@@ -34,12 +34,18 @@ async function handleCacheUpdateRequest(url: string, metadata: any) {
     // MERGE LOGIC: Prevent overwriting good metadata with bad data
     // Only update if duration > 0 or if the existing data is very old or missing
     const shouldUpdateDuration = metadata.seconds > 0 || !existing || metadata.isLive;
-    
+    // Don't overwrite a real cached title with a placeholder (e.g. Shorts whose page
+    // title hasn't loaded yet produce "YouTube Video" via document.title cleanup)
+    const isPlaceholderTitle = !metadata.title || metadata.title === "YouTube Video" || metadata.title === "YouTube";
+    const shouldUpdateTitle = !isPlaceholderTitle || !existing?.title || existing.title === "YouTube Video" || existing.title === "YouTube";
+
     cache[normalizedUrl] = {
       ...(existing || {}),
       ...metadata,
       // If we are trying to set seconds to 0 but we already have a value, keep the old value unless it's a live stream
       seconds: shouldUpdateDuration ? metadata.seconds : existing.seconds,
+      // Keep existing good title if the incoming one is a placeholder
+      title: shouldUpdateTitle ? metadata.title : existing!.title,
       timestamp: Date.now(),
     };
 

@@ -78,9 +78,6 @@
                        <button type="button" id="btn-save-session" class="p-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 cursor-pointer" title="Save current session">
                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
                        </button>
-                       <button type="button" id="btn-load-session" class="p-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 cursor-pointer" title="Open tabs… (saved sessions)">
-                           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v14H4V4z"/><path d="M8 2h14v14H8V2z"/></svg>
-                       </button>
                        <button id="btn-settings" class="p-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 cursor-pointer" title="Settings">
                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
                        </button>
@@ -142,25 +139,6 @@
       <div id="tab-list" class="flex-1 overflow-y-auto custom-scrollbar p-8 pt-4 pb-20 space-y-1">
       </div>
     </main>
-    
-    <!-- Sessions Modal (Load saved session) -->
-    <div id="sessions-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-        <div class="bg-surface-elevated border border-border rounded-lg shadow-xl w-full max-w-md max-h-[80vh] flex flex-col animate-in zoom-in-95 duration-200 relative">
-            <button id="close-sessions" class="absolute top-3 right-3 p-1 rounded hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors z-10">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>
-            </button>
-            <div class="p-5 border-b border-border">
-                <h3 class="text-lg font-bold text-text-primary">Saved Sessions</h3>
-                <p class="text-[11px] text-text-muted mt-1">Click a session to open its tabs in this window. Use “Open in New Window” to open in a separate window.</p>
-            </div>
-            <div id="sessions-list" class="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
-                <!-- Populated by JS -->
-            </div>
-            <div id="sessions-empty" class="hidden p-6 text-center text-text-muted text-sm">
-                No saved sessions yet. Use “Save session” to save your current tabs.
-            </div>
-        </div>
-    </div>
 
     <!-- Settings Modal -->
     <div id="settings-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">

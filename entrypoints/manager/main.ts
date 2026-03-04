@@ -364,17 +364,6 @@ async function probeTabs() {
   await Promise.all(activeTabPromises);
 }
 
-function formatSessionDate(ms: number): string {
-  const d = new Date(ms);
-  const now = new Date();
-  const sameDay = d.toDateString() === now.toDateString();
-  if (sameDay) return `Today ${d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (d.toDateString() === yesterday.toDateString()) return `Yesterday ${d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: d.getFullYear() !== now.getFullYear() ? "numeric" : undefined, hour: "2-digit", minute: "2-digit" });
-}
-
 async function loadSessionInCurrentWindow(sessionId: string) {
   const sessions = await getSavedSessions();
   const session = sessions.find((s) => s.id === sessionId);
@@ -398,55 +387,6 @@ async function loadSessionInNewWindow(sessionId: string) {
   for (let i = 1; i < tabs.length; i++) {
     await browser.tabs.create({ windowId: win.id, url: tabs[i].url });
   }
-}
-
-async function openSessionsModal() {
-  const sessions = await getSavedSessions();
-  const listEl = document.getElementById("sessions-list");
-  const emptyEl = document.getElementById("sessions-empty");
-  const modal = document.getElementById("sessions-modal");
-  if (!listEl || !emptyEl || !modal) return;
-
-  if (sessions.length === 0) {
-    listEl.innerHTML = "";
-    listEl.classList.add("hidden");
-    emptyEl.classList.remove("hidden");
-  } else {
-    emptyEl.classList.add("hidden");
-    listEl.classList.remove("hidden");
-    listEl.innerHTML = sessions
-      .map(
-        (s) => `
-        <div class="flex items-center justify-between gap-3 p-3 rounded-lg border border-border bg-surface hover:bg-surface-hover/50 group" data-session-id="${s.id}">
-          <div class="min-w-0 flex-1 flex items-center gap-2">
-            <button class="session-pin-btn p-1.5 rounded shrink-0 transition-colors border-0 cursor-pointer ${s.pinned ? "text-accent" : "text-text-muted hover:text-text-secondary"}" data-session-id="${s.id}" data-pinned="${s.pinned ? "1" : "0"}" title="${s.pinned ? "Unpin" : "Pin"}">
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
-            </button>
-            <div class="min-w-0">
-              <div class="text-sm font-medium text-text-primary truncate">${escapeHtml(s.name)}</div>
-              <div class="text-[11px] text-text-muted mt-0.5">${(s.tabs?.length ?? 0)} tabs · ${formatSessionDate(s.savedAt)}</div>
-            </div>
-          </div>
-          <div class="flex items-center gap-1 shrink-0">
-            <button class="session-open-new-window-btn px-3 py-1.5 text-xs font-medium rounded-md bg-accent text-white hover:opacity-90 border-0 cursor-pointer transition-opacity flex items-center gap-1.5" data-session-id="${s.id}" title="Open in a new window">
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
-              Open in New Window
-            </button>
-            <button class="session-delete-btn p-1.5 rounded hover:bg-red-500/20 text-text-muted hover:text-red-500 transition-colors border-0 cursor-pointer" data-session-id="${s.id}" title="Delete session">
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-            </button>
-          </div>
-        </div>
-      `
-      )
-      .join("");
-  }
-
-  modal.classList.remove("hidden");
-  modal.classList.add("flex");
-  requestAnimationFrame(() => {
-    modal.focus();
-  });
 }
 
 function escapeHtml(s: string): string {
@@ -1569,15 +1509,10 @@ function setupListeners() {
       await saveSession(name, tabs);
       await refreshSavedSessionsSidebar();
       showToast(`Saved "${name}" (${tabs.length} tabs)`);
-      openSessionsModal();
     } catch (err) {
       console.error("Save session failed:", err);
       showToast("Could not save session.");
     }
-  });
-
-  document.getElementById("btn-load-session")?.addEventListener("click", () => {
-    openSessionsModal();
   });
 
   document.getElementById("select-all-checkbox")?.addEventListener("click", (e) => {
@@ -1599,50 +1534,6 @@ function setupListeners() {
       else visibleIds.forEach((id) => selectedTabIds.add(id));
     }
     updateSelectionUI();
-  });
-
-  document.getElementById("close-sessions")?.addEventListener("click", () => {
-    document.getElementById("sessions-modal")?.classList.add("hidden");
-    document.getElementById("sessions-modal")?.classList.remove("flex");
-  });
-
-  document.getElementById("sessions-modal")?.addEventListener("click", (e) => {
-    if ((e.target as HTMLElement).id === "sessions-modal") {
-      (e.target as HTMLElement).classList.add("hidden");
-      (e.target as HTMLElement).classList.remove("flex");
-    }
-  });
-
-  // Sessions list: one delegated click instead of 3*N listeners
-  document.getElementById("sessions-list")?.addEventListener("click", async (e) => {
-    const target = e.target as HTMLElement;
-    const modal = document.getElementById("sessions-modal");
-    const pinBtn = target.closest(".session-pin-btn") as HTMLElement | null;
-    const openBtn = target.closest(".session-open-new-window-btn") as HTMLElement | null;
-    const delBtn = target.closest(".session-delete-btn") as HTMLElement | null;
-    const id = pinBtn?.dataset.sessionId ?? openBtn?.dataset.sessionId ?? delBtn?.dataset.sessionId;
-    if (!id) return;
-    if (pinBtn) {
-      e.stopPropagation();
-      const currentlyPinned = pinBtn.dataset.pinned === "1";
-      await setSessionPinned(id, !currentlyPinned);
-      openSessionsModal();
-    } else if (openBtn) {
-      await loadSessionInNewWindow(id);
-      modal?.classList.add("hidden");
-    } else if (delBtn) {
-      e.stopPropagation();
-      const confirmed = await showConfirm({
-        title: "Delete session",
-        message: "Delete this saved session?",
-        confirmLabel: "Delete",
-        confirmDanger: true,
-      });
-      if (!confirmed) return;
-      await deleteSession(id);
-      refreshSavedSessionsSidebar();
-      openSessionsModal();
-    }
   });
 
   // Context menu actions (right-click sidebar)
@@ -1701,7 +1592,6 @@ function setupListeners() {
     if (confirmed) {
       await deleteSession(t.sessionId);
       refreshSavedSessionsSidebar();
-      openSessionsModal();
     }
   });
 

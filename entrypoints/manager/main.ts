@@ -435,7 +435,7 @@ function showNameSessionModal(defaultName: string): Promise<string | null> {
     input.select();
     const close = (result: string | null) => {
       modal.classList.add("hidden");
-      modal.classList.remove("flex");
+      modal.classList.remove("flex", "items-center", "justify-center");
       resolve(result);
       cancelBtn.removeEventListener("click", onCancel);
       saveBtn.removeEventListener("click", onSave);
@@ -456,7 +456,7 @@ function showNameSessionModal(defaultName: string): Promise<string | null> {
     modal.addEventListener("click", onBackdrop);
     input.addEventListener("keydown", onKeydown);
     modal.classList.remove("hidden");
-    modal.classList.add("flex");
+    modal.classList.add("flex", "items-center", "justify-center");
     requestAnimationFrame(() => input.focus());
   });
 }
@@ -485,7 +485,7 @@ function showConfirm(options: ConfirmOptions): Promise<boolean> {
     }
     const close = (result: boolean) => {
       modal.classList.add("hidden");
-      modal.classList.remove("flex");
+      modal.classList.remove("flex", "items-center", "justify-center");
       resolve(result);
       cancelBtn.removeEventListener("click", onCancel);
       okBtn.removeEventListener("click", onOk);
@@ -500,7 +500,7 @@ function showConfirm(options: ConfirmOptions): Promise<boolean> {
     okBtn.addEventListener("click", onOk);
     modal.addEventListener("click", onBackdrop);
     modal.classList.remove("hidden");
-    modal.classList.add("flex");
+    modal.classList.add("flex", "items-center", "justify-center");
   });
 }
 
@@ -634,12 +634,12 @@ function renderMain() {
   if (settingsModal) {
     if (isSettingsOpen) {
       settingsModal.classList.remove("hidden", "fade-out");
-      settingsModal.classList.add("flex", "animate-in", "fade-in");
+      settingsModal.classList.add("flex", "items-center", "justify-center", "animate-in", "fade-in");
       const devVersion = document.getElementById("dev-version");
       if (devVersion) devVersion.textContent = `v${packageJson.version}`;
     } else {
       settingsModal.classList.add("hidden");
-      settingsModal.classList.remove("flex", "animate-in", "fade-in");
+      settingsModal.classList.remove("flex", "items-center", "justify-center", "animate-in", "fade-in");
     }
 
     const btnQualityStd = document.getElementById("quality-standard");
@@ -1324,20 +1324,21 @@ function setupListeners() {
     if (type === "all" || type === "window") {
       sidebarContextTarget = type === "all" ? { type: "all" } : { type: "window", windowId: parseInt(item.getAttribute("data-window-id") || "0", 10) };
       const saveBtn = document.getElementById("ctx-save");
-      if (saveBtn) { saveBtn.classList.remove("hidden"); }
+      if (saveBtn) { saveBtn.classList.remove("hidden"); saveBtn.classList.add("flex"); }
     } else if (type === "session") {
       sidebarContextTarget = { type: "session", sessionId: item.getAttribute("data-session-id") || undefined };
       const openBtn = document.getElementById("ctx-open-tabs");
       const pinBtn = document.getElementById("ctx-pin");
       const pinLabel = document.getElementById("ctx-pin-label");
       const delBtn = document.getElementById("ctx-delete");
-      if (openBtn) openBtn.classList.remove("hidden");
+      if (openBtn) { openBtn.classList.remove("hidden"); openBtn.classList.add("flex"); }
       if (pinBtn) {
         pinBtn.classList.remove("hidden");
+        pinBtn.classList.add("flex");
         const pinned = item.getAttribute("data-pinned") === "1";
         if (pinLabel) pinLabel.textContent = pinned ? "Unpin" : "Pin";
       }
-      if (delBtn) delBtn.classList.remove("hidden");
+      if (delBtn) { delBtn.classList.remove("hidden"); delBtn.classList.add("flex"); }
     }
     menu.classList.remove("hidden");
     const x = Math.min(event.clientX, window.innerWidth - 180);

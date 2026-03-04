@@ -1202,6 +1202,39 @@ function renderVideoGrid(videos: VideoData[]): string {
   return `<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 p-1">${cardsHtml}</div>`;
 }
 
+function updateSelectAllCheckbox() {
+  const wrap = document.getElementById("select-all-wrap");
+  const checkbox = document.getElementById("select-all-checkbox") as HTMLInputElement;
+  const dashEl = wrap?.querySelector(".select-all-indeterminate-dash") as HTMLElement;
+  if (!wrap || !checkbox) return;
+
+  const inSessionView = selectedSession != null;
+  const tabElements = document.querySelectorAll("#tab-list [data-session-tab-url]");
+  const idElements = document.querySelectorAll("#tab-list [data-id]");
+  const visibleUrls = inSessionView ? Array.from(tabElements).map((el) => (el as HTMLElement).getAttribute("data-session-tab-url")!) : [];
+  const visibleIds = inSessionView ? [] : Array.from(idElements).map((el) => parseInt((el as HTMLElement).dataset.id || "0", 10));
+
+  const count = inSessionView ? visibleUrls.length : visibleIds.length;
+  if (count === 0) {
+    wrap.classList.add("hidden");
+    wrap.classList.remove("flex");
+    return;
+  }
+  wrap.classList.remove("hidden");
+  wrap.classList.add("flex");
+
+  const allSelected = inSessionView
+    ? visibleUrls.every((url) => selectedSessionTabUrls.has(url))
+    : visibleIds.every((id) => selectedTabIds.has(id));
+  const someSelected = inSessionView
+    ? visibleUrls.some((url) => selectedSessionTabUrls.has(url))
+    : visibleIds.some((id) => selectedTabIds.has(id));
+
+  checkbox.checked = allSelected;
+  checkbox.indeterminate = someSelected && !allSelected;
+  if (dashEl) dashEl.style.opacity = checkbox.indeterminate ? "1" : "0";
+}
+
 function updateSelectionUI() {
   const bar = document.getElementById("selection-actions");
   const count = document.getElementById("selection-count");
@@ -1219,6 +1252,8 @@ function updateSelectionUI() {
     bar?.classList.add("hidden");
     bar?.classList.remove("flex");
   }
+
+  updateSelectAllCheckbox();
 
   if (inSessionView) {
     document.querySelectorAll("#tab-list [data-session-tab-url]").forEach((element) => {
@@ -1543,6 +1578,27 @@ function setupListeners() {
 
   document.getElementById("btn-load-session")?.addEventListener("click", () => {
     openSessionsModal();
+  });
+
+  document.getElementById("select-all-checkbox")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const inSessionView = selectedSession != null;
+    const tabElements = document.querySelectorAll("#tab-list [data-session-tab-url]");
+    const idElements = document.querySelectorAll("#tab-list [data-id]");
+    const visibleUrls = inSessionView ? Array.from(tabElements).map((el) => (el as HTMLElement).getAttribute("data-session-tab-url")!) : [];
+    const visibleIds = inSessionView ? [] : Array.from(idElements).map((el) => parseInt((el as HTMLElement).dataset.id || "0", 10));
+    const checkbox = document.getElementById("select-all-checkbox") as HTMLInputElement;
+    const allSelected = inSessionView
+      ? visibleUrls.every((url) => selectedSessionTabUrls.has(url))
+      : visibleIds.every((id) => selectedTabIds.has(id));
+    if (allSelected) {
+      if (inSessionView) visibleUrls.forEach((url) => selectedSessionTabUrls.delete(url));
+      else visibleIds.forEach((id) => selectedTabIds.delete(id));
+    } else {
+      if (inSessionView) visibleUrls.forEach((url) => selectedSessionTabUrls.add(url));
+      else visibleIds.forEach((id) => selectedTabIds.add(id));
+    }
+    updateSelectionUI();
   });
 
   document.getElementById("close-sessions")?.addEventListener("click", () => {

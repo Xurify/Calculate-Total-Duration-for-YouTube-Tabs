@@ -1,4 +1,5 @@
 import { normalizeYoutubeUrl } from "../utils/storage";
+import { getVideoIdFromUrl } from "../utils/format";
 
 let cacheUpdateQueue: Promise<void> = Promise.resolve();
 
@@ -39,9 +40,11 @@ async function handleCacheUpdateRequest(url: string, metadata: any) {
     const isPlaceholderTitle = !metadata.title || metadata.title === "YouTube Video" || metadata.title === "YouTube";
     const shouldUpdateTitle = !isPlaceholderTitle || !existing?.title || existing.title === "YouTube Video" || existing.title === "YouTube";
 
+    const videoId = metadata.videoId ?? getVideoIdFromUrl(url) ?? undefined;
     cache[normalizedUrl] = {
       ...(existing || {}),
       ...metadata,
+      videoId: videoId ?? existing?.videoId,
       // If we are trying to set seconds to 0 but we already have a value, keep the old value unless it's a live stream
       seconds: shouldUpdateDuration ? metadata.seconds : existing.seconds,
       // Keep existing good title if the incoming one is a placeholder
@@ -118,12 +121,14 @@ async function handleStealthSync(tabs: TabToSync[]) {
       let title = "";
       let channel = "";
       let isLive = false;
+      let syncedVideoId: string | null = null;
 
       if (playerResponseMatch) {
         try {
           const playerResponse = JSON.parse(playerResponseMatch[1]);
           const videoDetails = playerResponse.videoDetails;
           if (videoDetails) {
+            syncedVideoId = videoDetails.videoId ?? null;
             title = videoDetails.title || "";
             channel = videoDetails.author || "";
             isLive = videoDetails.isLive === true;
@@ -156,6 +161,7 @@ async function handleStealthSync(tabs: TabToSync[]) {
           title: title || "YouTube Video",
           channelName: channel || "",
           isLive,
+          videoId: syncedVideoId ?? undefined,
         };
         await handleCacheUpdateRequest(tab.url, metadata);
         browser.runtime.sendMessage({ action: "tab-synced", tabId: tab.id, metadata }).catch(() => {});

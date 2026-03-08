@@ -20,6 +20,8 @@ export interface CachedMetadata {
   currentTime: number;
   isLive: boolean;
   timestamp: number;
+  /** When set, cache is only used when this matches the tab's video ID (avoids stale SPA metadata). */
+  videoId?: string;
 }
 
 export function normalizeYoutubeUrl(url: string): string {

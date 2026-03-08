@@ -76,16 +76,13 @@ async function fetchTabs() {
   allVideos = youtubeTabs.map((tab, index) => {
     const url = tab.url!;
     const normalizedUrl = normalizeYoutubeUrl(url);
-    const cached = metadataCache[normalizedUrl];
-
-    // Clean "(1030) " notification count from tab title if present
-    let initialTitle = tab.title || "YouTube Video";
-    initialTitle = initialTitle.replace(/^\(\d+\)\s*/g, "");
-    initialTitle = initialTitle.replace(" - YouTube", "").trim();
+    const rawCached = metadataCache[normalizedUrl];
+    const expectedVideoId = getVideoIdFromUrl(url);
+    const cached = rawCached && rawCached.videoId !== undefined && rawCached.videoId === expectedVideoId ? rawCached : undefined;
 
     return {
       id: tab.id || 0,
-      title: cached?.title || initialTitle,
+      title: cached?.title || "YouTube Video",
       channelName: cached?.channelName || "",
       seconds: cached?.seconds || 0,
       currentTime: cached?.currentTime || parseTimeParam(url),
@@ -159,13 +156,22 @@ async function probeTabs() {
         video.seconds = contentMeta.seconds;
         video.currentTime = contentMeta.currentTime;
         video.isLive = contentMeta.isLive;
-        requestMetadataUpdate(video.url, {
-          seconds: video.seconds,
-          title: video.title,
-          channelName: video.channelName,
-          currentTime: video.currentTime,
-          isLive: video.isLive,
-        });
+        const verifyResults = await browser.scripting.executeScript({
+          target: { tabId: video.id },
+          world: "MAIN",
+          func: () => (window as unknown as { ytInitialPlayerResponse?: { videoDetails?: { videoId?: string } } }).ytInitialPlayerResponse?.videoDetails?.videoId ?? null,
+        }).catch(() => null);
+        const pageVideoId = verifyResults?.[0]?.result ?? null;
+        if (pageVideoId === expectedVideoId) {
+          requestMetadataUpdate(video.url, {
+            seconds: video.seconds,
+            title: video.title,
+            channelName: video.channelName,
+            currentTime: video.currentTime,
+            isLive: video.isLive,
+            videoId: expectedVideoId ?? undefined,
+          });
+        }
         render();
         return;
       }
@@ -313,7 +319,7 @@ async function probeTabs() {
               video.currentTime = meta.currentTime ?? 0;
               video.isLive = meta.isLive ?? false;
               if (video.seconds > 0 || video.isLive) {
-                requestMetadataUpdate(video.url, { seconds: video.seconds, title: video.title, channelName: video.channelName, currentTime: video.currentTime, isLive: video.isLive });
+                requestMetadataUpdate(video.url, { seconds: video.seconds, title: video.title, channelName: video.channelName, currentTime: video.currentTime, isLive: video.isLive, videoId: expectedVideoId ?? undefined });
               }
               render();
               return true;
@@ -349,6 +355,7 @@ async function probeTabs() {
                 channelName: video.channelName,
                 currentTime: video.currentTime,
                 isLive: video.isLive,
+                videoId: expectedVideoId ?? undefined,
               });
             }
           }

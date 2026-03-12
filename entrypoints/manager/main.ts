@@ -1033,7 +1033,7 @@ function renderSessionGrid(tabs: SavedSessionTab[]): string {
       <div class="group relative flex flex-col rounded-lg border border-transparent overflow-hidden hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? "bg-surface-hover border-border ring-1 ring-accent/50" : ""}" data-session-tab-url="${urlAttr}">
         <div class="relative w-full aspect-video bg-surface-elevated/50 overflow-hidden session-video-click-target cursor-pointer">
           ${thumbnailUrl
-        ? `<img src="${thumbnailUrl}" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" alt="" />`
+        ? `<img src="${thumbnailUrl}" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" decoding="async" alt="" />`
         : `<div class="w-full h-full flex items-center justify-center text-text-muted/20"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="12" cy="12" r="3"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>`
       }
           <div class="absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-mono font-medium text-white backdrop-blur-sm">
@@ -1103,7 +1103,7 @@ function renderVideoGrid(videos: VideoData[]): string {
                 <!-- Thumbnail Area -->
                 <div class="relative w-full aspect-video bg-surface-elevated/50 overflow-hidden video-click-target cursor-pointer">
                     ${thumbnailUrl
-        ? `<img src="${thumbnailUrl}" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" alt="" />`
+        ? `<img src="${thumbnailUrl}" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" decoding="async" alt="" />`
         : `<div class="w-full h-full flex items-center justify-center text-text-muted/20"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="12" cy="12" r="3"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>`
       }
                     

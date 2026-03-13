@@ -6,7 +6,8 @@ import {
   saveStorage as saveStorageUtil,
   requestMetadataUpdate,
   normalizeYoutubeUrl,
-  clearCache
+  clearCache,
+  isCacheEntryUsable
 } from "../../utils/storage";
 import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl } from "../../utils/format";
 
@@ -16,8 +17,13 @@ let videoData: VideoData[] = [];
 let sortByDuration = false;
 let currentView: "dashboard" | "settings" = "dashboard";
 
+const POPUP_STORAGE_READ_SKIP_MS = 2000;
+let lastStorageLoadTime = 0;
+let lastStorageData: Awaited<ReturnType<typeof loadStorage>> | null = null;
+
 async function saveStorage(): Promise<void> {
   await saveStorageUtil(videoData, sortByDuration);
+  lastStorageLoadTime = 0;
 }
 
 // Global listener for background cache updates (content script + auto sync for suspended tabs)
@@ -375,10 +381,19 @@ async function getYouTubeTabs(): Promise<void> {
   showLoading();
 
   try {
-    const { sortByDuration: savedSort, excludedUrls, metadataCache } = await loadStorage();
+    const now = Date.now();
+    const storage =
+      lastStorageData && now - lastStorageLoadTime < POPUP_STORAGE_READ_SKIP_MS
+        ? lastStorageData
+        : await (async () => {
+            const s = await loadStorage();
+            lastStorageData = s;
+            lastStorageLoadTime = Date.now();
+            return s;
+          })();
+    const { sortByDuration: savedSort, excludedUrls, metadataCache } = storage;
     sortByDuration = savedSort;
 
-    // Query ALL tabs and filter manually to avoid API quirks
     const allTabs = await browser.tabs.query({});
     const tabs = allTabs.filter((tab) => {
       if (!tab.url) return false;
@@ -394,13 +409,18 @@ async function getYouTubeTabs(): Promise<void> {
       }
     });
 
-    // Initialize videoData immediately with basic tab info and cached metadata
     videoData = tabs.map((tab, index) => {
       const url = tab.url!;
       const normalizedUrl = normalizeYoutubeUrl(url);
       const rawCached = metadataCache[normalizedUrl];
       const expectedVideoId = getVideoIdFromUrl(url);
-      const cached = rawCached && rawCached.videoId !== undefined && rawCached.videoId === expectedVideoId ? rawCached : undefined;
+      const cached =
+        rawCached &&
+        rawCached.videoId !== undefined &&
+        rawCached.videoId === expectedVideoId &&
+        isCacheEntryUsable(rawCached)
+          ? rawCached
+          : undefined;
 
         return {
           id: tab.id || 0,

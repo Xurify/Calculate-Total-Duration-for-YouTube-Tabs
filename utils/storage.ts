@@ -13,6 +13,8 @@ export interface VideoData {
   windowId?: number;
 }
 
+export const MAX_CACHE_AGE_MS = 48 * 60 * 60 * 1000;
+
 export interface CachedMetadata {
   seconds: number;
   title: string;
@@ -22,6 +24,11 @@ export interface CachedMetadata {
   timestamp: number;
   /** When set, cache is only used when this matches the tab's video ID (avoids stale SPA metadata). */
   videoId?: string;
+}
+
+export function isCacheEntryUsable(cached: CachedMetadata | undefined): cached is CachedMetadata {
+  if (!cached) return false;
+  return cached.timestamp != null && Date.now() - cached.timestamp < MAX_CACHE_AGE_MS;
 }
 
 export function normalizeYoutubeUrl(url: string): string {

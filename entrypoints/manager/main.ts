@@ -13,6 +13,7 @@ import {
   deleteSession,
   setSessionPinned,
   updateSessionTabs,
+  isCacheEntryUsable,
   type SavedSessionTab,
   type SavedSession
 } from "../../utils/storage";
@@ -50,8 +51,59 @@ let selectedSession: SavedSession | null = null;
 /** When viewing a saved session, URLs of tabs selected in the grid/list (for remove-from-session). */
 let selectedSessionTabUrls = new Set<string>();
 
+const STORAGE_READ_SKIP_MS = 2000;
+let lastStorageLoadTime = 0;
+let lastStorageData: Awaited<ReturnType<typeof loadStorage>> | null = null;
+
+const THUMBNAIL_CACHE_MAX = 60;
+const thumbnailBlobCache = new Map<string, string>();
+
+function getThumbnailSrc(videoId: string | null, quality: string): { src: string; cacheKey: string | null } {
+  if (!videoId) return { src: "", cacheKey: null };
+  const key = `${videoId}/${quality}`;
+  const blobUrl = thumbnailBlobCache.get(key);
+  if (blobUrl) return { src: blobUrl, cacheKey: null };
+  const normalUrl = `https://i.ytimg.com/vi/${videoId}/${quality}`;
+  return { src: normalUrl, cacheKey: key };
+}
+
+function thumbnailCacheBackfill(container: HTMLElement) {
+  container.querySelectorAll<HTMLImageElement>("img[data-thumbnail-key]").forEach((img) => {
+    const key = img.getAttribute("data-thumbnail-key");
+    if (!key || thumbnailBlobCache.has(key)) return;
+    const onLoad = () => {
+      img.removeAttribute("data-thumbnail-key");
+      img.removeEventListener("load", onLoad);
+      fetch(img.src)
+        .then((r) => r.blob())
+        .then((blob) => {
+          const blobUrl = URL.createObjectURL(blob);
+          while (thumbnailBlobCache.size >= THUMBNAIL_CACHE_MAX) {
+            const oldest = thumbnailBlobCache.keys().next().value;
+            if (oldest === undefined) break;
+            const oldUrl = thumbnailBlobCache.get(oldest);
+            if (oldUrl) URL.revokeObjectURL(oldUrl);
+            thumbnailBlobCache.delete(oldest);
+          }
+          thumbnailBlobCache.set(key, blobUrl);
+        })
+        .catch(() => {});
+    };
+    img.addEventListener("load", onLoad);
+  });
+}
+
 async function fetchTabs() {
-  const storage = await loadStorage();
+  const now = Date.now();
+  const storage =
+    lastStorageData && now - lastStorageLoadTime < STORAGE_READ_SKIP_MS
+      ? lastStorageData
+      : await (async () => {
+          const s = await loadStorage();
+          lastStorageData = s;
+          lastStorageLoadTime = Date.now();
+          return s;
+        })();
   metadataCache = storage.metadataCache;
   const excludedUrls = storage.excludedUrls;
   thumbnailQuality = storage.thumbnailQuality;
@@ -78,7 +130,13 @@ async function fetchTabs() {
     const normalizedUrl = normalizeYoutubeUrl(url);
     const rawCached = metadataCache[normalizedUrl];
     const expectedVideoId = getVideoIdFromUrl(url);
-    const cached = rawCached && rawCached.videoId !== undefined && rawCached.videoId === expectedVideoId ? rawCached : undefined;
+    const cached =
+      rawCached &&
+      rawCached.videoId !== undefined &&
+      rawCached.videoId === expectedVideoId &&
+      isCacheEntryUsable(rawCached)
+        ? rawCached
+        : undefined;
 
     return {
       id: tab.id || 0,
@@ -371,19 +429,6 @@ async function probeTabs() {
   await Promise.all(activeTabPromises);
 }
 
-async function loadSessionInCurrentWindow(sessionId: string) {
-  const sessions = await getSavedSessions();
-  const session = sessions.find((s) => s.id === sessionId);
-  const tabs = session?.tabs;
-  if (!session || !Array.isArray(tabs) || tabs.length === 0) return;
-  const current = await browser.windows.getCurrent();
-  const windowId = current.id;
-  if (windowId == null) return;
-  for (const tab of tabs) {
-    await browser.tabs.create({ windowId, url: tab.url });
-  }
-}
-
 async function loadSessionInNewWindow(sessionId: string) {
   const sessions = await getSavedSessions();
   const session = sessions.find((s) => s.id === sessionId);
@@ -394,6 +439,10 @@ async function loadSessionInNewWindow(sessionId: string) {
   for (let i = 1; i < tabs.length; i++) {
     await browser.tabs.create({ windowId: win.id, url: tabs[i].url });
   }
+}
+
+function openSessionVideoInNewTab(url: string) {
+  return browser.tabs.create({ url });
 }
 
 function escapeHtml(s: string): string {
@@ -536,6 +585,7 @@ async function saveSettings() {
     groupingMode,
     sortOption
   );
+  lastStorageLoadTime = 0;
 }
 
 function renderSidebar() {
@@ -722,19 +772,9 @@ function renderMain() {
 
     if (tabsToShow.length === 0) {
       container.innerHTML = `
-      <div class="space-y-4">
-        <div class="flex flex-wrap items-center gap-2">
-          <button type="button" id="session-open-current-window" class="px-4 py-2 text-sm font-medium rounded-md bg-accent text-white hover:opacity-90 border-0 cursor-pointer transition-opacity">
-            Open in current window
-          </button>
-          <button type="button" id="session-open-new-window" class="px-4 py-2 text-sm font-medium rounded-md border border-border bg-surface-hover text-text-primary hover:bg-surface transition-colors cursor-pointer">
-            Open in New Window
-          </button>
-        </div>
-        <div class="flex flex-col items-center justify-center py-16 opacity-40">
-          <div class="text-4xl mb-4">📺</div>
-          <div>No videos found</div>
-        </div>
+      <div class="flex flex-col items-center justify-center py-16 opacity-40">
+        <div class="text-4xl mb-4">📺</div>
+        <div>No videos found</div>
       </div>
     `;
     } else {
@@ -810,32 +850,9 @@ function renderMain() {
             ? renderSessionGrid(sorted)
             : renderSessionList(sorted);
       }
-      container.innerHTML = `
-      <div class="space-y-4">
-        <div class="flex flex-wrap items-center gap-2">
-          <button type="button" id="session-open-current-window" class="px-4 py-2 text-sm font-medium rounded-md bg-accent text-white hover:opacity-90 border-0 cursor-pointer transition-opacity">
-            Open in current window
-          </button>
-          <button type="button" id="session-open-new-window" class="px-4 py-2 text-sm font-medium rounded-md border border-border bg-surface-hover text-text-primary hover:bg-surface transition-colors cursor-pointer">
-            Open in New Window
-          </button>
-        </div>
-        ${contentHtml}
-      </div>
-    `;
+      container.innerHTML = `<div class="space-y-4">${contentHtml}</div>`;
+      thumbnailCacheBackfill(container);
     }
-    const openCurrentBtn = document.getElementById("session-open-current-window");
-    const openNewBtn = document.getElementById("session-open-new-window");
-    const tabCount = session.tabs?.length ?? 0;
-    openCurrentBtn?.addEventListener("click", async () => {
-      const confirmed = await showConfirm({
-        title: "Open in current window",
-        message: `Open ${tabCount} tabs in the current window?`,
-        confirmLabel: "Open",
-      });
-      if (confirmed) await loadSessionInCurrentWindow(session.id);
-    });
-    openNewBtn?.addEventListener("click", () => loadSessionInNewWindow(session.id));
     return;
   }
 
@@ -879,6 +896,7 @@ function renderMain() {
     const sortedVideos = sortVideos(videosToShow);
     if (layoutMode === 'grid') {
       container.innerHTML = renderVideoGrid(sortedVideos);
+      thumbnailCacheBackfill(container);
     } else {
       container.innerHTML = renderVideoList(sortedVideos);
     }
@@ -947,7 +965,7 @@ function renderMain() {
           `;
     }).join('');
 
-    // Fix indeterminate states visually since HTML attribute doesn't set property
+    thumbnailCacheBackfill(container);
     setTimeout(() => {
       document.querySelectorAll('input[type="checkbox"]').forEach((element: any) => {
         if (element.hasAttribute('indeterminate')) element.indeterminate = true;
@@ -1023,7 +1041,10 @@ function renderSessionGrid(tabs: SavedSessionTab[]): string {
   const thumbQuality = thumbnailQuality === "high" ? "hqdefault.jpg" : "mqdefault.jpg";
   const cardsHtml = tabs.map((t) => {
     const videoId = getVideoIdFromUrl(t.url);
-    const thumbnailUrl = videoId ? `https://i.ytimg.com/vi/${videoId}/${thumbQuality}` : "";
+    const { src: thumbnailUrl, cacheKey: thumbnailCacheKey } = getThumbnailSrc(videoId, thumbQuality);
+    const imgAttr = thumbnailCacheKey
+      ? `src="${thumbnailUrl}" data-thumbnail-key="${thumbnailCacheKey}"`
+      : `src="${thumbnailUrl}"`;
     const title = t.title ?? "Untitled";
     const channel = t.channelName ?? "";
     const sec = t.seconds ?? 0;
@@ -1033,7 +1054,7 @@ function renderSessionGrid(tabs: SavedSessionTab[]): string {
       <div class="group relative flex flex-col rounded-lg border border-transparent overflow-hidden hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? "bg-surface-hover border-border ring-1 ring-accent/50" : ""}" data-session-tab-url="${urlAttr}">
         <div class="relative w-full aspect-video bg-surface-elevated/50 overflow-hidden session-video-click-target cursor-pointer">
           ${thumbnailUrl
-        ? `<img src="${thumbnailUrl}" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" decoding="async" alt="" />`
+        ? `<img ${imgAttr} class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" decoding="async" alt="" />`
         : `<div class="w-full h-full flex items-center justify-center text-text-muted/20"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="12" cy="12" r="3"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>`
       }
           <div class="absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-mono font-medium text-white backdrop-blur-sm">
@@ -1044,6 +1065,9 @@ function renderSessionGrid(tabs: SavedSessionTab[]): string {
             <svg class="absolute w-2.5 h-2.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
           </div>
           <div class="absolute top-1 right-1 flex gap-1 transform translate-x-2 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 transition-all duration-200">
+            <button type="button" class="p-1.5 hover:bg-black/60 bg-black/40 text-white rounded-md backdrop-blur-sm transition-colors session-open-new-tab" title="Open in new tab">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
+            </button>
             <button type="button" class="p-1.5 hover:bg-red-500/80 bg-black/40 text-white rounded-md backdrop-blur-sm transition-colors session-remove-btn" title="Remove from session">
               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
             </button>
@@ -1079,9 +1103,14 @@ function renderSessionList(tabs: SavedSessionTab[]): string {
           </div>
           <div class="text-xs font-mono text-text-muted">${formatCompact(sec)}</div>
         </div>
-        <button type="button" class="absolute right-4 p-1.5 rounded hover:bg-red-500/20 text-text-muted hover:text-red-500 transition-colors session-remove-btn" title="Remove from session">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
-        </button>
+        <div class="absolute right-4 flex items-center gap-1">
+          <button type="button" class="p-1.5 rounded hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors session-open-new-tab" title="Open in new tab">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
+          </button>
+          <button type="button" class="p-1.5 rounded hover:bg-red-500/20 text-text-muted hover:text-red-500 transition-colors session-remove-btn" title="Remove from session">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+          </button>
+        </div>
       </div>
     `;
   }).join("");
@@ -1090,20 +1119,22 @@ function renderSessionList(tabs: SavedSessionTab[]): string {
 function renderVideoGrid(videos: VideoData[]): string {
   if (videos.length === 0) return '';
 
+  const thumbQuality = thumbnailQuality === 'high' ? 'hqdefault.jpg' : 'mqdefault.jpg';
   const cardsHtml = videos.map(video => {
     const isSelected = selectedTabIds.has(video.id);
     const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
     const videoId = getVideoIdFromUrl(video.url);
-    const thumbQuality = thumbnailQuality === 'high' ? 'hqdefault.jpg' : 'mqdefault.jpg';
-    const thumbnailUrl = videoId ? `https://i.ytimg.com/vi/${videoId}/${thumbQuality}` : '';
+    const { src: thumbnailUrl, cacheKey: thumbnailCacheKey } = getThumbnailSrc(videoId, thumbQuality);
+    const imgAttr = thumbnailCacheKey
+      ? `src="${thumbnailUrl}" data-thumbnail-key="${thumbnailCacheKey}"`
+      : `src="${thumbnailUrl}"`;
 
     return `
             <div class="group relative flex flex-col rounded-lg border border-transparent overflow-hidden hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? 'bg-surface-hover border-border ring-1 ring-accent/50' : ''}" data-id="${video.id}">
                 
-                <!-- Thumbnail Area -->
                 <div class="relative w-full aspect-video bg-surface-elevated/50 overflow-hidden video-click-target cursor-pointer">
                     ${thumbnailUrl
-        ? `<img src="${thumbnailUrl}" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" decoding="async" alt="" />`
+        ? `<img ${imgAttr} class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" decoding="async" alt="" />`
         : `<div class="w-full h-full flex items-center justify-center text-text-muted/20"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="12" cy="12" r="3"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>`
       }
                     
@@ -1388,6 +1419,11 @@ function setupListeners() {
           else selectedSessionTabUrls.add(url);
           updateSelectionUI();
           render();
+          return;
+        }
+        if (target.closest(".session-open-new-tab")) {
+          event.stopPropagation();
+          openSessionVideoInNewTab(url);
           return;
         }
         if (target.closest(".session-video-click-target")) {

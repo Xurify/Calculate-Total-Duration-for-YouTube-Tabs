@@ -145,8 +145,17 @@ function setupApp() {
     currentView = "settings";
     render();
   });
-  document.getElementById("open-manager")?.addEventListener("click", () => {
-    browser.tabs.create({ url: browser.runtime.getURL("/manager.html") });
+  document.getElementById("open-manager")?.addEventListener("click", async () => {
+    const managerUrl = browser.runtime.getURL("/manager.html");
+    const tabs = await browser.tabs.query({ url: managerUrl });
+    if (tabs.length > 0 && tabs[0].id != null) {
+      await browser.tabs.update(tabs[0].id, { active: true });
+      if (tabs[0].windowId != null) {
+        await browser.windows.update(tabs[0].windowId, { focused: true });
+      }
+    } else {
+      await browser.tabs.create({ url: managerUrl });
+    }
   });
   document.getElementById("refresh-tabs")?.addEventListener("click", getYouTubeTabs);
   document.getElementById("sort-order")?.addEventListener("click", () => {

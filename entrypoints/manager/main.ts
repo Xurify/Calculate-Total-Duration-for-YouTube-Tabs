@@ -44,6 +44,12 @@ let renderTimeout: ReturnType<typeof setTimeout> | null = null;
 let searchDebounceTimeout: ReturnType<typeof setTimeout> | null = null;
 const SEARCH_DEBOUNCE_MS = 200;
 
+const VISIBILITY_REFETCH_MS = 2000;
+let lastVisibilityFetch = 0;
+
+let lastTabListFingerprint = "";
+let skippedTabListDom = false;
+
 let sidebarContextTarget: { type: "all" | "window" | "session"; windowId?: number; sessionId?: string } | null = null;
 
 /** When set, main view shows this session's tab list instead of live windows. */
@@ -86,6 +92,7 @@ function thumbnailCacheBackfill(container: HTMLElement) {
             thumbnailBlobCache.delete(oldest);
           }
           thumbnailBlobCache.set(key, blobUrl);
+          img.src = blobUrl;
         })
         .catch(() => {});
     };
@@ -93,7 +100,7 @@ function thumbnailCacheBackfill(container: HTMLElement) {
   });
 }
 
-async function fetchTabs() {
+async function fetchTabs(skipInitialRender = false) {
   const now = Date.now();
   const storage =
     lastStorageData && now - lastStorageLoadTime < STORAGE_READ_SKIP_MS
@@ -177,10 +184,9 @@ async function fetchTabs() {
     })
     .sort((a, b) => b.tabs.length - a.tabs.length);
 
-  render();
+  if (!skipInitialRender) render();
   await probeTabs();
 
-  // After probing: auto-fetch durations for any tab still missing it (suspended or probe failed). Background skips when cache is fresh.
   const tabsWithoutDuration = allVideos.filter((v) => v.seconds === 0 && !v.isLive);
   if (tabsWithoutDuration.length > 0 && Date.now() - lastSyncTime >= SYNC_COOLDOWN_MS) {
     lastSyncTime = Date.now();
@@ -230,7 +236,6 @@ async function probeTabs() {
             videoId: expectedVideoId ?? undefined,
           });
         }
-        render();
         return;
       }
     } catch {
@@ -379,7 +384,6 @@ async function probeTabs() {
               if (video.seconds > 0 || video.isLive) {
                 requestMetadataUpdate(video.url, { seconds: video.seconds, title: video.title, channelName: video.channelName, currentTime: video.currentTime, isLive: video.isLive, videoId: expectedVideoId ?? undefined });
               }
-              render();
               return true;
             }
             return false;
@@ -419,7 +423,6 @@ async function probeTabs() {
           }
           
         }
-        render();
       }
     } catch (error) {
       // Ignore errors (permissions, closed tabs, etc)
@@ -427,6 +430,7 @@ async function probeTabs() {
   });
 
   await Promise.all(activeTabPromises);
+  render();
 }
 
 async function loadSessionInNewWindow(sessionId: string) {
@@ -561,21 +565,6 @@ function showConfirm(options: ConfirmOptions): Promise<boolean> {
 }
 
 async function saveSettings() {
-  // We need to pass all arguments to match signature, but we can rely on current global state
-  // To do this safely without re-reading storage every time (which we do in loadStorage anyway), 
-  // we should ideally keep a local state object.
-  // However, saveStorageUtil needs videoData for excludedUrls. 
-  // We will just pass empty videoData since saveStorage filters it. 
-  // WAIT: saveStorage OVERWRITES excludedUrls if we pass empty list?
-  // Let's check storage.ts.  
-  // "const excludedUrls = videoData.filter((video) => video.excluded).map((video) => video.url);"
-  // "await browser.storage.local.set(data);" - and data includes excludedUrls.
-  // This wipes excluded URLs if we pass []. 
-  // CRITICAL FIX: We need to read current storage or pass allVideos.
-
-  // Better approach: Update saveStorage in storage.ts to only update provided keys? 
-  // Or just pass allVideos here.
-
   const storage = await loadStorage();
   await saveStorageUtil(
     allVideos,
@@ -664,7 +653,6 @@ function sortVideos(videos: VideoData[]): VideoData[] {
 const SYNC_COOLDOWN_MS = 30_000;
 let lastSyncTime = 0;
 
-/** Debounce tab-event-driven fetch so opening many tabs (e.g. "Open in New Window") doesn't re-render the sidebar repeatedly. */
 let fetchTabsFromEventsTimeout: ReturnType<typeof setTimeout> | null = null;
 const FETCH_TABS_DEBOUNCE_MS = 400;
 
@@ -672,11 +660,201 @@ function scheduleFetchTabsFromEvents() {
   if (fetchTabsFromEventsTimeout != null) clearTimeout(fetchTabsFromEventsTimeout);
   fetchTabsFromEventsTimeout = setTimeout(() => {
     fetchTabsFromEventsTimeout = null;
+    if (Date.now() - lastVisibilityFetch < VISIBILITY_REFETCH_MS) return;
     fetchTabs();
   }, FETCH_TABS_DEBOUNCE_MS);
 }
 
+function tabListFingerprint(): string {
+  if (selectedSession) {
+    const session = selectedSession;
+    let tabsToShow: SavedSessionTab[] = session.tabs ?? [];
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      tabsToShow = tabsToShow.filter(
+        (t) =>
+          (t.title ?? "").toLowerCase().includes(q) ||
+          (t.channelName ?? "").toLowerCase().includes(q)
+      );
+    }
+    const state = [
+      "session",
+      session.id,
+      session.name,
+      String(tabsToShow.length),
+      searchQuery,
+      groupingMode,
+      layoutMode,
+      sortOption,
+      thumbnailQuality,
+      [...collapsedGroups].sort().join(","),
+      [...selectedSessionTabUrls].sort().join("|"),
+    ].join("\x1f");
+    if (tabsToShow.length === 0) return `${state}\x1fempty`;
+    if (groupingMode === "channel") {
+      const channels = new Map<string, SavedSessionTab[]>();
+      tabsToShow.forEach((t) => {
+        const name = t.channelName ?? "Unknown Channel";
+        if (!channels.has(name)) channels.set(name, []);
+        channels.get(name)!.push(t);
+      });
+      let sortedGroups = Array.from(channels.entries());
+      if (sortOption === "channel-asc") {
+        sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
+      } else if (sortOption === "duration-desc") {
+        sortedGroups.sort((a, b) => {
+          const dA = a[1].reduce((acc, t) => acc + (t.seconds ?? 0), 0);
+          const dB = b[1].reduce((acc, t) => acc + (t.seconds ?? 0), 0);
+          return dB - dA;
+        });
+      } else if (sortOption === "duration-asc") {
+        sortedGroups.sort((a, b) => {
+          const dA = a[1].reduce((acc, t) => acc + (t.seconds ?? 0), 0);
+          const dB = b[1].reduce((acc, t) => acc + (t.seconds ?? 0), 0);
+          return dA - dB;
+        });
+      }
+      const groupSig = sortedGroups
+        .map(([channel, tabList]) => {
+          const collapsed = collapsedGroups.has(channel);
+          const sortedTabs = sortSessionTabs(tabList);
+          const sig = sortedTabs
+            .map((t) => `${t.url}|${t.title}|${t.channelName}|${t.seconds}`)
+            .join(";");
+          return `${channel}:${collapsed}:${sig}`;
+        })
+        .join("||");
+      return `${state}\x1fcg:${groupSig}`;
+    }
+    const sorted = sortSessionTabs(tabsToShow);
+    const vidSig = sorted.map((t) => `${t.url}|${t.title}|${t.channelName}|${t.seconds}`).join(";");
+    return `${state}\x1fflat:${vidSig}`;
+  }
+
+  let videosToShow: VideoData[] = [];
+  if (currentWindowId === "all") {
+    videosToShow = allVideos;
+  } else {
+    const group = windowGroups.find((w) => w.id === currentWindowId);
+    if (group) videosToShow = group.tabs;
+    else videosToShow = [];
+  }
+  if (searchQuery) {
+    const searchQueryLower = searchQuery.toLowerCase();
+    videosToShow = videosToShow.filter(
+      (video) =>
+        video.title.toLowerCase().includes(searchQueryLower) ||
+        video.channelName.toLowerCase().includes(searchQueryLower)
+    );
+  }
+  const state = [
+    "live",
+    String(currentWindowId),
+    searchQuery,
+    groupingMode,
+    layoutMode,
+    sortOption,
+    thumbnailQuality,
+    [...collapsedGroups].sort().join(","),
+    [...selectedTabIds].sort((a, b) => a - b).join(","),
+  ].join("\x1f");
+  if (videosToShow.length === 0) return `${state}\x1fempty`;
+  if (groupingMode === "none") {
+    const sortedVideos = sortVideos(videosToShow);
+    const vidSig = sortedVideos
+      .map(
+        (v) =>
+          `${v.id}|${v.url}|${v.title}|${v.channelName}|${v.seconds}|${v.isLive ? 1 : 0}`
+      )
+      .join(";");
+    return `${state}\x1fnone:${layoutMode}:${vidSig}`;
+  }
+  const channels = new Map<string, VideoData[]>();
+  videosToShow.forEach((video) => {
+    const name = video.channelName || "Unknown Channel";
+    if (!channels.has(name)) channels.set(name, []);
+    channels.get(name)!.push(video);
+  });
+  let sortedGroups = Array.from(channels.entries());
+  if (sortOption === "channel-asc") {
+    sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
+  } else if (sortOption === "duration-desc") {
+    sortedGroups.sort((a, b) => {
+      const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
+      const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
+      return durationB - durationA;
+    });
+  } else if (sortOption === "duration-asc") {
+    sortedGroups.sort((a, b) => {
+      const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
+      const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
+      return durationA - durationB;
+    });
+  }
+  const groupSig = sortedGroups
+    .map(([channel, videos]) => {
+      const collapsed = collapsedGroups.has(channel);
+      const sortedGroupVideos = sortVideos(videos);
+      const allSelected = videos.every((video) => selectedTabIds.has(video.id));
+      const someSelected = !allSelected && videos.some((video) => selectedTabIds.has(video.id));
+      const vidSig = sortedGroupVideos
+        .map(
+          (v) =>
+            `${v.id}|${v.url}|${v.title}|${v.channelName}|${v.seconds}|${v.isLive ? 1 : 0}`
+        )
+        .join(";");
+      return `${channel}:${collapsed}:${allSelected}:${someSelected}:${vidSig}`;
+    })
+    .join("||");
+  return `${state}\x1fgrp:${layoutMode}:${groupSig}`;
+}
+
+function updateLiveTabListCardsFromState() {
+  if (selectedSession) return;
+  document.querySelectorAll("#tab-list [data-id]").forEach((node) => {
+    const id = parseInt((node as HTMLElement).dataset.id || "0", 10);
+    const video = allVideos.find((v) => v.id === id);
+    if (!video) return;
+    const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
+
+    const titleEl = node.querySelector(".manager-card-title");
+    if (titleEl) {
+      titleEl.textContent = video.title;
+      (titleEl as HTMLElement).title = video.title;
+    }
+    const channelEl = node.querySelector(".manager-card-channel");
+    if (channelEl) channelEl.textContent = video.channelName;
+
+    const durEl = node.querySelector(".manager-card-duration");
+    if (durEl) durEl.textContent = video.isLive ? "LIVE" : formatCompact(video.seconds);
+
+    const progWrap = node.querySelector(".manager-card-progress-wrap") as HTMLElement | null;
+    const progInner = node.querySelector(".manager-card-progress") as HTMLElement | null;
+    if (progWrap && progInner) {
+      if (video.isLive || video.seconds <= 0) {
+        progWrap.style.opacity = "0";
+        progInner.style.width = "0%";
+      } else {
+        progWrap.style.opacity = watchedPercent > 0 ? "1" : "0";
+        progInner.style.width = `${watchedPercent}%`;
+      }
+    }
+
+    const curEl = node.querySelector(".manager-card-time-current");
+    const totEl = node.querySelector(".manager-card-time-total");
+    const listBar = node.querySelector(".manager-card-list-progress") as HTMLElement | null;
+    if (curEl && totEl) {
+      curEl.textContent = formatCompact(video.currentTime);
+      totEl.textContent = formatCompact(video.seconds);
+      curEl.classList.toggle("text-text-primary", watchedPercent > 0);
+      curEl.classList.toggle("text-text-muted", watchedPercent <= 0);
+    }
+    if (listBar) listBar.style.width = `${watchedPercent}%`;
+  });
+}
+
 function renderMain() {
+  skippedTabListDom = false;
   const container = document.getElementById("tab-list");
   const headerTitle = document.getElementById("current-view-title");
   const headerStats = document.getElementById("current-view-stats");
@@ -770,6 +948,9 @@ function renderMain() {
     headerTitle.innerText = session.name;
     headerStats.innerText = `${tabsToShow.length} videos · ${formatTime(totalSec)} total duration`;
 
+    const fpSession = tabListFingerprint();
+    if (fpSession === lastTabListFingerprint) return;
+
     if (tabsToShow.length === 0) {
       container.innerHTML = `
       <div class="flex flex-col items-center justify-center py-16 opacity-40">
@@ -777,6 +958,7 @@ function renderMain() {
         <div>No videos found</div>
       </div>
     `;
+      lastTabListFingerprint = fpSession;
     } else {
       let contentHtml: string;
       if (groupingMode === "channel") {
@@ -852,6 +1034,7 @@ function renderMain() {
       }
       container.innerHTML = `<div class="space-y-4">${contentHtml}</div>`;
       thumbnailCacheBackfill(container);
+      lastTabListFingerprint = fpSession;
     }
     return;
   }
@@ -882,6 +1065,12 @@ function renderMain() {
   const duration = videosToShow.reduce((acc, video) => acc + video.seconds, 0);
   headerStats.innerText = `${videosToShow.length} videos · ${formatTime(duration)} total duration`;
 
+  const fpLive = tabListFingerprint();
+  if (fpLive === lastTabListFingerprint) {
+    skippedTabListDom = true;
+    return;
+  }
+
   if (videosToShow.length === 0) {
     container.innerHTML = `
       <div class="flex flex-col items-center justify-center h-full opacity-40">
@@ -889,6 +1078,7 @@ function renderMain() {
         <div>No videos found</div>
       </div>
     `;
+    lastTabListFingerprint = fpLive;
     return;
   }
 
@@ -900,6 +1090,7 @@ function renderMain() {
     } else {
       container.innerHTML = renderVideoList(sortedVideos);
     }
+    lastTabListFingerprint = fpLive;
   } else {
     const channels = new Map<string, VideoData[]>();
     videosToShow.forEach(video => {
@@ -941,7 +1132,6 @@ function renderMain() {
                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
                     </button>
                     
-                     <!-- Group Checkbox -->
                     <div class="relative flex items-center justify-center w-4 h-4 cursor-pointer group-selection-toggle" data-group="${channel}">
                       <input type="checkbox" class="peer appearance-none w-3.5 h-3.5 rounded border border-text-muted/40 checked:bg-accent checked:border-accent transition-colors cursor-pointer" ${allSelected ? 'checked' : ''} ${someSelected ? 'indeterminate' : ''}>
                        <svg class="absolute w-2 h-2 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -971,6 +1161,7 @@ function renderMain() {
         if (element.hasAttribute('indeterminate')) element.indeterminate = true;
       });
     }, 0);
+    lastTabListFingerprint = fpLive;
   }
 }
 
@@ -988,18 +1179,18 @@ function renderVideoList(videos: VideoData[]): string {
 
         <div class="flex-1 min-w-0 cursor-pointer video-click-target pr-16">
            <div class="flex items-baseline gap-2 mb-1">
-             <h3 class="text-sm font-medium text-text-primary truncate" title="${video.title}">${video.title}</h3>
-             <span class="text-[10px] text-text-muted truncate uppercase tracking-tight">${video.channelName}</span>
+             <h3 class="manager-card-title text-sm font-medium text-text-primary truncate" title="${video.title}">${video.title}</h3>
+             <span class="manager-card-channel text-[10px] text-text-muted truncate uppercase tracking-tight">${video.channelName}</span>
            </div>
            
            <div class="flex items-center gap-3 w-full max-w-md bg-surface-elevated/50 py-1 px-2 rounded-md">
              <div class="text-xs font-mono text-text-secondary whitespace-nowrap">
-                <span class="${watchedPercent > 0 ? "text-text-primary" : "text-text-muted"}">${formatCompact(video.currentTime)}</span>
+                <span class="manager-card-time-current ${watchedPercent > 0 ? "text-text-primary" : "text-text-muted"}">${formatCompact(video.currentTime)}</span>
                 <span class="mx-0.5 opacity-30">/</span>
-                <span>${formatCompact(video.seconds)}</span>
+                <span class="manager-card-time-total">${formatCompact(video.seconds)}</span>
              </div>
              <div class="flex-1 h-1 bg-surface rounded-full overflow-hidden">
-                <div class="h-full bg-accent opacity-80" style="width: ${watchedPercent}%"></div>
+                <div class="manager-card-list-progress h-full bg-accent opacity-80" style="width: ${watchedPercent}%"></div>
              </div>
            </div>
         </div>
@@ -1054,7 +1245,7 @@ function renderSessionGrid(tabs: SavedSessionTab[]): string {
       <div class="group relative flex flex-col rounded-lg border border-transparent overflow-hidden hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? "bg-surface-hover border-border ring-1 ring-accent/50" : ""}" data-session-tab-url="${urlAttr}">
         <div class="relative w-full aspect-video bg-surface-elevated/50 overflow-hidden session-video-click-target cursor-pointer">
           ${thumbnailUrl
-        ? `<img ${imgAttr} class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" decoding="async" alt="" />`
+        ? `<img ${imgAttr} class="manager-card-thumb w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="eager" decoding="async" alt="" />`
         : `<div class="w-full h-full flex items-center justify-center text-text-muted/20"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="12" cy="12" r="3"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>`
       }
           <div class="absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-mono font-medium text-white backdrop-blur-sm">
@@ -1134,28 +1325,23 @@ function renderVideoGrid(videos: VideoData[]): string {
                 
                 <div class="relative w-full aspect-video bg-surface-elevated/50 overflow-hidden video-click-target cursor-pointer">
                     ${thumbnailUrl
-        ? `<img ${imgAttr} class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" decoding="async" alt="" />`
+        ? `<img ${imgAttr} class="manager-card-thumb w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="eager" decoding="async" alt="" />`
         : `<div class="w-full h-full flex items-center justify-center text-text-muted/20"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="12" cy="12" r="3"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>`
       }
                     
-                    <!-- Duration Badge -->
-                    <div class="absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-mono font-medium text-white backdrop-blur-sm">
+                    <div class="manager-card-duration absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-mono font-medium text-white backdrop-blur-sm">
                         ${video.isLive ? 'LIVE' : formatCompact(video.seconds)}
                     </div>
 
-                    <!-- Progress Bar (Overlay at bottom of thumb) -->
-                    ${watchedPercent > 0 ? `
-                    <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-surface/30">
-                        <div class="h-full bg-accent" style="width: ${watchedPercent}%"></div>
-                    </div>` : ''}
+                    <div class="manager-card-progress-wrap absolute bottom-0 left-0 right-0 h-0.5 bg-surface/30 transition-opacity" style="opacity: ${!video.isLive && video.seconds > 0 && watchedPercent > 0 ? 1 : 0}">
+                        <div class="manager-card-progress h-full bg-accent" style="width: ${watchedPercent}%"></div>
+                    </div>
 
-                    <!-- Selection Checkbox (Top Left) -->
                     <div class="absolute top-2 left-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity ${isSelected ? 'opacity-100' : ''} selection-toggle flex items-center justify-center w-5 h-5">
                         <input type="checkbox" class="peer appearance-none w-4 h-4 rounded border border-white/60 checked:bg-accent checked:border-accent bg-black/40 backdrop-blur-sm transition-colors cursor-pointer" ${isSelected ? 'checked' : ''}>
                         <svg class="absolute w-2.5 h-2.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                     </div>
 
-                    <!-- Hover Actions (Top Right) -->
                     <div class="absolute top-1 right-1 flex gap-1 transform translate-x-2 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 transition-all duration-200">
                          <button class="p-1.5 bg-black/40 hover:bg-accent text-white rounded-md backdrop-blur-sm border border-white/10 hover:border-accent transition-all duration-200 jump-btn" title="Go to Tab">
                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
@@ -1166,11 +1352,10 @@ function renderVideoGrid(videos: VideoData[]): string {
                     </div>
                 </div>
 
-                <!-- Info Area -->
                 <div class="p-2 video-click-target cursor-pointer">
-                    <h3 class="text-xs font-medium text-text-primary line-clamp-2 leading-snug mb-1 min-h-[2.5em]" title="${video.title}">${video.title}</h3>
+                    <h3 class="manager-card-title text-xs font-medium text-text-primary line-clamp-2 leading-snug mb-1 min-h-[2.5em]" title="${video.title}">${video.title}</h3>
                     <div class="flex items-center justify-between text-[10px] text-text-muted">
-                        <span class="truncate hover:text-text-secondary transition-colors">${video.channelName}</span>
+                        <span class="manager-card-channel truncate hover:text-text-secondary transition-colors">${video.channelName}</span>
                     </div>
                 </div>
             </div>
@@ -1314,7 +1499,6 @@ function setupListeners() {
     }
   });
 
-  // Sidebar: use event delegation so saved sessions (loaded async) work
   document.getElementById("window-list")?.addEventListener("click", async (event) => {
     const item = (event.target as HTMLElement).closest(".sidebar-item");
     if (!item) return;
@@ -1385,8 +1569,6 @@ function setupListeners() {
     menu.style.top = `${y}px`;
   });
 
-  // Tab list: one delegated click handler instead of hundreds of per-element listeners
-  // Session view: handle remove/selection on session cards first
   document.getElementById("tab-list")?.addEventListener("click", async (event) => {
     const target = event.target as HTMLElement;
     const sessionRow = target.closest("[data-session-tab-url]") as HTMLElement | null;
@@ -1580,7 +1762,6 @@ function setupListeners() {
     updateSelectionUI();
   });
 
-  // Context menu actions (right-click sidebar)
   document.getElementById("ctx-save")?.addEventListener("click", async () => {
     const t = sidebarContextTarget;
     document.getElementById("sidebar-context-menu")?.classList.add("hidden");
@@ -1727,13 +1908,13 @@ function render() {
     renderTimeout = null;
     renderSidebar();
     renderMain();
+    if (!selectedSession && skippedTabListDom) updateLiveTabListCardsFromState();
     updateSelectionUI();
     attachDynamicListeners();
   }, 0);
 }
 
 function attachDynamicListeners() {
-  // Tab list uses delegated click on #tab-list; only fix indeterminate checkbox property (HTML attribute doesn't set it)
   setTimeout(() => {
     document.querySelectorAll("#tab-list input[type='checkbox']").forEach((el: Element) => {
       const input = el as HTMLInputElement;
@@ -1752,16 +1933,13 @@ document.addEventListener("DOMContentLoaded", () => {
     if (changeInfo.status === 'complete' || changeInfo.title || changeInfo.url) scheduleFetchTabsFromEvents();
   });
 
-  const VISIBILITY_REFETCH_MS = 2000;
-  let lastVisibilityFetch = 0;
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
     if (Date.now() - lastVisibilityFetch < VISIBILITY_REFETCH_MS) return;
     lastVisibilityFetch = Date.now();
-    fetchTabs();
+    fetchTabs(true);
   });
 
-  // tab-synced: update in-memory only; sync-complete does one render to avoid N renders for N tabs
   browser.runtime.onMessage.addListener((message) => {
     if (message.action === "tab-synced") {
       const video = allVideos.find((v) => v.id === message.tabId);
@@ -1772,8 +1950,6 @@ document.addEventListener("DOMContentLoaded", () => {
         video.isLive = message.metadata.isLive || false;
       }
     }
-    if (message.action === "sync-complete") {
-      render();
-    }
+    if (message.action === "sync-complete") render();
   });
 });

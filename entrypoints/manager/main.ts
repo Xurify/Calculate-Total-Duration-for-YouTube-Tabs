@@ -81,7 +81,7 @@ function thumbnailCacheBackfill(container: HTMLElement) {
       img.removeAttribute("data-thumbnail-key");
       img.removeEventListener("load", onLoad);
       fetch(img.src)
-        .then((r) => r.blob())
+        .then((response) => response.blob())
         .then((blob) => {
           const blobUrl = URL.createObjectURL(blob);
           while (thumbnailBlobCache.size >= THUMBNAIL_CACHE_MAX) {
@@ -106,10 +106,10 @@ async function fetchTabs(skipInitialRender = false) {
     lastStorageData && now - lastStorageLoadTime < STORAGE_READ_SKIP_MS
       ? lastStorageData
       : await (async () => {
-          const s = await loadStorage();
-          lastStorageData = s;
+          const storage = await loadStorage();
+          lastStorageData = storage;
           lastStorageLoadTime = Date.now();
-          return s;
+          return storage;
         })();
   metadataCache = storage.metadataCache;
   const excludedUrls = storage.excludedUrls;
@@ -187,13 +187,13 @@ async function fetchTabs(skipInitialRender = false) {
   if (!skipInitialRender) render();
   await probeTabs();
 
-  const tabsWithoutDuration = allVideos.filter((v) => v.seconds === 0 && !v.isLive);
+  const tabsWithoutDuration = allVideos.filter((video) => video.seconds === 0 && !video.isLive);
   if (tabsWithoutDuration.length > 0 && Date.now() - lastSyncTime >= SYNC_COOLDOWN_MS) {
     lastSyncTime = Date.now();
     browser.runtime
       .sendMessage({
         action: "sync-all",
-        tabs: tabsWithoutDuration.map((v) => ({ id: v.id, url: v.url })),
+        tabs: tabsWithoutDuration.map((video) => ({ id: video.id, url: video.url })),
       })
       .catch(() => {});
   }
@@ -214,7 +214,7 @@ async function probeTabs() {
         contentMeta.title &&
         (contentMeta.seconds > 0 || contentMeta.isLive)
       ) {
-        const isPlaceholder = (t: string) => !t || t === "YouTube Video" || t === "YouTube";
+        const isPlaceholder = (title: string) => !title || title === "YouTube Video" || title === "YouTube";
         video.title = isPlaceholder(contentMeta.title) ? (video.title || contentMeta.title) : contentMeta.title;
         video.channelName = contentMeta.channelName || "";
         video.seconds = contentMeta.seconds;
@@ -321,8 +321,8 @@ async function probeTabs() {
             if (duration === 0 && window.location.pathname.startsWith("/shorts/")) {
               try {
                 // @ts-ignore
-                const d = window.ytInitialData;
-                const ms = d && d.contents && d.contents.reelWatchEndpoint && d.contents.reelWatchEndpoint.approxDurationMs;
+                const initialData = window.ytInitialData;
+                const ms = initialData && initialData.contents && initialData.contents.reelWatchEndpoint && initialData.contents.reelWatchEndpoint.approxDurationMs;
                 if (ms != null && !isNaN(ms)) duration = Number(ms) / 1000;
               } catch (_) { }
             }
@@ -389,7 +389,7 @@ async function probeTabs() {
             return false;
           };
           if (await tryContentScript()) return;
-          await new Promise((r) => setTimeout(r, 500));
+          await new Promise((resolve) => setTimeout(resolve, 500));
           if (await tryContentScript()) return;
           return;
         }
@@ -435,7 +435,7 @@ async function probeTabs() {
 
 async function loadSessionInNewWindow(sessionId: string) {
   const sessions = await getSavedSessions();
-  const session = sessions.find((s) => s.id === sessionId);
+  const session = sessions.find((saved) => saved.id === sessionId);
   const tabs = session?.tabs;
   if (!session || !Array.isArray(tabs) || tabs.length === 0) return;
   const win = await browser.windows.create({ url: tabs[0].url });
@@ -449,9 +449,9 @@ function openSessionVideoInNewTab(url: string) {
   return browser.tabs.create({ url });
 }
 
-function escapeHtml(s: string): string {
-  if (s.length === 0) return s;
-  return s
+function escapeHtml(raw: string): string {
+  if (raw.length === 0) return raw;
+  return raw
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -504,12 +504,12 @@ function showNameSessionModal(defaultName: string): Promise<string | null> {
     };
     const onCancel = () => close(null);
     const onSave = () => close((input.value?.trim() || defaultName));
-    const onBackdrop = (e: MouseEvent) => {
-      if ((e.target as HTMLElement).id === "name-session-modal") close(null);
+    const onBackdrop = (event: MouseEvent) => {
+      if ((event.target as HTMLElement).id === "name-session-modal") close(null);
     };
-    const onKeydown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close(null);
-      if (e.key === "Enter") onSave();
+    const onKeydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close(null);
+      if (event.key === "Enter") onSave();
     };
     cancelBtn.addEventListener("click", onCancel);
     saveBtn.addEventListener("click", onSave);
@@ -553,8 +553,8 @@ function showConfirm(options: ConfirmOptions): Promise<boolean> {
     };
     const onCancel = () => close(false);
     const onOk = () => close(true);
-    const onBackdrop = (e: MouseEvent) => {
-      if ((e.target as HTMLElement).id === "confirm-modal") close(false);
+    const onBackdrop = (event: MouseEvent) => {
+      if ((event.target as HTMLElement).id === "confirm-modal") close(false);
     };
     cancelBtn.addEventListener("click", onCancel);
     okBtn.addEventListener("click", onOk);
@@ -621,14 +621,14 @@ async function refreshSavedSessionsSidebar() {
   const isSelected = (sid: string) => selectedSession?.id === sid;
   container.innerHTML = sessions
     .map(
-      (s) => {
-        const active = isSelected(s.id);
+      (savedSession) => {
+        const active = isSelected(savedSession.id);
         return `
-    <button type="button" class="sidebar-item sidebar-item-session w-full text-left px-3 py-2 rounded-md mb-1 flex items-center gap-2 transition-colors ${active ? "bg-surface-hover text-text-primary" : "text-text-muted hover:bg-surface-hover/50 hover:text-text-secondary"}" data-sidebar-type="session" data-session-id="${s.id}" data-pinned="${s.pinned ? "1" : "0"}">
-      ${s.pinned ? `<svg class="shrink-0 w-3 h-3 text-accent" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>` : ""}
+    <button type="button" class="sidebar-item sidebar-item-session w-full text-left px-3 py-2 rounded-md mb-1 flex items-center gap-2 transition-colors ${active ? "bg-surface-hover text-text-primary" : "text-text-muted hover:bg-surface-hover/50 hover:text-text-secondary"}" data-sidebar-type="session" data-session-id="${savedSession.id}" data-pinned="${savedSession.pinned ? "1" : "0"}">
+      ${savedSession.pinned ? `<svg class="shrink-0 w-3 h-3 text-accent" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>` : ""}
       <div class="truncate min-w-0 flex-1">
-        <div class="text-xs font-semibold truncate">${escapeHtml(s.name)}</div>
-        <div class="text-[10px] font-mono opacity-60">${(s.tabs?.length ?? 0)} tabs</div>
+        <div class="text-xs font-semibold truncate">${escapeHtml(savedSession.name)}</div>
+        <div class="text-[10px] font-mono opacity-60">${(savedSession.tabs?.length ?? 0)} tabs</div>
       </div>
     </button>
   `;
@@ -670,11 +670,11 @@ function tabListFingerprint(): string {
     const session = selectedSession;
     let tabsToShow: SavedSessionTab[] = session.tabs ?? [];
     if (searchQuery) {
-      const q = searchQuery.toLowerCase();
+      const searchLower = searchQuery.toLowerCase();
       tabsToShow = tabsToShow.filter(
-        (t) =>
-          (t.title ?? "").toLowerCase().includes(q) ||
-          (t.channelName ?? "").toLowerCase().includes(q)
+        (tab) =>
+          (tab.title ?? "").toLowerCase().includes(searchLower) ||
+          (tab.channelName ?? "").toLowerCase().includes(searchLower)
       );
     }
     const state = [
@@ -693,25 +693,25 @@ function tabListFingerprint(): string {
     if (tabsToShow.length === 0) return `${state}\x1fempty`;
     if (groupingMode === "channel") {
       const channels = new Map<string, SavedSessionTab[]>();
-      tabsToShow.forEach((t) => {
-        const name = t.channelName ?? "Unknown Channel";
+      tabsToShow.forEach((tab) => {
+        const name = tab.channelName ?? "Unknown Channel";
         if (!channels.has(name)) channels.set(name, []);
-        channels.get(name)!.push(t);
+        channels.get(name)!.push(tab);
       });
       let sortedGroups = Array.from(channels.entries());
       if (sortOption === "channel-asc") {
         sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
       } else if (sortOption === "duration-desc") {
         sortedGroups.sort((a, b) => {
-          const dA = a[1].reduce((acc, t) => acc + (t.seconds ?? 0), 0);
-          const dB = b[1].reduce((acc, t) => acc + (t.seconds ?? 0), 0);
-          return dB - dA;
+          const durationA = a[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+          const durationB = b[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+          return durationB - durationA;
         });
       } else if (sortOption === "duration-asc") {
         sortedGroups.sort((a, b) => {
-          const dA = a[1].reduce((acc, t) => acc + (t.seconds ?? 0), 0);
-          const dB = b[1].reduce((acc, t) => acc + (t.seconds ?? 0), 0);
-          return dA - dB;
+          const durationA = a[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+          const durationB = b[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+          return durationA - durationB;
         });
       }
       const groupSig = sortedGroups
@@ -719,7 +719,7 @@ function tabListFingerprint(): string {
           const collapsed = collapsedGroups.has(channel);
           const sortedTabs = sortSessionTabs(tabList);
           const sig = sortedTabs
-            .map((t) => `${t.url}|${t.title}|${t.channelName}|${t.seconds}`)
+            .map((tab) => `${tab.url}|${tab.title}|${tab.channelName}|${tab.seconds}`)
             .join(";");
           return `${channel}:${collapsed}:${sig}`;
         })
@@ -727,7 +727,7 @@ function tabListFingerprint(): string {
       return `${state}\x1fcg:${groupSig}`;
     }
     const sorted = sortSessionTabs(tabsToShow);
-    const vidSig = sorted.map((t) => `${t.url}|${t.title}|${t.channelName}|${t.seconds}`).join(";");
+    const vidSig = sorted.map((tab) => `${tab.url}|${tab.title}|${tab.channelName}|${tab.seconds}`).join(";");
     return `${state}\x1fflat:${vidSig}`;
   }
 
@@ -735,7 +735,7 @@ function tabListFingerprint(): string {
   if (currentWindowId === "all") {
     videosToShow = allVideos;
   } else {
-    const group = windowGroups.find((w) => w.id === currentWindowId);
+    const group = windowGroups.find((windowGroup) => windowGroup.id === currentWindowId);
     if (group) videosToShow = group.tabs;
     else videosToShow = [];
   }
@@ -763,8 +763,8 @@ function tabListFingerprint(): string {
     const sortedVideos = sortVideos(videosToShow);
     const vidSig = sortedVideos
       .map(
-        (v) =>
-          `${v.id}|${v.url}|${v.title}|${v.channelName}|${v.seconds}|${v.isLive ? 1 : 0}`
+        (video) =>
+          `${video.id}|${video.url}|${video.title}|${video.channelName}|${video.seconds}|${video.isLive ? 1 : 0}`
       )
       .join(";");
     return `${state}\x1fnone:${layoutMode}:${vidSig}`;
@@ -799,8 +799,8 @@ function tabListFingerprint(): string {
       const someSelected = !allSelected && videos.some((video) => selectedTabIds.has(video.id));
       const vidSig = sortedGroupVideos
         .map(
-          (v) =>
-            `${v.id}|${v.url}|${v.title}|${v.channelName}|${v.seconds}|${v.isLive ? 1 : 0}`
+          (video) =>
+            `${video.id}|${video.url}|${video.title}|${video.channelName}|${video.seconds}|${video.isLive ? 1 : 0}`
         )
         .join(";");
       return `${channel}:${collapsed}:${allSelected}:${someSelected}:${vidSig}`;
@@ -811,25 +811,25 @@ function tabListFingerprint(): string {
 
 function updateLiveTabListCardsFromState() {
   if (selectedSession) return;
-  document.querySelectorAll("#tab-list [data-id]").forEach((node) => {
-    const id = parseInt((node as HTMLElement).dataset.id || "0", 10);
-    const video = allVideos.find((v) => v.id === id);
+  document.querySelectorAll("#tab-list [data-id]").forEach((card) => {
+    const id = parseInt((card as HTMLElement).dataset.id || "0", 10);
+    const video = allVideos.find((candidate) => candidate.id === id);
     if (!video) return;
     const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
 
-    const titleEl = node.querySelector(".manager-card-title");
+    const titleEl = card.querySelector(".manager-card-title");
     if (titleEl) {
       titleEl.textContent = video.title;
       (titleEl as HTMLElement).title = video.title;
     }
-    const channelEl = node.querySelector(".manager-card-channel");
+    const channelEl = card.querySelector(".manager-card-channel");
     if (channelEl) channelEl.textContent = video.channelName;
 
-    const durEl = node.querySelector(".manager-card-duration");
+    const durEl = card.querySelector(".manager-card-duration");
     if (durEl) durEl.textContent = video.isLive ? "LIVE" : formatCompact(video.seconds);
 
-    const progWrap = node.querySelector(".manager-card-progress-wrap") as HTMLElement | null;
-    const progInner = node.querySelector(".manager-card-progress") as HTMLElement | null;
+    const progWrap = card.querySelector(".manager-card-progress-wrap") as HTMLElement | null;
+    const progInner = card.querySelector(".manager-card-progress") as HTMLElement | null;
     if (progWrap && progInner) {
       if (video.isLive || video.seconds <= 0) {
         progWrap.style.opacity = "0";
@@ -840,9 +840,9 @@ function updateLiveTabListCardsFromState() {
       }
     }
 
-    const curEl = node.querySelector(".manager-card-time-current");
-    const totEl = node.querySelector(".manager-card-time-total");
-    const listBar = node.querySelector(".manager-card-list-progress") as HTMLElement | null;
+    const curEl = card.querySelector(".manager-card-time-current");
+    const totEl = card.querySelector(".manager-card-time-total");
+    const listBar = card.querySelector(".manager-card-list-progress") as HTMLElement | null;
     if (curEl && totEl) {
       curEl.textContent = formatCompact(video.currentTime);
       totEl.textContent = formatCompact(video.seconds);
@@ -937,14 +937,14 @@ function renderMain() {
     const session = selectedSession;
     let tabsToShow: SavedSessionTab[] = session.tabs ?? [];
     if (searchQuery) {
-      const q = searchQuery.toLowerCase();
+      const searchLower = searchQuery.toLowerCase();
       tabsToShow = tabsToShow.filter(
-        (t) =>
-          (t.title ?? "").toLowerCase().includes(q) ||
-          (t.channelName ?? "").toLowerCase().includes(q)
+        (tab) =>
+          (tab.title ?? "").toLowerCase().includes(searchLower) ||
+          (tab.channelName ?? "").toLowerCase().includes(searchLower)
       );
     }
-    const totalSec = tabsToShow.reduce((acc, t) => acc + (t.seconds ?? 0), 0);
+    const totalSec = tabsToShow.reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
     headerTitle.innerText = session.name;
     headerStats.innerText = `${tabsToShow.length} videos · ${formatTime(totalSec)} total duration`;
 
@@ -963,31 +963,31 @@ function renderMain() {
       let contentHtml: string;
       if (groupingMode === "channel") {
         const channels = new Map<string, SavedSessionTab[]>();
-        tabsToShow.forEach((t) => {
-          const name = t.channelName ?? "Unknown Channel";
+        tabsToShow.forEach((tab) => {
+          const name = tab.channelName ?? "Unknown Channel";
           if (!channels.has(name)) channels.set(name, []);
-          channels.get(name)!.push(t);
+          channels.get(name)!.push(tab);
         });
         let sortedGroups = Array.from(channels.entries());
         if (sortOption === "channel-asc") {
           sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
         } else if (sortOption === "duration-desc") {
           sortedGroups.sort((a, b) => {
-            const dA = a[1].reduce((acc, t) => acc + (t.seconds ?? 0), 0);
-            const dB = b[1].reduce((acc, t) => acc + (t.seconds ?? 0), 0);
-            return dB - dA;
+            const durationA = a[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+            const durationB = b[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+            return durationB - durationA;
           });
         } else if (sortOption === "duration-asc") {
           sortedGroups.sort((a, b) => {
-            const dA = a[1].reduce((acc, t) => acc + (t.seconds ?? 0), 0);
-            const dB = b[1].reduce((acc, t) => acc + (t.seconds ?? 0), 0);
-            return dA - dB;
+            const durationA = a[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+            const durationB = b[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+            return durationA - durationB;
           });
         }
         contentHtml = sortedGroups
           .map(([channel, tabList]) => {
             const isCollapsed = collapsedGroups.has(channel);
-            const groupDuration = tabList.reduce((acc, t) => acc + (t.seconds ?? 0), 0);
+            const groupDuration = tabList.reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
             const sortedTabs = sortSessionTabs(tabList);
             const gridOrList =
               layoutMode === "grid"
@@ -1014,9 +1014,9 @@ function renderMain() {
           })
           .join("");
         setTimeout(() => {
-          container.querySelectorAll(".group-toggle").forEach((el) => {
-            el.addEventListener("click", () => {
-              const groupName = (el as HTMLElement).dataset.group;
+          container.querySelectorAll(".group-toggle").forEach((toggle) => {
+            toggle.addEventListener("click", () => {
+              const groupName = (toggle as HTMLElement).dataset.group;
               if (groupName) {
                 if (collapsedGroups.has(groupName)) collapsedGroups.delete(groupName);
                 else collapsedGroups.add(groupName);
@@ -1157,8 +1157,9 @@ function renderMain() {
 
     thumbnailCacheBackfill(container);
     setTimeout(() => {
-      document.querySelectorAll('input[type="checkbox"]').forEach((element: any) => {
-        if (element.hasAttribute('indeterminate')) element.indeterminate = true;
+      document.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+        const input = checkbox as HTMLInputElement;
+        if (input.hasAttribute("indeterminate")) input.indeterminate = true;
       });
     }, 0);
     lastTabListFingerprint = fpLive;
@@ -1230,17 +1231,17 @@ function sortSessionTabs(tabs: SavedSessionTab[]): SavedSessionTab[] {
 function renderSessionGrid(tabs: SavedSessionTab[]): string {
   if (tabs.length === 0) return "";
   const thumbQuality = thumbnailQuality === "high" ? "hqdefault.jpg" : "mqdefault.jpg";
-  const cardsHtml = tabs.map((t) => {
-    const videoId = getVideoIdFromUrl(t.url);
+  const cardsHtml = tabs.map((tab) => {
+    const videoId = getVideoIdFromUrl(tab.url);
     const { src: thumbnailUrl, cacheKey: thumbnailCacheKey } = getThumbnailSrc(videoId, thumbQuality);
     const imgAttr = thumbnailCacheKey
       ? `src="${thumbnailUrl}" data-thumbnail-key="${thumbnailCacheKey}"`
       : `src="${thumbnailUrl}"`;
-    const title = t.title ?? "Untitled";
-    const channel = t.channelName ?? "";
-    const sec = t.seconds ?? 0;
-    const isSelected = selectedSessionTabUrls.has(t.url);
-    const urlAttr = escapeHtml(t.url);
+    const title = tab.title ?? "Untitled";
+    const channel = tab.channelName ?? "";
+    const sec = tab.seconds ?? 0;
+    const isSelected = selectedSessionTabUrls.has(tab.url);
+    const urlAttr = escapeHtml(tab.url);
     return `
       <div class="group relative flex flex-col rounded-lg border border-transparent overflow-hidden hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? "bg-surface-hover border-border ring-1 ring-accent/50" : ""}" data-session-tab-url="${urlAttr}">
         <div class="relative w-full aspect-video bg-surface-elevated/50 overflow-hidden session-video-click-target cursor-pointer">
@@ -1275,12 +1276,12 @@ function renderSessionGrid(tabs: SavedSessionTab[]): string {
 }
 
 function renderSessionList(tabs: SavedSessionTab[]): string {
-  return tabs.map((t) => {
-    const title = t.title ?? "Untitled";
-    const channel = t.channelName ?? "";
-    const sec = t.seconds ?? 0;
-    const isSelected = selectedSessionTabUrls.has(t.url);
-    const urlAttr = escapeHtml(t.url);
+  return tabs.map((tab) => {
+    const title = tab.title ?? "Untitled";
+    const channel = tab.channelName ?? "";
+    const sec = tab.seconds ?? 0;
+    const isSelected = selectedSessionTabUrls.has(tab.url);
+    const urlAttr = escapeHtml(tab.url);
     return `
       <div class="group relative flex items-center gap-4 p-3 rounded-lg border border-transparent hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? "bg-surface-hover border-border" : ""}" data-session-tab-url="${urlAttr}">
         <div class="relative flex items-center justify-center w-5 h-5 shrink-0 cursor-pointer session-selection-toggle">
@@ -1419,37 +1420,36 @@ function updateSelectionUI() {
   updateSelectAllCheckbox();
 
   if (inSessionView) {
-    document.querySelectorAll("#tab-list [data-session-tab-url]").forEach((element) => {
-      const url = (element as HTMLElement).getAttribute("data-session-tab-url");
+    document.querySelectorAll("#tab-list [data-session-tab-url]").forEach((row) => {
+      const url = (row as HTMLElement).getAttribute("data-session-tab-url");
       const isSelected = url != null && selectedSessionTabUrls.has(url);
-      const checkbox = element.querySelector('input[type="checkbox"]') as HTMLInputElement;
+      const checkbox = row.querySelector('input[type="checkbox"]') as HTMLInputElement;
       if (checkbox) checkbox.checked = isSelected;
       if (isSelected) {
-        element.classList.add("bg-surface-hover", "border-border", "ring-1", "ring-accent/50");
-        element.querySelector(".session-selection-toggle")?.classList.add("opacity-100");
+        row.classList.add("bg-surface-hover", "border-border", "ring-1", "ring-accent/50");
+        row.querySelector(".session-selection-toggle")?.classList.add("opacity-100");
       } else {
-        element.classList.remove("bg-surface-hover", "border-border", "ring-1", "ring-accent/50");
-        element.querySelector(".session-selection-toggle")?.classList.remove("opacity-100");
+        row.classList.remove("bg-surface-hover", "border-border", "ring-1", "ring-accent/50");
+        row.querySelector(".session-selection-toggle")?.classList.remove("opacity-100");
       }
     });
     return;
   }
 
-  document.querySelectorAll('#tab-list [data-id]').forEach(element => {
-    const id = parseInt((element as HTMLElement).dataset.id || "0");
-    const checkbox = element.querySelector('input[type="checkbox"]') as HTMLInputElement;
+  document.querySelectorAll('#tab-list [data-id]').forEach((row) => {
+    const id = parseInt((row as HTMLElement).dataset.id || "0");
+    const checkbox = row.querySelector('input[type="checkbox"]') as HTMLInputElement;
     const isSelected = selectedTabIds.has(id);
     if (checkbox) checkbox.checked = isSelected;
 
     if (layoutMode === 'list') {
-      if (isSelected) element.classList.add('bg-surface-hover', 'border-border');
-      else element.classList.remove('bg-surface-hover', 'border-border');
+      if (isSelected) row.classList.add('bg-surface-hover', 'border-border');
+      else row.classList.remove('bg-surface-hover', 'border-border');
     } else {
-      // Grid mode selection styling
-      if (isSelected) element.classList.add('bg-surface-hover', 'border-border', 'ring-1', 'ring-accent/50');
-      else element.classList.remove('bg-surface-hover', 'border-border', 'ring-1', 'ring-accent/50');
+      if (isSelected) row.classList.add('bg-surface-hover', 'border-border', 'ring-1', 'ring-accent/50');
+      else row.classList.remove('bg-surface-hover', 'border-border', 'ring-1', 'ring-accent/50');
 
-      const selectionToggle = element.querySelector('.selection-toggle');
+      const selectionToggle = row.querySelector('.selection-toggle');
       if (selectionToggle) {
         if (isSelected) selectionToggle.classList.add('opacity-100');
         else selectionToggle.classList.remove('opacity-100');
@@ -1475,7 +1475,7 @@ function setupListeners() {
         confirmDanger: true,
       });
       if (!confirmed) return;
-      const newTabs = (selectedSession.tabs ?? []).filter((t) => !urls.includes(t.url ?? ""));
+      const newTabs = (selectedSession.tabs ?? []).filter((sessionTab) => !urls.includes(sessionTab.url ?? ""));
       await updateSessionTabs(selectedSession.id, newTabs);
       selectedSession.tabs = newTabs;
       selectedSessionTabUrls.clear();
@@ -1520,7 +1520,7 @@ function setupListeners() {
       const id = item.getAttribute("data-session-id");
       if (!id) return;
       const sessions = await getSavedSessions();
-      const session = sessions.find((s) => s.id === id);
+      const session = sessions.find((saved) => saved.id === id);
       if (session) {
         selectedSession = session;
         selectedSessionTabUrls.clear();
@@ -1540,8 +1540,8 @@ function setupListeners() {
     const menu = document.getElementById("sidebar-context-menu");
     if (!menu) return;
     sidebarContextTarget = null;
-    menu.querySelectorAll(".sidebar-ctx-item").forEach((el) => {
-      (el as HTMLElement).classList.add("hidden");
+    menu.querySelectorAll(".sidebar-ctx-item").forEach((item) => {
+      (item as HTMLElement).classList.add("hidden");
     });
     if (type === "all" || type === "window") {
       sidebarContextTarget = type === "all" ? { type: "all" } : { type: "window", windowId: parseInt(item.getAttribute("data-window-id") || "0", 10) };
@@ -1563,10 +1563,10 @@ function setupListeners() {
       if (delBtn) { delBtn.classList.remove("hidden"); delBtn.classList.add("flex"); }
     }
     menu.classList.remove("hidden");
-    const x = Math.min(event.clientX, window.innerWidth - 180);
-    const y = Math.min(event.clientY, window.innerHeight - 120);
-    menu.style.left = `${x}px`;
-    menu.style.top = `${y}px`;
+    const menuLeftPx = Math.min(event.clientX, window.innerWidth - 180);
+    const menuTopPx = Math.min(event.clientY, window.innerHeight - 120);
+    menu.style.left = `${menuLeftPx}px`;
+    menu.style.top = `${menuTopPx}px`;
   });
 
   document.getElementById("tab-list")?.addEventListener("click", async (event) => {
@@ -1577,7 +1577,7 @@ function setupListeners() {
       if (url != null) {
         if (target.closest(".session-remove-btn")) {
           event.stopPropagation();
-          const tab = (selectedSession.tabs ?? []).find((t) => (t.url ?? "") === url);
+          const tab = (selectedSession.tabs ?? []).find((sessionTab) => (sessionTab.url ?? "") === url);
           const title = tab?.title ?? "this video";
           const confirmed = await showConfirm({
             title: "Remove from session",
@@ -1586,7 +1586,7 @@ function setupListeners() {
             confirmDanger: true,
           });
           if (!confirmed) return;
-          const newTabs = (selectedSession.tabs ?? []).filter((t) => (t.url ?? "") !== url);
+          const newTabs = (selectedSession.tabs ?? []).filter((sessionTab) => (sessionTab.url ?? "") !== url);
           await updateSessionTabs(selectedSession.id, newTabs);
           selectedSession.tabs = newTabs;
           selectedSessionTabUrls.delete(url);
@@ -1619,7 +1619,6 @@ function setupListeners() {
       return;
     }
 
-    // Window view: [data-id] cards
     const row = target.closest("[data-id]") as HTMLElement | null;
     const id = row ? parseInt(row.dataset.id || "0", 10) : 0;
 
@@ -1632,7 +1631,7 @@ function setupListeners() {
     }
     if (target.closest(".jump-btn")) {
       event.stopPropagation();
-      const video = allVideos.find((v) => v.id === id);
+      const video = allVideos.find((candidate) => candidate.id === id);
       if (video) {
         await browser.tabs.update(video.id, { active: true });
         await browser.windows.update(video.windowId as number, { focused: true });
@@ -1669,15 +1668,15 @@ function setupListeners() {
       if (groupName) {
         let scopeVideos = allVideos;
         if (currentWindowId !== "all") {
-          scopeVideos = allVideos.filter((v) => v.windowId === currentWindowId);
+          scopeVideos = allVideos.filter((video) => video.windowId === currentWindowId);
         }
         const videosInGroup = scopeVideos.filter(
-          (v) => (v.channelName || "Unknown Channel") === groupName
+          (video) => (video.channelName || "Unknown Channel") === groupName
         );
-        const allSelected = videosInGroup.every((v) => selectedTabIds.has(v.id));
-        videosInGroup.forEach((v) => {
-          if (allSelected) selectedTabIds.delete(v.id);
-          else selectedTabIds.add(v.id);
+        const allSelected = videosInGroup.every((video) => selectedTabIds.has(video.id));
+        videosInGroup.forEach((video) => {
+          if (allSelected) selectedTabIds.delete(video.id);
+          else selectedTabIds.add(video.id);
         });
         updateSelectionUI();
         render();
@@ -1725,11 +1724,11 @@ function setupListeners() {
     const defaultName = `Session ${new Date().toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}`;
     const name = await showNameSessionModal(defaultName);
     if (name === null) return;
-    const tabs: SavedSessionTab[] = allVideos.map((v) => ({
-      url: v.url,
-      title: v.title,
-      channelName: v.channelName,
-      seconds: v.seconds,
+    const tabs: SavedSessionTab[] = allVideos.map((video) => ({
+      url: video.url,
+      title: video.title,
+      channelName: video.channelName,
+      seconds: video.seconds,
     }));
     try {
       await saveSession(name, tabs);
@@ -1741,8 +1740,8 @@ function setupListeners() {
     }
   });
 
-  document.getElementById("select-all-checkbox")?.addEventListener("click", (e) => {
-    e.stopPropagation();
+  document.getElementById("select-all-checkbox")?.addEventListener("click", (event) => {
+    event.stopPropagation();
     const inSessionView = selectedSession != null;
     const tabElements = document.querySelectorAll("#tab-list [data-session-tab-url]");
     const idElements = document.querySelectorAll("#tab-list [data-id]");
@@ -1763,10 +1762,11 @@ function setupListeners() {
   });
 
   document.getElementById("ctx-save")?.addEventListener("click", async () => {
-    const t = sidebarContextTarget;
+    const context = sidebarContextTarget;
     document.getElementById("sidebar-context-menu")?.classList.add("hidden");
-    if (!t || (t.type !== "all" && t.type !== "window")) return;
-    const videosToSave = t.type === "all" ? allVideos : allVideos.filter((v) => v.windowId === t.windowId);
+    if (!context || (context.type !== "all" && context.type !== "window")) return;
+    const videosToSave =
+      context.type === "all" ? allVideos : allVideos.filter((video) => video.windowId === context.windowId);
     if (videosToSave.length === 0) {
       showToast("No YouTube tabs to save.");
       return;
@@ -1774,7 +1774,12 @@ function setupListeners() {
     const defaultName = `Session ${new Date().toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}`;
     const name = await showNameSessionModal(defaultName);
     if (name === null) return;
-    const tabs: SavedSessionTab[] = videosToSave.map((v) => ({ url: v.url, title: v.title, channelName: v.channelName, seconds: v.seconds }));
+    const tabs: SavedSessionTab[] = videosToSave.map((video) => ({
+      url: video.url,
+      title: video.title,
+      channelName: video.channelName,
+      seconds: video.seconds,
+    }));
     try {
       await saveSession(name, tabs);
       await refreshSavedSessionsSidebar();
@@ -1786,28 +1791,28 @@ function setupListeners() {
   });
 
   document.getElementById("ctx-open-tabs")?.addEventListener("click", async () => {
-    const t = sidebarContextTarget;
+    const context = sidebarContextTarget;
     document.getElementById("sidebar-context-menu")?.classList.add("hidden");
-    if (t?.type === "session" && t.sessionId) {
-      await loadSessionInNewWindow(t.sessionId);
+    if (context?.type === "session" && context.sessionId) {
+      await loadSessionInNewWindow(context.sessionId);
     }
   });
 
   document.getElementById("ctx-pin")?.addEventListener("click", async () => {
-    const t = sidebarContextTarget;
+    const context = sidebarContextTarget;
     document.getElementById("sidebar-context-menu")?.classList.add("hidden");
-    if (t?.type !== "session" || !t.sessionId) return;
+    if (context?.type !== "session" || !context.sessionId) return;
     const sessions = await getSavedSessions();
-    const session = sessions.find((s) => s.id === t.sessionId);
+    const session = sessions.find((saved) => saved.id === context.sessionId);
     if (!session) return;
-    await setSessionPinned(t.sessionId, !session.pinned);
+    await setSessionPinned(context.sessionId, !session.pinned);
     refreshSavedSessionsSidebar();
   });
 
   document.getElementById("ctx-delete")?.addEventListener("click", async () => {
-    const t = sidebarContextTarget;
+    const context = sidebarContextTarget;
     document.getElementById("sidebar-context-menu")?.classList.add("hidden");
-    if (t?.type !== "session" || !t.sessionId) return;
+    if (context?.type !== "session" || !context.sessionId) return;
     const confirmed = await showConfirm({
       title: "Delete session",
       message: "Delete this saved session?",
@@ -1815,7 +1820,7 @@ function setupListeners() {
       confirmDanger: true,
     });
     if (confirmed) {
-      await deleteSession(t.sessionId);
+      await deleteSession(context.sessionId);
       refreshSavedSessionsSidebar();
     }
   });
@@ -1823,7 +1828,7 @@ function setupListeners() {
   document.addEventListener("click", () => {
     document.getElementById("sidebar-context-menu")?.classList.add("hidden");
   });
-  document.getElementById("sidebar-context-menu")?.addEventListener("click", (e) => e.stopPropagation());
+  document.getElementById("sidebar-context-menu")?.addEventListener("click", (event) => event.stopPropagation());
   document.addEventListener("contextmenu", () => {
     document.getElementById("sidebar-context-menu")?.classList.add("hidden");
   });
@@ -1897,7 +1902,7 @@ function setupListeners() {
     if (rows.length === 0) {
       container.innerHTML = "<span class='text-text-muted/70'>No YouTube tabs open</span>";
     } else {
-      container.innerHTML = rows.map((r) => `<div class="truncate" title="${r}">${r}</div>`).join("");
+      container.innerHTML = rows.map((row) => `<div class="truncate" title="${row}">${row}</div>`).join("");
     }
   });
 }
@@ -1916,8 +1921,8 @@ function render() {
 
 function attachDynamicListeners() {
   setTimeout(() => {
-    document.querySelectorAll("#tab-list input[type='checkbox']").forEach((el: Element) => {
-      const input = el as HTMLInputElement;
+    document.querySelectorAll("#tab-list input[type='checkbox']").forEach((checkbox: Element) => {
+      const input = checkbox as HTMLInputElement;
       if (input.getAttribute("indeterminate") != null) input.indeterminate = true;
     });
   }, 0);
@@ -1942,7 +1947,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   browser.runtime.onMessage.addListener((message) => {
     if (message.action === "tab-synced") {
-      const video = allVideos.find((v) => v.id === message.tabId);
+      const video = allVideos.find((candidate) => candidate.id === message.tabId);
       if (video) {
         video.seconds = message.metadata.seconds;
         video.title = message.metadata.title;

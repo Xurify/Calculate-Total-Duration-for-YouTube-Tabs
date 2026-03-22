@@ -36,6 +36,10 @@ export function parseTimeParam(url: string): number {
 export function getVideoIdFromUrl(url: string): string | null {
   try {
     const urlObj = new URL(url);
+    if (urlObj.hostname === "youtu.be" || urlObj.hostname.endsWith(".youtu.be")) {
+      const segment = urlObj.pathname.replace(/^\//, "").split("/")[0];
+      return segment || null;
+    }
     if (urlObj.pathname.startsWith("/shorts/")) {
       const m = urlObj.pathname.match(/\/shorts\/([^/?]+)/);
       return m ? m[1] : null;

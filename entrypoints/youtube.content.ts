@@ -153,6 +153,7 @@ export default defineContentScript({
 
     ctx.addEventListener(window, "popstate", () => scheduleRead(ctx));
     ctx.addEventListener(window, "hashchange", () => scheduleRead(ctx));
+    ctx.addEventListener(document, "yt-navigate-finish", () => scheduleRead(ctx));
 
     browser.runtime.onMessage.addListener(
       (message: { action: string; reset?: boolean }, _sender: unknown, sendResponse: (r: unknown) => void) => {

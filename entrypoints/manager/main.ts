@@ -449,6 +449,32 @@ function openSessionVideoInNewTab(url: string) {
   return browser.tabs.create({ url });
 }
 
+async function openOrFocusSessionVideo(url: string) {
+  const normalizedTargetUrl = normalizeYoutubeUrl(url);
+  const allTabs = await browser.tabs.query({});
+  const existingTab = allTabs.find((tab) => {
+    if (!tab.url) return false;
+    return normalizeYoutubeUrl(tab.url) === normalizedTargetUrl;
+  });
+
+  if (existingTab?.id != null) {
+    await browser.tabs.update(existingTab.id, { active: true });
+    if (existingTab.windowId != null) {
+      await browser.windows.update(existingTab.windowId, { focused: true });
+    }
+    return;
+  }
+
+  return browser.tabs.create({ url });
+}
+
+async function focusLiveVideoTab(video: VideoData) {
+  await browser.tabs.update(video.id, { active: true });
+  if (video.windowId != null) {
+    await browser.windows.update(video.windowId, { focused: true });
+  }
+}
+
 function escapeHtml(raw: string): string {
   if (raw.length === 0) return raw;
   return raw
@@ -1252,6 +1278,11 @@ function renderSessionGrid(tabs: SavedSessionTab[]): string {
           <div class="absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-mono font-medium text-white backdrop-blur-sm">
             ${formatCompact(sec)}
           </div>
+          <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
+            <div class="w-14 h-14 rounded-full bg-black/50 flex items-center justify-center backdrop-blur-[2px] ring-1 ring-white/15 shadow-lg">
+              <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="white" class="ml-0.5"><path d="M8 5v14l11-7z"/></svg>
+            </div>
+          </div>
           <div class="absolute top-2 left-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity ${isSelected ? "opacity-100" : ""} session-selection-toggle flex items-center justify-center w-5 h-5">
             <input type="checkbox" class="peer appearance-none w-4 h-4 rounded border border-white/60 checked:bg-accent checked:border-accent bg-black/40 backdrop-blur-sm transition-colors cursor-pointer" ${isSelected ? "checked" : ""}>
             <svg class="absolute w-2.5 h-2.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -1336,6 +1367,12 @@ function renderVideoGrid(videos: VideoData[]): string {
 
                     <div class="manager-card-progress-wrap absolute bottom-0 left-0 right-0 h-0.5 bg-surface/30 transition-opacity" style="opacity: ${!video.isLive && video.seconds > 0 && watchedPercent > 0 ? 1 : 0}">
                         <div class="manager-card-progress h-full bg-accent" style="width: ${watchedPercent}%"></div>
+                    </div>
+
+                    <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div class="w-14 h-14 rounded-full bg-black/50 flex items-center justify-center backdrop-blur-[2px] ring-1 ring-white/15 shadow-lg">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="white" class="ml-0.5"><path d="M8 5v14l11-7z"/></svg>
+                        </div>
                     </div>
 
                     <div class="absolute top-2 left-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity ${isSelected ? 'opacity-100' : ''} selection-toggle flex items-center justify-center w-5 h-5">
@@ -1457,7 +1494,6 @@ function updateSelectionUI() {
     }
   });
 }
-
 
 function setupListeners() {
   document.getElementById("btn-refresh")?.addEventListener("click", () => {
@@ -1609,10 +1645,8 @@ function setupListeners() {
           return;
         }
         if (target.closest(".session-video-click-target")) {
-          if (selectedSessionTabUrls.has(url)) selectedSessionTabUrls.delete(url);
-          else selectedSessionTabUrls.add(url);
-          updateSelectionUI();
-          render();
+          event.stopPropagation();
+          void openOrFocusSessionVideo(url);
           return;
         }
       }
@@ -1633,8 +1667,7 @@ function setupListeners() {
       event.stopPropagation();
       const video = allVideos.find((candidate) => candidate.id === id);
       if (video) {
-        await browser.tabs.update(video.id, { active: true });
-        await browser.windows.update(video.windowId as number, { focused: true });
+        await focusLiveVideoTab(video);
       }
       return;
     }
@@ -1646,9 +1679,8 @@ function setupListeners() {
       return;
     }
     if (target.closest(".video-click-target")) {
-      if (selectedTabIds.has(id)) selectedTabIds.delete(id);
-      else selectedTabIds.add(id);
-      updateSelectionUI();
+      const video = allVideos.find((candidate) => candidate.id === id);
+      if (video) await focusLiveVideoTab(video);
       return;
     }
     const groupToggle = target.closest(".group-toggle");

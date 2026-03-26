@@ -13,9 +13,14 @@ import {
   deleteSession,
   setSessionPinned,
   updateSessionTabs,
+  updateSessionSections,
+  getLiveTabSections,
+  setLiveTabSections,
   isCacheEntryUsable,
   type SavedSessionTab,
-  type SavedSession
+  type SavedSession,
+  type SessionSection,
+  type LiveTabSectionsState,
 } from "../../utils/storage";
 import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl } from "../../utils/format";
 
@@ -56,6 +61,64 @@ let sidebarContextTarget: { type: "all" | "window" | "session"; windowId?: numbe
 let selectedSession: SavedSession | null = null;
 /** When viewing a saved session, URLs of tabs selected in the grid/list (for remove-from-session). */
 let selectedSessionTabUrls = new Set<string>();
+
+let liveTabSectionsState: LiveTabSectionsState = { sections: [], assignments: {} };
+
+const SECTION_RAIL_VARS = [
+  "var(--section-coral)",
+  "var(--section-amber)",
+  "var(--section-lime)",
+  "var(--section-teal)",
+  "var(--section-sky)",
+  "var(--section-indigo)",
+  "var(--section-violet)",
+  "var(--section-rose)",
+] as const;
+
+const SECTION_PRESETS: { name: string; emoji: string; colorIndex: number }[] = [
+  { name: "Music", emoji: "🎵", colorIndex: 6 },
+  { name: "Work", emoji: "💼", colorIndex: 5 },
+  { name: "Podcasts", emoji: "🎙️", colorIndex: 3 },
+  { name: "Learning", emoji: "📚", colorIndex: 4 },
+  { name: "Entertainment", emoji: "🎬", colorIndex: 1 },
+  { name: "Favorites", emoji: "⭐", colorIndex: 7 },
+  { name: "Gaming", emoji: "🎮", colorIndex: 2 },
+  { name: "News", emoji: "📰", colorIndex: 0 },
+];
+
+const SECTION_COLLAPSE_PREFIX = "sec:";
+const UNSORTED_COLLAPSE_KEY = `${SECTION_COLLAPSE_PREFIX}__unsorted`;
+
+let tabSectionContextTarget: { mode: "session"; url: string } | { mode: "live"; tabId: number } | null = null;
+let sectionHeaderContextTarget: { sectionId: string } | null = null;
+
+const TAB_MANAGER_DRAG_MIME = "application/x-tab-manager";
+let sectionDropHighlightEl: HTMLElement | null = null;
+
+function clearSectionDropHighlight(): void {
+  sectionDropHighlightEl?.classList.remove("section-drop-target--active");
+  sectionDropHighlightEl = null;
+}
+
+function setSectionDropHighlight(zone: HTMLElement | null): void {
+  if (sectionDropHighlightEl === zone) return;
+  clearSectionDropHighlight();
+  if (zone) {
+    zone.classList.add("section-drop-target--active");
+    sectionDropHighlightEl = zone;
+  }
+}
+
+function parseTabManagerDrag(raw: string): { kind: "session"; url: string } | { kind: "live"; tabId: number } | null {
+  try {
+    const o = JSON.parse(raw) as { kind?: string; url?: string; tabId?: number };
+    if (o.kind === "session" && typeof o.url === "string") return { kind: "session", url: o.url };
+    if (o.kind === "live" && typeof o.tabId === "number") return { kind: "live", tabId: o.tabId };
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
 
 const STORAGE_READ_SKIP_MS = 2000;
 let lastStorageLoadTime = 0;
@@ -117,6 +180,8 @@ async function fetchTabs(skipInitialRender = false) {
   groupingMode = storage.groupingMode;
   layoutMode = storage.layoutMode;
   sortOption = storage.sortOption;
+
+  liveTabSectionsState = await getLiveTabSections();
 
   const allTabs = await browser.tabs.query({});
   const youtubeTabs = allTabs.filter(tab => {
@@ -485,6 +550,604 @@ function escapeHtml(raw: string): string {
     .replace(/'/g, "&#39;");
 }
 
+function sectionRailVar(colorIndex: number | "unsorted"): string {
+  if (colorIndex === "unsorted") return "rgba(255,255,255,0.14)";
+  return SECTION_RAIL_VARS[((colorIndex % SECTION_RAIL_VARS.length) + SECTION_RAIL_VARS.length) % SECTION_RAIL_VARS.length];
+}
+
+function tabCardDnDHtml(sectionColorIndex: number | "unsorted" | undefined): { extraClass: string; draggableAttr: string } {
+  if (sectionColorIndex === undefined) return { extraClass: "", draggableAttr: "" };
+  return { extraClass: " tab-card-dnd", draggableAttr: ` draggable="true"` };
+}
+
+function orderedSections(sections: SessionSection[] | undefined): SessionSection[] {
+  if (!sections || sections.length === 0) return [];
+  return [...sections].sort((a, b) => a.order - b.order);
+}
+
+function validSectionIds(sections: SessionSection[]): Set<string> {
+  return new Set(sections.map((s) => s.id));
+}
+
+function liveSectionIdForVideo(video: VideoData): string | undefined {
+  const sections = orderedSections(liveTabSectionsState.sections);
+  const valid = validSectionIds(sections);
+  const key = normalizeYoutubeUrl(video.url);
+  const sid = liveTabSectionsState.assignments[key];
+  if (typeof sid === "string" && valid.has(sid)) return sid;
+  return undefined;
+}
+
+function sessionTabSectionId(tab: SavedSessionTab, sections: SessionSection[]): string | undefined {
+  const valid = validSectionIds(sections);
+  const sid = tab.sectionId;
+  if (typeof sid === "string" && valid.has(sid)) return sid;
+  return undefined;
+}
+
+function partitionSessionTabsBySection(
+  tabs: SavedSessionTab[],
+  sections: SessionSection[]
+): { blocks: { section: SessionSection; tabs: SavedSessionTab[] }[]; unsorted: SavedSessionTab[] } {
+  const ordered = orderedSections(sections);
+  const byId = new Map<string, SavedSessionTab[]>();
+  for (const s of ordered) byId.set(s.id, []);
+  const unsorted: SavedSessionTab[] = [];
+  for (const t of tabs) {
+    const sid = sessionTabSectionId(t, ordered);
+    if (sid && byId.has(sid)) byId.get(sid)!.push(t);
+    else unsorted.push(t);
+  }
+  const blocks = ordered.map((section) => ({ section, tabs: byId.get(section.id) ?? [] }));
+  return { blocks, unsorted };
+}
+
+function partitionLiveVideosBySection(
+  videos: VideoData[],
+  sections: SessionSection[],
+  assignments: Record<string, string>
+): { blocks: { section: SessionSection; videos: VideoData[] }[]; unsorted: VideoData[] } {
+  const ordered = orderedSections(sections);
+  const byId = new Map<string, VideoData[]>();
+  for (const s of ordered) byId.set(s.id, []);
+  const unsorted: VideoData[] = [];
+  const valid = validSectionIds(ordered);
+  for (const v of videos) {
+    const key = normalizeYoutubeUrl(v.url);
+    const sid = assignments[key];
+    if (typeof sid === "string" && valid.has(sid) && byId.has(sid)) byId.get(sid)!.push(v);
+    else unsorted.push(v);
+  }
+  const blocks = ordered.map((section) => ({ section, videos: byId.get(section.id) ?? [] }));
+  return { blocks, unsorted };
+}
+
+function usesSectionLayoutForSession(session: SavedSession | null): boolean {
+  if (!session) return false;
+  return orderedSections(session.sections).length > 0;
+}
+
+function usesSectionLayoutForLive(): boolean {
+  return orderedSections(liveTabSectionsState.sections).length > 0;
+}
+
+function persistLiveSections(): Promise<void> {
+  return setLiveTabSections(liveTabSectionsState);
+}
+
+async function reloadSelectedSessionFromStorage(): Promise<void> {
+  if (!selectedSession) return;
+  const sessions = await getSavedSessions();
+  const fresh = sessions.find((s) => s.id === selectedSession!.id);
+  if (fresh) selectedSession = fresh;
+}
+
+async function moveSessionTabsToSection(urls: string[], sectionId: string | null): Promise<void> {
+  if (!selectedSession || urls.length === 0) return;
+  const sections = orderedSections(selectedSession.sections);
+  const valid = validSectionIds(sections);
+  const target = sectionId && valid.has(sectionId) ? sectionId : undefined;
+  const tabs = (selectedSession.tabs ?? []).map((t) => {
+    const u = t.url ?? "";
+    if (!urls.includes(u)) return t;
+    if (target) return { ...t, sectionId: target };
+    return { url: t.url, title: t.title, channelName: t.channelName, seconds: t.seconds };
+  });
+  await updateSessionTabs(selectedSession.id, tabs);
+  selectedSession.tabs = tabs;
+  await reloadSelectedSessionFromStorage();
+  selectedSessionTabUrls.clear();
+  updateSelectionUI();
+  render();
+}
+
+async function moveLiveVideosToSection(tabIds: number[], sectionId: string | null): Promise<void> {
+  if (tabIds.length === 0) return;
+  const sections = orderedSections(liveTabSectionsState.sections);
+  const valid = validSectionIds(sections);
+  const assign = { ...liveTabSectionsState.assignments };
+  for (const id of tabIds) {
+    const video = allVideos.find((v) => v.id === id);
+    if (!video) continue;
+    const key = normalizeYoutubeUrl(video.url);
+    if (sectionId && valid.has(sectionId)) assign[key] = sectionId;
+    else delete assign[key];
+  }
+  liveTabSectionsState = { ...liveTabSectionsState, assignments: assign };
+  await persistLiveSections();
+  selectedTabIds.clear();
+  updateSelectionUI();
+  render();
+}
+
+async function moveSelectionToSection(sectionId: string | null): Promise<void> {
+  if (selectedSession) {
+    await moveSessionTabsToSection(Array.from(selectedSessionTabUrls), sectionId);
+  } else {
+    await moveLiveVideosToSection(Array.from(selectedTabIds), sectionId);
+  }
+}
+
+async function addNewSection(name: string, emoji: string | undefined, colorIndex: number): Promise<void> {
+  const trimmed = name.trim() || "Section";
+  if (selectedSession) {
+    const list = orderedSections(selectedSession.sections);
+    const sec = createSectionObject(trimmed, emoji, colorIndex, list);
+    const next = [...list, sec];
+    selectedSession.sections = next;
+    await updateSessionSections(selectedSession.id, next);
+    await reloadSelectedSessionFromStorage();
+  } else {
+    const list = orderedSections(liveTabSectionsState.sections);
+    const sec = createSectionObject(trimmed, emoji, colorIndex, list);
+    liveTabSectionsState = {
+      sections: [...list, sec],
+      assignments: { ...liveTabSectionsState.assignments },
+    };
+    await persistLiveSections();
+  }
+  showToast(`Section "${trimmed}" added`);
+  render();
+}
+
+async function deleteSectionById(sectionId: string): Promise<void> {
+  if (selectedSession) {
+    const nextSecs = orderedSections(selectedSession.sections).filter((s) => s.id !== sectionId);
+    await updateSessionSections(selectedSession.id, nextSecs);
+    await reloadSelectedSessionFromStorage();
+  } else {
+    const nextSecs = liveTabSectionsState.sections.filter((s) => s.id !== sectionId);
+    const assign = { ...liveTabSectionsState.assignments };
+    for (const k of Object.keys(assign)) {
+      if (assign[k] === sectionId) delete assign[k];
+    }
+    liveTabSectionsState = { sections: nextSecs, assignments: assign };
+    await persistLiveSections();
+  }
+  render();
+}
+
+async function renameSectionById(sectionId: string, newName: string): Promise<void> {
+  const name = newName.trim();
+  if (!name) return;
+  if (selectedSession) {
+    const next = orderedSections(selectedSession.sections).map((s) => (s.id === sectionId ? { ...s, name } : s));
+    await updateSessionSections(selectedSession.id, next);
+    await reloadSelectedSessionFromStorage();
+  } else {
+    liveTabSectionsState = {
+      ...liveTabSectionsState,
+      sections: liveTabSectionsState.sections.map((s) => (s.id === sectionId ? { ...s, name } : s)),
+    };
+    await persistLiveSections();
+  }
+  render();
+}
+
+function openAddSectionModal(): void {
+  const modal = document.getElementById("add-section-modal");
+  const presets = document.getElementById("add-section-presets");
+  const customInput = document.getElementById("add-section-custom") as HTMLInputElement | null;
+  if (!modal || !presets) return;
+  presets.innerHTML = SECTION_PRESETS.map(
+    (p) => `
+    <button type="button" class="section-preset-btn text-left" style="--preset-color: ${sectionRailVar(p.colorIndex)}" data-preset-name="${escapeHtml(p.name)}" data-preset-emoji="${escapeHtml(p.emoji)}" data-preset-color="${p.colorIndex}">
+      <span class="text-lg leading-none">${escapeHtml(p.emoji)}</span>
+      <span class="text-xs font-semibold text-text-primary">${escapeHtml(p.name)}</span>
+    </button>
+  `
+  ).join("");
+  if (customInput) customInput.value = "";
+  modal.classList.remove("hidden");
+  requestAnimationFrame(() => customInput?.focus());
+}
+
+function closeAddSectionModal(): void {
+  document.getElementById("add-section-modal")?.classList.add("hidden");
+}
+
+function nextSectionOrder(sections: SessionSection[]): number {
+  if (sections.length === 0) return 0;
+  return Math.max(...sections.map((s) => s.order)) + 1;
+}
+
+function createSectionObject(name: string, emoji: string | undefined, colorIndex: number, sections: SessionSection[]): SessionSection {
+  return {
+    id: crypto.randomUUID(),
+    name: name.trim() || "Section",
+    emoji,
+    colorIndex: colorIndex % SECTION_RAIL_VARS.length,
+    order: nextSectionOrder(sections),
+  };
+}
+
+function renderSectionHeaderHtml(options: {
+  title: string;
+  emoji?: string;
+  subtitle?: string;
+  countLabel: string;
+  durationLabel: string;
+  collapseKey: string;
+  colorIndex: number | "unsorted";
+  sectionId?: string;
+}): string {
+  const isCollapsed = collapsedGroups.has(options.collapseKey);
+  const rail = sectionRailVar(options.colorIndex);
+  const glow =
+    options.colorIndex === "unsorted"
+      ? "rgba(255,255,255,0.06)"
+      : `color-mix(in srgb, ${rail} 35%, transparent)`;
+  const surface =
+    options.colorIndex === "unsorted"
+      ? "var(--color-surface-elevated)"
+      : `color-mix(in srgb, var(--color-surface-elevated) 92%, ${rail})`;
+  const dataSectionAttr = options.sectionId ? ` data-section-id="${escapeHtml(options.sectionId)}"` : "";
+  return `
+    <div class="session-section-shell session-section-animate mb-3" style="--section-rail: ${rail}; --section-glow: ${glow}; --section-surface: ${surface}">
+      <div class="flex items-stretch gap-0">
+        <div class="session-section-rail mx-3 my-3" style="--section-rail: ${rail}" aria-hidden="true"></div>
+        <div class="flex-1 min-w-0 py-3 pr-3">
+          <div class="flex items-center gap-3 px-1">
+            <button type="button" class="section-collapse-toggle p-1.5 rounded-lg hover:bg-white/5 text-text-muted transition-transform duration-200 ${isCollapsed ? "-rotate-90" : ""}" data-section-collapse="${escapeHtml(options.collapseKey)}" aria-expanded="${isCollapsed ? "false" : "true"}">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            <div class="flex-1 min-w-0 flex items-baseline gap-2">
+              ${options.emoji ? `<span class="text-lg leading-none shrink-0" aria-hidden="true">${escapeHtml(options.emoji)}</span>` : ""}
+              <h3 class="session-section-title text-base font-semibold text-text-primary truncate cursor-default section-title-target"${dataSectionAttr}>${escapeHtml(options.title)}</h3>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="session-stat-pill">${escapeHtml(options.countLabel)}</span>
+              <span class="session-stat-pill font-mono">${escapeHtml(options.durationLabel)}</span>
+            </div>
+          </div>
+          ${options.subtitle ? `<p class="text-[11px] text-text-muted/90 pl-11 pr-1 mt-1 leading-snug">${escapeHtml(options.subtitle)}</p>` : ""}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderSectionEmptyPlaceholder(colorIndex: number): string {
+  const rail = sectionRailVar(colorIndex);
+  return `
+    <div class="section-empty-hint mx-1 mb-4 py-8 px-4 text-center text-[12px] text-text-muted/80" style="--section-rail: ${rail}">
+      No videos here yet — right-click a video and choose <span class="text-text-secondary font-medium">Move to section</span>
+    </div>
+  `;
+}
+
+function nestedChannelCollapseKey(scopeId: string, channel: string): string {
+  return `sg:${scopeId}:${channel}`;
+}
+
+function renderSessionTabsInnerHtml(
+  tabs: SavedSessionTab[],
+  sectionColor: number | "unsorted",
+  collapseScopeId: string
+): string {
+  if (tabs.length === 0) return "";
+  if (groupingMode !== "channel") {
+    const sorted = sortSessionTabs(tabs);
+    return layoutMode === "grid" ? renderSessionGrid(sorted, sectionColor) : renderSessionList(sorted, sectionColor);
+  }
+  const channels = new Map<string, SavedSessionTab[]>();
+  tabs.forEach((tab) => {
+    const name = tab.channelName ?? "Unknown Channel";
+    if (!channels.has(name)) channels.set(name, []);
+    channels.get(name)!.push(tab);
+  });
+  let sortedGroups = Array.from(channels.entries());
+  if (sortOption === "channel-asc") {
+    sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
+  } else if (sortOption === "duration-desc") {
+    sortedGroups.sort((a, b) => {
+      const durationA = a[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+      const durationB = b[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+      return durationB - durationA;
+    });
+  } else if (sortOption === "duration-asc") {
+    sortedGroups.sort((a, b) => {
+      const durationA = a[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+      const durationB = b[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+      return durationA - durationB;
+    });
+  }
+  return sortedGroups
+    .map(([channel, tabList]) => {
+      const ck = nestedChannelCollapseKey(collapseScopeId, channel);
+      const isCollapsed = collapsedGroups.has(ck);
+      const groupDuration = tabList.reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+      const sortedTabs = sortSessionTabs(tabList);
+      const gridOrList =
+        layoutMode === "grid" ? renderSessionGrid(sortedTabs, sectionColor) : renderSessionList(sortedTabs, sectionColor);
+      return `
+            <div class="mb-3">
+              <div class="flex items-center gap-3 px-2 py-1.5 rounded-md hover:bg-surface-hover/30 group/header select-none">
+                <button type="button" class="p-1 rounded hover:bg-surface-hover text-text-muted transition-transform duration-200 nested-group-toggle ${isCollapsed ? "-rotate-90" : ""}" data-nested-group="${escapeHtml(ck)}">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+                <div class="flex-1 font-medium text-xs text-text-secondary truncate nested-group-toggle cursor-pointer" data-nested-group="${escapeHtml(ck)}">${escapeHtml(channel)}</div>
+                <div class="text-[10px] text-text-muted font-mono flex items-center gap-2">
+                  <span>${tabList.length} videos</span>
+                  <span class="w-px h-3 bg-border"></span>
+                  <span>${formatTime(groupDuration)}</span>
+                </div>
+              </div>
+              <div class="space-y-1 ml-10 border-l border-border/60 pl-2 mt-1 ${isCollapsed ? "hidden" : ""}" data-nested-group-body="${escapeHtml(ck)}">
+                ${gridOrList}
+              </div>
+            </div>
+          `;
+    })
+    .join("");
+}
+
+function renderLiveVideosInnerHtml(
+  videos: VideoData[],
+  sectionColor: number | "unsorted",
+  collapseScopeId: string
+): string {
+  if (videos.length === 0) return "";
+  if (groupingMode !== "channel") {
+    const sortedVideos = sortVideos(videos);
+    return layoutMode === "grid" ? renderVideoGrid(sortedVideos, sectionColor) : renderVideoList(sortedVideos, sectionColor);
+  }
+  const channels = new Map<string, VideoData[]>();
+  videos.forEach((video) => {
+    const name = video.channelName || "Unknown Channel";
+    if (!channels.has(name)) channels.set(name, []);
+    channels.get(name)!.push(video);
+  });
+  let sortedGroups = Array.from(channels.entries());
+  if (sortOption === "channel-asc") {
+    sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
+  } else if (sortOption === "duration-desc") {
+    sortedGroups.sort((a, b) => {
+      const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
+      const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
+      return durationB - durationA;
+    });
+  } else if (sortOption === "duration-asc") {
+    sortedGroups.sort((a, b) => {
+      const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
+      const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
+      return durationA - durationB;
+    });
+  }
+  return sortedGroups
+    .map(([channel, groupVideos]) => {
+      const ck = nestedChannelCollapseKey(collapseScopeId, channel);
+      const isCollapsed = collapsedGroups.has(ck);
+      const groupDuration = groupVideos.reduce((acc, video) => acc + video.seconds, 0);
+      const sortedGroupVideos = sortVideos(groupVideos);
+      const allSelected = groupVideos.every((video) => selectedTabIds.has(video.id));
+      const someSelected = !allSelected && groupVideos.some((video) => selectedTabIds.has(video.id));
+      const inner =
+        layoutMode === "grid" ? renderVideoGrid(sortedGroupVideos, sectionColor) : renderVideoList(sortedGroupVideos, sectionColor);
+      return `
+            <div class="mb-3">
+                <div class="flex items-center gap-3 px-2 py-1.5 rounded-md hover:bg-surface-hover/30 group/header select-none">
+                    <button type="button" class="p-1 rounded hover:bg-surface-hover text-text-muted transition-transform duration-200 nested-group-toggle ${isCollapsed ? "-rotate-90" : ""}" data-nested-group="${escapeHtml(ck)}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                    </button>
+                    <div class="relative flex items-center justify-center w-4 h-4 cursor-pointer nested-group-selection-toggle" data-nested-group-scope="${escapeHtml(collapseScopeId)}" data-nested-channel="${escapeHtml(channel)}">
+                      <input type="checkbox" class="peer appearance-none w-3.5 h-3.5 rounded border border-text-muted/40 checked:bg-accent checked:border-accent transition-colors cursor-pointer" ${allSelected ? "checked" : ""} ${someSelected ? "indeterminate" : ""}>
+                       <svg class="absolute w-2 h-2 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                       <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 ${someSelected && !allSelected ? "opacity-100" : ""}">
+                          <div class="w-2 h-0.5 bg-accent"></div>
+                       </div>
+                    </div>
+                    <div class="flex-1 font-medium text-xs text-text-secondary truncate nested-group-toggle cursor-pointer" data-nested-group="${escapeHtml(ck)}">${escapeHtml(channel)}</div>
+                    <div class="text-[10px] text-text-muted font-mono flex items-center gap-2">
+                        <span>${groupVideos.length} videos</span>
+                        <span class="w-px h-3 bg-border"></span>
+                        <span>${formatTime(groupDuration)}</span>
+                    </div>
+                </div>
+                <div class="space-y-1 ml-10 border-l border-border/60 pl-2 mt-1 ${isCollapsed ? "hidden" : ""}" data-nested-group-body="${escapeHtml(ck)}">
+                    ${inner}
+                </div>
+            </div>
+          `;
+    })
+    .join("");
+}
+
+function buildSessionSectionedHtml(tabsToShow: SavedSessionTab[], sections: SessionSection[]): string {
+  const { blocks, unsorted } = partitionSessionTabsBySection(tabsToShow, sections);
+  const parts: string[] = [];
+  for (const { section, tabs } of blocks) {
+    const ck = `${SECTION_COLLAPSE_PREFIX}${section.id}`;
+    const color = section.colorIndex ?? 0;
+    const dur = tabs.reduce((s, t) => s + (t.seconds ?? 0), 0);
+    const header = renderSectionHeaderHtml({
+      title: section.name,
+      emoji: section.emoji,
+      collapseKey: ck,
+      countLabel: `${tabs.length} videos`,
+      durationLabel: formatTime(dur),
+      colorIndex: color,
+      sectionId: section.id,
+    });
+    const collapsed = collapsedGroups.has(ck);
+    const body =
+      tabs.length === 0
+        ? renderSectionEmptyPlaceholder(color)
+        : renderSessionTabsInnerHtml(tabs, color, section.id);
+    parts.push(`
+      <div class="mb-8" data-section-wrapper="${escapeHtml(section.id)}">
+        ${header}
+        <div class="pl-1 ${collapsed ? "hidden" : ""}" data-section-body="${escapeHtml(section.id)}">
+          ${body}
+        </div>
+      </div>
+    `);
+  }
+  {
+    const ck = UNSORTED_COLLAPSE_KEY;
+    const dur = unsorted.reduce((s, t) => s + (t.seconds ?? 0), 0);
+    const header = renderSectionHeaderHtml({
+      title: "Unsorted",
+      emoji: "✦",
+      subtitle: "Videos not assigned to a section yet",
+      collapseKey: ck,
+      countLabel: `${unsorted.length} videos`,
+      durationLabel: formatTime(dur),
+      colorIndex: "unsorted",
+    });
+    const collapsed = collapsedGroups.has(ck);
+    const body =
+      unsorted.length === 0 ? "" : renderSessionTabsInnerHtml(unsorted, "unsorted", "__unsorted");
+    parts.push(`
+      <div class="mb-8" data-section-wrapper="__unsorted">
+        ${header}
+        <div class="pl-1 ${collapsed ? "hidden" : ""}" data-section-body="__unsorted">
+          ${body}
+        </div>
+      </div>
+    `);
+  }
+  return parts.join("");
+}
+
+function sectionCollapseKeyToBodyId(collapseKey: string): string {
+  if (collapseKey.startsWith(SECTION_COLLAPSE_PREFIX)) {
+    return collapseKey.slice(SECTION_COLLAPSE_PREFIX.length);
+  }
+  return collapseKey;
+}
+
+function applySectionCollapseDom(collapseKey: string, collapsed: boolean): void {
+  const tabList = document.getElementById("tab-list");
+  if (!tabList) return;
+  const bodyId = sectionCollapseKeyToBodyId(collapseKey);
+  const body = tabList.querySelector(`[data-section-body="${bodyId}"]`) as HTMLElement | null;
+  if (body) body.classList.toggle("hidden", collapsed);
+  tabList.querySelectorAll(".section-collapse-toggle[data-section-collapse]").forEach((el) => {
+    const h = el as HTMLElement;
+    if (h.dataset.sectionCollapse === collapseKey) {
+      h.classList.toggle("-rotate-90", collapsed);
+      h.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    }
+  });
+}
+
+function findNestedGroupBodyEl(nestedKey: string): HTMLElement | null {
+  const tabList = document.getElementById("tab-list");
+  if (!tabList) return null;
+  return Array.from(tabList.querySelectorAll("[data-nested-group-body]")).find(
+    (el) => el.getAttribute("data-nested-group-body") === nestedKey
+  ) as HTMLElement | null;
+}
+
+function applyNestedGroupCollapseDom(nestedKey: string, collapsed: boolean): void {
+  const tabList = document.getElementById("tab-list");
+  if (!tabList) return;
+  const body = findNestedGroupBodyEl(nestedKey);
+  if (body) body.classList.toggle("hidden", collapsed);
+  tabList.querySelectorAll("button.nested-group-toggle").forEach((el) => {
+    const h = el as HTMLElement;
+    if (h.dataset.nestedGroup === nestedKey) {
+      h.classList.toggle("-rotate-90", collapsed);
+    }
+  });
+}
+
+function applyFlatChannelGroupCollapseDom(channel: string, collapsed: boolean): void {
+  const tabList = document.getElementById("tab-list");
+  if (!tabList) return;
+  const body = Array.from(tabList.querySelectorAll("[data-flat-group-body]")).find(
+    (el) => el.getAttribute("data-flat-group-body") === channel
+  ) as HTMLElement | null;
+  if (body) body.classList.toggle("hidden", collapsed);
+  tabList.querySelectorAll(".group-toggle").forEach((el) => {
+    const h = el as HTMLElement;
+    if (h.dataset.group === channel) {
+      h.classList.toggle("-rotate-90", collapsed);
+    }
+  });
+}
+
+function wireSectionLayoutInteractivity(_container: HTMLElement) {
+  /* Collapse/expand uses delegated click + DOM updates (apply*CollapseDom); no per-render listeners. */
+}
+
+function buildLiveSectionedHtml(videosToShow: VideoData[], sections: SessionSection[], assignments: Record<string, string>): string {
+  const { blocks, unsorted } = partitionLiveVideosBySection(videosToShow, sections, assignments);
+  const parts: string[] = [];
+  for (const { section, videos } of blocks) {
+    const ck = `${SECTION_COLLAPSE_PREFIX}${section.id}`;
+    const color = section.colorIndex ?? 0;
+    const dur = videos.reduce((s, v) => s + v.seconds, 0);
+    const header = renderSectionHeaderHtml({
+      title: section.name,
+      emoji: section.emoji,
+      collapseKey: ck,
+      countLabel: `${videos.length} videos`,
+      durationLabel: formatTime(dur),
+      colorIndex: color,
+      sectionId: section.id,
+    });
+    const collapsed = collapsedGroups.has(ck);
+    const body =
+      videos.length === 0
+        ? renderSectionEmptyPlaceholder(color)
+        : renderLiveVideosInnerHtml(videos, color, section.id);
+    parts.push(`
+      <div class="mb-8" data-section-wrapper="${escapeHtml(section.id)}">
+        ${header}
+        <div class="pl-1 ${collapsed ? "hidden" : ""}" data-section-body="${escapeHtml(section.id)}">
+          ${body}
+        </div>
+      </div>
+    `);
+  }
+  {
+    const ck = UNSORTED_COLLAPSE_KEY;
+    const dur = unsorted.reduce((s, v) => s + v.seconds, 0);
+    const header = renderSectionHeaderHtml({
+      title: "Unsorted",
+      emoji: "✦",
+      subtitle: "Videos not assigned to a section yet",
+      collapseKey: ck,
+      countLabel: `${unsorted.length} videos`,
+      durationLabel: formatTime(dur),
+      colorIndex: "unsorted",
+    });
+    const collapsed = collapsedGroups.has(ck);
+    const body = unsorted.length === 0 ? "" : renderLiveVideosInnerHtml(unsorted, "unsorted", "__unsorted");
+    parts.push(`
+      <div class="mb-8" data-section-wrapper="__unsorted">
+        ${header}
+        <div class="pl-1 ${collapsed ? "hidden" : ""}" data-section-body="__unsorted">
+          ${body}
+        </div>
+      </div>
+    `);
+  }
+  return parts.join("");
+}
+
 let toastTimeout: ReturnType<typeof setTimeout> | null = null;
 function showToast(message: string, durationMs = 3000) {
   const el = document.getElementById("toast");
@@ -507,16 +1170,18 @@ interface ConfirmOptions {
   confirmDanger?: boolean;
 }
 
-function showNameSessionModal(defaultName: string): Promise<string | null> {
+function showNameSessionModal(defaultName: string, heading = "Name this session"): Promise<string | null> {
   return new Promise((resolve) => {
     const modal = document.getElementById("name-session-modal");
     const input = document.getElementById("name-session-input") as HTMLInputElement;
     const cancelBtn = document.getElementById("name-session-cancel");
     const saveBtn = document.getElementById("name-session-save");
+    const titleEl = document.getElementById("name-session-title");
     if (!modal || !input || !cancelBtn || !saveBtn) {
       resolve(null);
       return;
     }
+    if (titleEl) titleEl.textContent = heading;
     input.value = defaultName;
     input.select();
     const close = (result: string | null) => {
@@ -691,6 +1356,109 @@ function scheduleFetchTabsFromEvents() {
   }, FETCH_TABS_DEBOUNCE_MS);
 }
 
+function fingerprintSessionTabsInner(tabs: SavedSessionTab[], collapseScopeId: string): string {
+  if (tabs.length === 0) return "";
+  if (groupingMode !== "channel") {
+    return sortSessionTabs(tabs)
+      .map((tab) => `${tab.url}|${tab.title}|${tab.channelName}|${tab.seconds}|${tab.sectionId ?? ""}`)
+      .join(";");
+  }
+  const channels = new Map<string, SavedSessionTab[]>();
+  tabs.forEach((tab) => {
+    const name = tab.channelName ?? "Unknown Channel";
+    if (!channels.has(name)) channels.set(name, []);
+    channels.get(name)!.push(tab);
+  });
+  let sortedGroups = Array.from(channels.entries());
+  if (sortOption === "channel-asc") {
+    sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
+  } else if (sortOption === "duration-desc") {
+    sortedGroups.sort((a, b) => {
+      const durationA = a[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+      const durationB = b[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+      return durationB - durationA;
+    });
+  } else if (sortOption === "duration-asc") {
+    sortedGroups.sort((a, b) => {
+      const durationA = a[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+      const durationB = b[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+      return durationA - durationB;
+    });
+  }
+  return sortedGroups
+    .map(([channel, tabList]) => {
+      const ck = nestedChannelCollapseKey(collapseScopeId, channel);
+      const collapsed = collapsedGroups.has(ck);
+      const sortedTabs = sortSessionTabs(tabList);
+      const sig = sortedTabs
+        .map((tab) => `${tab.url}|${tab.title}|${tab.channelName}|${tab.seconds}|${tab.sectionId ?? ""}`)
+        .join(";");
+      return `${ck}:${collapsed}:${sig}`;
+    })
+    .join("||");
+}
+
+function fingerprintLiveVideosInner(videos: VideoData[], collapseScopeId: string): string {
+  if (videos.length === 0) return "";
+  if (groupingMode !== "channel") {
+    return sortVideos(videos)
+      .map(
+        (video) =>
+          `${video.id}|${video.url}|${video.title}|${video.channelName}|${video.seconds}|${video.isLive ? 1 : 0}`
+      )
+      .join(";");
+  }
+  const channels = new Map<string, VideoData[]>();
+  videos.forEach((video) => {
+    const name = video.channelName || "Unknown Channel";
+    if (!channels.has(name)) channels.set(name, []);
+    channels.get(name)!.push(video);
+  });
+  let sortedGroups = Array.from(channels.entries());
+  if (sortOption === "channel-asc") {
+    sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
+  } else if (sortOption === "duration-desc") {
+    sortedGroups.sort((a, b) => {
+      const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
+      const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
+      return durationB - durationA;
+    });
+  } else if (sortOption === "duration-asc") {
+    sortedGroups.sort((a, b) => {
+      const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
+      const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
+      return durationA - durationB;
+    });
+  }
+  return sortedGroups
+    .map(([channel, groupVideos]) => {
+      const ck = nestedChannelCollapseKey(collapseScopeId, channel);
+      const collapsed = collapsedGroups.has(ck);
+      const sortedGroupVideos = sortVideos(groupVideos);
+      const allSelected = groupVideos.every((video) => selectedTabIds.has(video.id));
+      const someSelected = !allSelected && groupVideos.some((video) => selectedTabIds.has(video.id));
+      const vidSig = sortedGroupVideos
+        .map(
+          (video) =>
+            `${video.id}|${video.url}|${video.title}|${video.channelName}|${video.seconds}|${video.isLive ? 1 : 0}`
+        )
+        .join(";");
+      return `${ck}:${collapsed}:${allSelected}:${someSelected}:${vidSig}`;
+    })
+    .join("||");
+}
+
+function sessionSectionsFingerprintSig(session: SavedSession): string {
+  return orderedSections(session.sections)
+    .map((s) => `${s.id}:${s.name}:${s.order}:${s.emoji ?? ""}:${s.colorIndex ?? 0}`)
+    .join("|");
+}
+
+function liveAssignmentsFingerprintSig(): string {
+  const entries = Object.entries(liveTabSectionsState.assignments).sort(([a], [b]) => a.localeCompare(b));
+  return entries.map(([url, sid]) => `${url}→${sid}`).join(";");
+}
+
 function tabListFingerprint(): string {
   if (selectedSession) {
     const session = selectedSession;
@@ -715,8 +1483,22 @@ function tabListFingerprint(): string {
       thumbnailQuality,
       [...collapsedGroups].sort().join(","),
       [...selectedSessionTabUrls].sort().join("|"),
+      sessionSectionsFingerprintSig(session),
     ].join("\x1f");
-    if (tabsToShow.length === 0) return `${state}\x1fempty`;
+    if (tabsToShow.length === 0 && !usesSectionLayoutForSession(session)) return `${state}\x1fempty`;
+    if (usesSectionLayoutForSession(session)) {
+      const secs = orderedSections(session.sections);
+      const { blocks, unsorted } = partitionSessionTabsBySection(tabsToShow, secs);
+      const parts: string[] = [];
+      for (const { section, tabs } of blocks) {
+        const ck = `${SECTION_COLLAPSE_PREFIX}${section.id}`;
+        const collapsed = collapsedGroups.has(ck);
+        parts.push(`${section.id}:${collapsed}:${fingerprintSessionTabsInner(tabs, section.id)}`);
+      }
+      const uCollapsed = collapsedGroups.has(UNSORTED_COLLAPSE_KEY);
+      parts.push(`__unsorted:${uCollapsed}:${fingerprintSessionTabsInner(unsorted, "__unsorted")}`);
+      return `${state}\x1fseclay:${layoutMode}:${parts.join("§")}`;
+    }
     if (groupingMode === "channel") {
       const channels = new Map<string, SavedSessionTab[]>();
       tabsToShow.forEach((tab) => {
@@ -783,8 +1565,29 @@ function tabListFingerprint(): string {
     thumbnailQuality,
     [...collapsedGroups].sort().join(","),
     [...selectedTabIds].sort((a, b) => a - b).join(","),
+    orderedSections(liveTabSectionsState.sections)
+      .map((s) => `${s.id}:${s.name}:${s.order}:${s.emoji ?? ""}:${s.colorIndex ?? 0}`)
+      .join("|"),
+    liveAssignmentsFingerprintSig(),
   ].join("\x1f");
-  if (videosToShow.length === 0) return `${state}\x1fempty`;
+  if (videosToShow.length === 0 && !usesSectionLayoutForLive()) return `${state}\x1fempty`;
+  if (usesSectionLayoutForLive()) {
+    const secs = orderedSections(liveTabSectionsState.sections);
+    const { blocks, unsorted } = partitionLiveVideosBySection(
+      videosToShow,
+      secs,
+      liveTabSectionsState.assignments
+    );
+    const parts: string[] = [];
+    for (const { section, videos } of blocks) {
+      const ck = `${SECTION_COLLAPSE_PREFIX}${section.id}`;
+      const collapsed = collapsedGroups.has(ck);
+      parts.push(`${section.id}:${collapsed}:${fingerprintLiveVideosInner(videos, section.id)}`);
+    }
+    const uCollapsed = collapsedGroups.has(UNSORTED_COLLAPSE_KEY);
+    parts.push(`__unsorted:${uCollapsed}:${fingerprintLiveVideosInner(unsorted, "__unsorted")}`);
+    return `${state}\x1flivesec:${layoutMode}:${parts.join("§")}`;
+  }
   if (groupingMode === "none") {
     const sortedVideos = sortVideos(videosToShow);
     const vidSig = sortedVideos
@@ -977,13 +1780,20 @@ function renderMain() {
     const fpSession = tabListFingerprint();
     if (fpSession === lastTabListFingerprint) return;
 
-    if (tabsToShow.length === 0) {
+    if (tabsToShow.length === 0 && !usesSectionLayoutForSession(session)) {
       container.innerHTML = `
       <div class="flex flex-col items-center justify-center py-16 opacity-40">
         <div class="text-4xl mb-4">📺</div>
         <div>No videos found</div>
       </div>
     `;
+      lastTabListFingerprint = fpSession;
+    } else if (usesSectionLayoutForSession(session)) {
+      const secs = orderedSections(session.sections);
+      const contentHtml = buildSessionSectionedHtml(tabsToShow, secs);
+      container.innerHTML = `<div class="space-y-2 pb-8">${contentHtml}</div>`;
+      wireSectionLayoutInteractivity(container);
+      thumbnailCacheBackfill(container);
       lastTabListFingerprint = fpSession;
     } else {
       let contentHtml: string;
@@ -1032,25 +1842,13 @@ function renderMain() {
                   <span>${formatTime(groupDuration)}</span>
                 </div>
               </div>
-              <div class="space-y-1 ml-12 border-l border-border pl-2 mt-1 ${isCollapsed ? "hidden" : ""}">
+              <div class="space-y-1 ml-12 border-l border-border pl-2 mt-1 ${isCollapsed ? "hidden" : ""}" data-flat-group-body="${escapeHtml(channel)}">
                 ${gridOrList}
               </div>
             </div>
           `;
           })
           .join("");
-        setTimeout(() => {
-          container.querySelectorAll(".group-toggle").forEach((toggle) => {
-            toggle.addEventListener("click", () => {
-              const groupName = (toggle as HTMLElement).dataset.group;
-              if (groupName) {
-                if (collapsedGroups.has(groupName)) collapsedGroups.delete(groupName);
-                else collapsedGroups.add(groupName);
-                render();
-              }
-            });
-          });
-        }, 0);
       } else {
         const sorted = sortSessionTabs(tabsToShow);
         contentHtml =
@@ -1097,13 +1895,29 @@ function renderMain() {
     return;
   }
 
-  if (videosToShow.length === 0) {
+  if (videosToShow.length === 0 && !usesSectionLayoutForLive()) {
     container.innerHTML = `
       <div class="flex flex-col items-center justify-center h-full opacity-40">
         <div class="text-4xl mb-4">📺</div>
         <div>No videos found</div>
       </div>
     `;
+    lastTabListFingerprint = fpLive;
+    return;
+  }
+
+  if (usesSectionLayoutForLive()) {
+    const secs = orderedSections(liveTabSectionsState.sections);
+    const contentHtml = buildLiveSectionedHtml(videosToShow, secs, liveTabSectionsState.assignments);
+    container.innerHTML = `<div class="space-y-2 pb-8">${contentHtml}</div>`;
+    wireSectionLayoutInteractivity(container);
+    thumbnailCacheBackfill(container);
+    setTimeout(() => {
+      document.querySelectorAll("#tab-list input[type='checkbox']").forEach((checkbox) => {
+        const input = checkbox as HTMLInputElement;
+        if (input.hasAttribute("indeterminate")) input.indeterminate = true;
+      });
+    }, 0);
     lastTabListFingerprint = fpLive;
     return;
   }
@@ -1174,7 +1988,7 @@ function renderMain() {
                     </div>
                 </div>
                 
-                <div class="space-y-1 ml-12 border-l border-border pl-2 mt-1 ${isCollapsed ? 'hidden' : ''}">
+                <div class="space-y-1 ml-12 border-l border-border pl-2 mt-1 ${isCollapsed ? 'hidden' : ''}" data-flat-group-body="${escapeHtml(channel)}">
                     ${layoutMode === 'grid' ? renderVideoGrid(sortedGroupVideos) : renderVideoList(sortedGroupVideos)}
                 </div>
             </div>
@@ -1192,15 +2006,16 @@ function renderMain() {
   }
 }
 
-function renderVideoList(videos: VideoData[]): string {
+function renderVideoList(videos: VideoData[], sectionColorIndex?: number | "unsorted"): string {
+  const dnd = tabCardDnDHtml(sectionColorIndex);
   return videos.map(video => {
     const isSelected = selectedTabIds.has(video.id);
     const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
 
     return `
-      <div class="group relative flex items-center gap-4 p-3 rounded-lg border border-transparent hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? 'bg-surface-hover border-border' : ''}" data-id="${video.id}">
+      <div class="group relative flex items-center gap-4 p-3 rounded-lg border border-transparent hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? 'bg-surface-hover border-border' : ''}${dnd.extraClass}" data-id="${video.id}"${dnd.draggableAttr}>
         <div class="relative flex items-center justify-center w-5 h-5 cursor-pointer selection-toggle">
-          <input type="checkbox" class="peer appearance-none w-4 h-4 rounded border border-text-muted/40 checked:bg-accent checked:border-accent transition-colors cursor-pointer" ${isSelected ? 'checked' : ''}>
+          <input type="checkbox" draggable="false" class="peer appearance-none w-4 h-4 rounded border border-text-muted/40 checked:bg-accent checked:border-accent transition-colors cursor-pointer" ${isSelected ? 'checked' : ''}>
           <svg class="absolute w-2.5 h-2.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
         </div>
 
@@ -1223,10 +2038,10 @@ function renderVideoList(videos: VideoData[]): string {
         </div>
 
         <div class="absolute right-4 opacity-0 group-hover:opacity-100 flex items-center gap-2 transition-opacity bg-surface-elevated/90 backdrop-blur-sm rounded-md p-1 shadow-sm border border-border/50">
-           <button class="p-1.5 text-text-muted hover:bg-accent hover:text-white rounded transition-colors duration-200 jump-btn" title="Go to Tab">
+           <button type="button" draggable="false" class="p-1.5 text-text-muted hover:bg-accent hover:text-white rounded transition-colors duration-200 jump-btn" title="Go to Tab">
              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
            </button>
-           <button class="p-1.5 text-text-muted hover:bg-accent hover:text-white rounded transition-colors duration-200 close-btn" title="Close Tab">
+           <button type="button" draggable="false" class="p-1.5 text-text-muted hover:bg-accent hover:text-white rounded transition-colors duration-200 close-btn" title="Close Tab">
              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
            </button>
         </div>
@@ -1254,9 +2069,11 @@ function sortSessionTabs(tabs: SavedSessionTab[]): SavedSessionTab[] {
   });
 }
 
-function renderSessionGrid(tabs: SavedSessionTab[]): string {
+function renderSessionGrid(tabs: SavedSessionTab[], sectionColorIndex?: number | "unsorted"): string {
   if (tabs.length === 0) return "";
   const thumbQuality = thumbnailQuality === "high" ? "hqdefault.jpg" : "mqdefault.jpg";
+  const dnd = tabCardDnDHtml(sectionColorIndex);
+  const imgDragOff = sectionColorIndex !== undefined ? ` draggable="false"` : "";
   const cardsHtml = tabs.map((tab) => {
     const videoId = getVideoIdFromUrl(tab.url);
     const { src: thumbnailUrl, cacheKey: thumbnailCacheKey } = getThumbnailSrc(videoId, thumbQuality);
@@ -1269,10 +2086,10 @@ function renderSessionGrid(tabs: SavedSessionTab[]): string {
     const isSelected = selectedSessionTabUrls.has(tab.url);
     const urlAttr = escapeHtml(tab.url);
     return `
-      <div class="group relative flex flex-col rounded-lg border border-transparent overflow-hidden hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? "bg-surface-hover border-border ring-1 ring-accent/50" : ""}" data-session-tab-url="${urlAttr}">
+      <div class="group relative flex flex-col rounded-lg border border-transparent overflow-hidden hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? "bg-surface-hover border-border ring-1 ring-accent/50" : ""}${dnd.extraClass}" data-session-tab-url="${urlAttr}"${dnd.draggableAttr}>
         <div class="relative w-full aspect-video bg-surface-elevated/50 overflow-hidden session-video-click-target cursor-pointer">
           ${thumbnailUrl
-        ? `<img ${imgAttr} class="manager-card-thumb w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="eager" decoding="async" alt="" />`
+        ? `<img ${imgAttr} class="manager-card-thumb w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="eager" decoding="async" alt=""${imgDragOff} />`
         : `<div class="w-full h-full flex items-center justify-center text-text-muted/20"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="12" cy="12" r="3"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>`
       }
           <div class="absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-mono font-medium text-white backdrop-blur-sm">
@@ -1284,14 +2101,14 @@ function renderSessionGrid(tabs: SavedSessionTab[]): string {
             </div>
           </div>
           <div class="absolute top-2 left-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity ${isSelected ? "opacity-100" : ""} session-selection-toggle flex items-center justify-center w-5 h-5">
-            <input type="checkbox" class="peer appearance-none w-4 h-4 rounded border border-white/60 checked:bg-accent checked:border-accent bg-black/40 backdrop-blur-sm transition-colors cursor-pointer" ${isSelected ? "checked" : ""}>
+            <input type="checkbox" draggable="false" class="peer appearance-none w-4 h-4 rounded border border-white/60 checked:bg-accent checked:border-accent bg-black/40 backdrop-blur-sm transition-colors cursor-pointer" ${isSelected ? "checked" : ""}>
             <svg class="absolute w-2.5 h-2.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
           </div>
           <div class="absolute top-1 right-1 flex gap-1 transform translate-x-2 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 transition-all duration-200">
-            <button type="button" class="p-1.5 hover:bg-black/60 bg-black/40 text-white rounded-md backdrop-blur-sm transition-colors session-open-new-tab" title="Open in new tab">
+            <button type="button" draggable="false" class="p-1.5 hover:bg-black/60 bg-black/40 text-white rounded-md backdrop-blur-sm transition-colors session-open-new-tab" title="Open in new tab">
               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
             </button>
-            <button type="button" class="p-1.5 hover:bg-red-500/80 bg-black/40 text-white rounded-md backdrop-blur-sm transition-colors session-remove-btn" title="Remove from session">
+            <button type="button" draggable="false" class="p-1.5 hover:bg-red-500/80 bg-black/40 text-white rounded-md backdrop-blur-sm transition-colors session-remove-btn" title="Remove from session">
               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
             </button>
           </div>
@@ -1306,7 +2123,8 @@ function renderSessionGrid(tabs: SavedSessionTab[]): string {
   return `<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 p-1">${cardsHtml}</div>`;
 }
 
-function renderSessionList(tabs: SavedSessionTab[]): string {
+function renderSessionList(tabs: SavedSessionTab[], sectionColorIndex?: number | "unsorted"): string {
+  const dnd = tabCardDnDHtml(sectionColorIndex);
   return tabs.map((tab) => {
     const title = tab.title ?? "Untitled";
     const channel = tab.channelName ?? "";
@@ -1314,9 +2132,9 @@ function renderSessionList(tabs: SavedSessionTab[]): string {
     const isSelected = selectedSessionTabUrls.has(tab.url);
     const urlAttr = escapeHtml(tab.url);
     return `
-      <div class="group relative flex items-center gap-4 p-3 rounded-lg border border-transparent hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? "bg-surface-hover border-border" : ""}" data-session-tab-url="${urlAttr}">
+      <div class="group relative flex items-center gap-4 p-3 rounded-lg border border-transparent hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? "bg-surface-hover border-border" : ""}${dnd.extraClass}" data-session-tab-url="${urlAttr}"${dnd.draggableAttr}>
         <div class="relative flex items-center justify-center w-5 h-5 shrink-0 cursor-pointer session-selection-toggle">
-          <input type="checkbox" class="peer appearance-none w-4 h-4 rounded border border-text-muted/40 checked:bg-accent checked:border-accent transition-colors cursor-pointer" ${isSelected ? "checked" : ""}>
+          <input type="checkbox" draggable="false" class="peer appearance-none w-4 h-4 rounded border border-text-muted/40 checked:bg-accent checked:border-accent transition-colors cursor-pointer" ${isSelected ? "checked" : ""}>
           <svg class="absolute w-2.5 h-2.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
         </div>
         <div class="flex-1 min-w-0 pr-12 session-video-click-target cursor-pointer">
@@ -1327,10 +2145,10 @@ function renderSessionList(tabs: SavedSessionTab[]): string {
           <div class="text-xs font-mono text-text-muted">${formatCompact(sec)}</div>
         </div>
         <div class="absolute right-4 flex items-center gap-1">
-          <button type="button" class="p-1.5 rounded hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors session-open-new-tab" title="Open in new tab">
+          <button type="button" draggable="false" class="p-1.5 rounded hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors session-open-new-tab" title="Open in new tab">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
           </button>
-          <button type="button" class="p-1.5 rounded hover:bg-red-500/20 text-text-muted hover:text-red-500 transition-colors session-remove-btn" title="Remove from session">
+          <button type="button" draggable="false" class="p-1.5 rounded hover:bg-red-500/20 text-text-muted hover:text-red-500 transition-colors session-remove-btn" title="Remove from session">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
           </button>
         </div>
@@ -1339,10 +2157,12 @@ function renderSessionList(tabs: SavedSessionTab[]): string {
   }).join("");
 }
 
-function renderVideoGrid(videos: VideoData[]): string {
+function renderVideoGrid(videos: VideoData[], sectionColorIndex?: number | "unsorted"): string {
   if (videos.length === 0) return '';
 
   const thumbQuality = thumbnailQuality === 'high' ? 'hqdefault.jpg' : 'mqdefault.jpg';
+  const dnd = tabCardDnDHtml(sectionColorIndex);
+  const imgDragOff = sectionColorIndex !== undefined ? ` draggable="false"` : "";
   const cardsHtml = videos.map(video => {
     const isSelected = selectedTabIds.has(video.id);
     const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
@@ -1353,11 +2173,10 @@ function renderVideoGrid(videos: VideoData[]): string {
       : `src="${thumbnailUrl}"`;
 
     return `
-            <div class="group relative flex flex-col rounded-lg border border-transparent overflow-hidden hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? 'bg-surface-hover border-border ring-1 ring-accent/50' : ''}" data-id="${video.id}">
-                
+            <div class="group relative flex flex-col rounded-lg border border-transparent overflow-hidden hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? 'bg-surface-hover border-border ring-1 ring-accent/50' : ''}${dnd.extraClass}" data-id="${video.id}"${dnd.draggableAttr}>
                 <div class="relative w-full aspect-video bg-surface-elevated/50 overflow-hidden video-click-target cursor-pointer">
                     ${thumbnailUrl
-        ? `<img ${imgAttr} class="manager-card-thumb w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="eager" decoding="async" alt="" />`
+        ? `<img ${imgAttr} class="manager-card-thumb w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="eager" decoding="async" alt=""${imgDragOff} />`
         : `<div class="w-full h-full flex items-center justify-center text-text-muted/20"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="12" cy="12" r="3"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>`
       }
                     
@@ -1376,15 +2195,15 @@ function renderVideoGrid(videos: VideoData[]): string {
                     </div>
 
                     <div class="absolute top-2 left-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity ${isSelected ? 'opacity-100' : ''} selection-toggle flex items-center justify-center w-5 h-5">
-                        <input type="checkbox" class="peer appearance-none w-4 h-4 rounded border border-white/60 checked:bg-accent checked:border-accent bg-black/40 backdrop-blur-sm transition-colors cursor-pointer" ${isSelected ? 'checked' : ''}>
+                        <input type="checkbox" draggable="false" class="peer appearance-none w-4 h-4 rounded border border-white/60 checked:bg-accent checked:border-accent bg-black/40 backdrop-blur-sm transition-colors cursor-pointer" ${isSelected ? 'checked' : ''}>
                         <svg class="absolute w-2.5 h-2.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                     </div>
 
                     <div class="absolute top-1 right-1 flex gap-1 transform translate-x-2 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 transition-all duration-200">
-                         <button class="p-1.5 bg-black/40 hover:bg-accent text-white rounded-md backdrop-blur-sm border border-white/10 hover:border-accent transition-all duration-200 jump-btn" title="Go to Tab">
+                         <button type="button" draggable="false" class="p-1.5 bg-black/40 hover:bg-accent text-white rounded-md backdrop-blur-sm border border-white/10 hover:border-accent transition-all duration-200 jump-btn" title="Go to Tab">
                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
                          </button>
-                         <button class="p-1.5 bg-black/40 hover:bg-accent text-white rounded-md backdrop-blur-sm border border-white/10 hover:border-accent transition-all duration-200 close-btn" title="Close Tab">
+                         <button type="button" draggable="false" class="p-1.5 bg-black/40 hover:bg-accent text-white rounded-md backdrop-blur-sm border border-white/10 hover:border-accent transition-all duration-200 close-btn" title="Close Tab">
                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>
                          </button>
                     </div>
@@ -1436,22 +2255,63 @@ function updateSelectAllCheckbox() {
   if (dashEl) dashEl.style.opacity = checkbox.indeterminate ? "1" : "0";
 }
 
+function currentSectionsForMove(): SessionSection[] {
+  if (selectedSession) return orderedSections(selectedSession.sections);
+  return orderedSections(liveTabSectionsState.sections);
+}
+
+function updateMoveToSectionPopover(): void {
+  const pop = document.getElementById("move-to-section-popover");
+  if (!pop) return;
+  const sections = currentSectionsForMove();
+  if (sections.length === 0) {
+    pop.innerHTML = `<div class="px-3 py-2 text-[11px] text-text-muted">Create a section first</div>`;
+    return;
+  }
+  const items: string[] = [];
+  for (const sec of sections) {
+    const rail = sectionRailVar(sec.colorIndex ?? 0);
+    items.push(`
+      <button type="button" class="move-to-section-item flex items-center gap-2" data-move-section-id="${escapeHtml(sec.id)}" style="--card-rail: ${rail}">
+        <span class="w-1.5 h-4 rounded-full shrink-0" style="background: ${rail}"></span>
+        <span class="truncate">${sec.emoji ? `${escapeHtml(sec.emoji)} ` : ""}${escapeHtml(sec.name)}</span>
+      </button>
+    `);
+  }
+  items.push(`
+    <button type="button" class="move-to-section-item text-text-muted mt-1 border-t border-border pt-2 rounded-none" data-move-section-id="">
+      ✦ Unsorted
+    </button>
+  `);
+  pop.innerHTML = items.join("");
+}
+
 function updateSelectionUI() {
   const bar = document.getElementById("selection-actions");
   const count = document.getElementById("selection-count");
   const closeBtn = document.getElementById("btn-close-selected");
+  const moveWrap = document.getElementById("move-to-section-wrap");
 
   const inSessionView = selectedSession != null;
   const selectionSize = inSessionView ? selectedSessionTabUrls.size : selectedTabIds.size;
+  const hasSections = currentSectionsForMove().length > 0;
 
   if (selectionSize > 0) {
     bar?.classList.remove("hidden");
     bar?.classList.add("flex");
     if (count) count.innerText = `${selectionSize} selected`;
     if (closeBtn) closeBtn.textContent = inSessionView ? "Remove from session" : "Close Selected";
+    if (moveWrap) {
+      if (hasSections) {
+        moveWrap.classList.remove("hidden");
+        updateMoveToSectionPopover();
+      } else moveWrap.classList.add("hidden");
+    }
   } else {
     bar?.classList.add("hidden");
     bar?.classList.remove("flex");
+    moveWrap?.classList.add("hidden");
+    document.getElementById("move-to-section-popover")?.classList.add("hidden");
   }
 
   updateSelectAllCheckbox();
@@ -1607,6 +2467,31 @@ function setupListeners() {
 
   document.getElementById("tab-list")?.addEventListener("click", async (event) => {
     const target = event.target as HTMLElement;
+
+    if (target.closest(".section-collapse-toggle")) {
+      const btn = target.closest(".section-collapse-toggle") as HTMLElement;
+      const key = btn.dataset.sectionCollapse;
+      if (key) {
+        if (collapsedGroups.has(key)) collapsedGroups.delete(key);
+        else collapsedGroups.add(key);
+        applySectionCollapseDom(key, collapsedGroups.has(key));
+        lastTabListFingerprint = tabListFingerprint();
+      }
+      return;
+    }
+
+    if (target.closest(".nested-group-toggle") && !target.closest(".nested-group-selection-toggle")) {
+      const tg = target.closest(".nested-group-toggle") as HTMLElement;
+      const key = tg.dataset.nestedGroup;
+      if (key) {
+        if (collapsedGroups.has(key)) collapsedGroups.delete(key);
+        else collapsedGroups.add(key);
+        applyNestedGroupCollapseDom(key, collapsedGroups.has(key));
+        lastTabListFingerprint = tabListFingerprint();
+      }
+      return;
+    }
+
     const sessionRow = target.closest("[data-session-tab-url]") as HTMLElement | null;
     if (sessionRow && selectedSession) {
       const url = sessionRow.getAttribute("data-session-tab-url");
@@ -1683,13 +2568,56 @@ function setupListeners() {
       if (video) await focusLiveVideoTab(video);
       return;
     }
+    if (target.closest(".nested-group-selection-toggle")) {
+      event.stopPropagation();
+      const el = target.closest(".nested-group-selection-toggle") as HTMLElement;
+      const scopeId = el.dataset.nestedGroupScope;
+      const channel = el.dataset.nestedChannel;
+      if (!scopeId || !channel) return;
+      if (selectedSession) {
+        const secs = orderedSections(selectedSession.sections);
+        const inSection = (tab: SavedSessionTab) => {
+          if (scopeId === "__unsorted") return !sessionTabSectionId(tab, secs);
+          return sessionTabSectionId(tab, secs) === scopeId;
+        };
+        const groupTabs = (selectedSession.tabs ?? []).filter(
+          (t) => inSection(t) && (t.channelName ?? "Unknown Channel") === channel
+        );
+        const urls = groupTabs.map((t) => t.url ?? "").filter(Boolean);
+        const allSelected = urls.length > 0 && urls.every((u) => selectedSessionTabUrls.has(u));
+        urls.forEach((u) => {
+          if (allSelected) selectedSessionTabUrls.delete(u);
+          else selectedSessionTabUrls.add(u);
+        });
+      } else {
+        let scopeVideos = allVideos;
+        if (currentWindowId !== "all") {
+          scopeVideos = allVideos.filter((video) => video.windowId === currentWindowId);
+        }
+        const groupVideos = scopeVideos.filter((v) => {
+          const sid = liveSectionIdForVideo(v);
+          const inSec = scopeId === "__unsorted" ? sid === undefined : sid === scopeId;
+          return inSec && (v.channelName || "Unknown Channel") === channel;
+        });
+        const allSelected =
+          groupVideos.length > 0 && groupVideos.every((v) => selectedTabIds.has(v.id));
+        groupVideos.forEach((v) => {
+          if (allSelected) selectedTabIds.delete(v.id);
+          else selectedTabIds.add(v.id);
+        });
+      }
+      updateSelectionUI();
+      render();
+      return;
+    }
     const groupToggle = target.closest(".group-toggle");
     if (groupToggle) {
       const groupName = (groupToggle as HTMLElement).dataset.group;
       if (groupName) {
         if (collapsedGroups.has(groupName)) collapsedGroups.delete(groupName);
         else collapsedGroups.add(groupName);
-        render();
+        applyFlatChannelGroupCollapseDom(groupName, collapsedGroups.has(groupName));
+        lastTabListFingerprint = tabListFingerprint();
       }
       return;
     }
@@ -1713,6 +2641,83 @@ function setupListeners() {
         updateSelectionUI();
         render();
       }
+    }
+  });
+
+  document.getElementById("tab-list")?.addEventListener("dragstart", (e) => {
+    const t = e.target as HTMLElement;
+    if (
+      t.closest(
+        "button, input, .session-selection-toggle, .selection-toggle, .session-open-new-tab, .session-remove-btn, .jump-btn, .close-btn, .nested-group-selection-toggle, .nested-group-toggle, .group-toggle, .section-collapse-toggle"
+      )
+    ) {
+      e.preventDefault();
+      return;
+    }
+    const sessionRow = t.closest("[data-session-tab-url]") as HTMLElement | null;
+    if (sessionRow && selectedSession) {
+      const url = sessionRow.getAttribute("data-session-tab-url");
+      if (!url) return;
+      e.dataTransfer?.setData(TAB_MANAGER_DRAG_MIME, JSON.stringify({ kind: "session", url }));
+      e.dataTransfer!.effectAllowed = "move";
+      sessionRow.classList.add("tab-card-dragging");
+      return;
+    }
+    const liveRow = t.closest("[data-id]") as HTMLElement | null;
+    if (liveRow && !selectedSession) {
+      const id = parseInt(liveRow.dataset.id || "0", 10);
+      if (Number.isNaN(id)) return;
+      e.dataTransfer?.setData(TAB_MANAGER_DRAG_MIME, JSON.stringify({ kind: "live", tabId: id }));
+      e.dataTransfer!.effectAllowed = "move";
+      liveRow.classList.add("tab-card-dragging");
+    }
+  });
+
+  document.getElementById("tab-list")?.addEventListener("dragend", () => {
+    document.querySelectorAll(".tab-card-dragging").forEach((el) => el.classList.remove("tab-card-dragging"));
+    clearSectionDropHighlight();
+  });
+
+  document.getElementById("tab-list")?.addEventListener("dragover", (e) => {
+    if (!e.dataTransfer?.types.includes(TAB_MANAGER_DRAG_MIME)) return;
+    const zone = (e.target as HTMLElement).closest("[data-section-wrapper]");
+    setSectionDropHighlight(zone);
+    if (zone) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+    }
+  });
+
+  document.getElementById("tab-list")?.addEventListener("drop", async (e) => {
+    if (!e.dataTransfer?.types.includes(TAB_MANAGER_DRAG_MIME)) return;
+    const zone = (e.target as HTMLElement).closest("[data-section-wrapper]");
+    e.preventDefault();
+    clearSectionDropHighlight();
+    if (!zone) return;
+    const raw = e.dataTransfer.getData(TAB_MANAGER_DRAG_MIME);
+    const payload = parseTabManagerDrag(raw);
+    if (!payload) return;
+    const sectionKey = zone.getAttribute("data-section-wrapper");
+    const targetSectionId = sectionKey === "__unsorted" || sectionKey == null ? null : sectionKey;
+
+    if (payload.kind === "session") {
+      if (!selectedSession) return;
+      const secs = orderedSections(selectedSession.sections);
+      const tab = (selectedSession.tabs ?? []).find((x) => (x.url ?? "") === payload.url);
+      const cur = tab ? sessionTabSectionId(tab, secs) : undefined;
+      const curNorm = cur ?? null;
+      const tgtNorm = targetSectionId ?? null;
+      if (curNorm === tgtNorm) return;
+      await moveSessionTabsToSection([payload.url], targetSectionId);
+    } else {
+      if (selectedSession) return;
+      const video = allVideos.find((v) => v.id === payload.tabId);
+      if (!video) return;
+      const cur = liveSectionIdForVideo(video);
+      const curNorm = cur ?? null;
+      const tgtNorm = targetSectionId ?? null;
+      if (curNorm === tgtNorm) return;
+      await moveLiveVideosToSection([payload.tabId], targetSectionId);
     }
   });
 
@@ -1756,14 +2761,25 @@ function setupListeners() {
     const defaultName = `Session ${new Date().toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}`;
     const name = await showNameSessionModal(defaultName);
     if (name === null) return;
-    const tabs: SavedSessionTab[] = allVideos.map((video) => ({
-      url: video.url,
-      title: video.title,
-      channelName: video.channelName,
-      seconds: video.seconds,
-    }));
+    const liveSecs = orderedSections(liveTabSectionsState.sections);
+    const valid = validSectionIds(liveSecs);
+    const tabs: SavedSessionTab[] = allVideos.map((video) => {
+      const key = normalizeYoutubeUrl(video.url);
+      const sid = liveTabSectionsState.assignments[key];
+      return {
+        url: video.url,
+        title: video.title,
+        channelName: video.channelName,
+        seconds: video.seconds,
+        sectionId: sid && valid.has(sid) ? sid : undefined,
+      };
+    });
+    const referenced = new Set(
+      tabs.map((t) => t.sectionId).filter((x): x is string => typeof x === "string" && x.length > 0)
+    );
+    const secsToSave = liveSecs.filter((s) => referenced.has(s.id));
     try {
-      await saveSession(name, tabs);
+      await saveSession(name, tabs, secsToSave.length > 0 ? secsToSave : undefined);
       await refreshSavedSessionsSidebar();
       showToast(`Saved "${name}" (${tabs.length} tabs)`);
     } catch (err) {
@@ -1806,14 +2822,25 @@ function setupListeners() {
     const defaultName = `Session ${new Date().toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}`;
     const name = await showNameSessionModal(defaultName);
     if (name === null) return;
-    const tabs: SavedSessionTab[] = videosToSave.map((video) => ({
-      url: video.url,
-      title: video.title,
-      channelName: video.channelName,
-      seconds: video.seconds,
-    }));
+    const liveSecs = orderedSections(liveTabSectionsState.sections);
+    const valid = validSectionIds(liveSecs);
+    const tabs: SavedSessionTab[] = videosToSave.map((video) => {
+      const key = normalizeYoutubeUrl(video.url);
+      const sid = liveTabSectionsState.assignments[key];
+      return {
+        url: video.url,
+        title: video.title,
+        channelName: video.channelName,
+        seconds: video.seconds,
+        sectionId: sid && valid.has(sid) ? sid : undefined,
+      };
+    });
+    const referenced = new Set(
+      tabs.map((t) => t.sectionId).filter((x): x is string => typeof x === "string" && x.length > 0)
+    );
+    const secsToSave = liveSecs.filter((s) => referenced.has(s.id));
     try {
-      await saveSession(name, tabs);
+      await saveSession(name, tabs, secsToSave.length > 0 ? secsToSave : undefined);
       await refreshSavedSessionsSidebar();
       showToast(`Saved "${name}" (${tabs.length} tabs)`);
     } catch (err) {
@@ -1857,12 +2884,192 @@ function setupListeners() {
     }
   });
 
+  function openTabSectionContextMenu(
+    clientX: number,
+    clientY: number,
+    target: { mode: "session"; url: string } | { mode: "live"; tabId: number }
+  ) {
+    tabSectionContextTarget = target;
+    const menu = document.getElementById("tab-section-context-menu");
+    const items = document.getElementById("tab-section-context-items");
+    if (!menu || !items) return;
+    const sections = currentSectionsForMove();
+    if (sections.length === 0) {
+      items.innerHTML = `<div class="px-3 py-2 text-[11px] text-text-muted leading-relaxed">Add a section with <span class="text-text-secondary font-medium">New section</span> first.</div>`;
+    } else {
+      const rows = sections.map((sec) => {
+        const rail = sectionRailVar(sec.colorIndex ?? 0);
+        return `
+          <button type="button" class="tab-ctx-section-item" data-ctx-section-id="${escapeHtml(sec.id)}">
+            <span class="w-1.5 h-4 rounded-full shrink-0" style="background:${rail}"></span>
+            <span class="truncate">${sec.emoji ? `${escapeHtml(sec.emoji)} ` : ""}${escapeHtml(sec.name)}</span>
+          </button>`;
+      });
+      rows.push(
+        `<button type="button" class="tab-ctx-section-item text-text-muted border-t border-border/60 mt-1 pt-2 rounded-none" data-ctx-section-id="">✦ Unsorted</button>`
+      );
+      items.innerHTML = rows.join("");
+    }
+    menu.classList.remove("hidden");
+    menu.style.left = `${Math.min(clientX, window.innerWidth - 240)}px`;
+    menu.style.top = `${Math.min(clientY, window.innerHeight - 220)}px`;
+  }
+
+  document.getElementById("btn-add-section")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openAddSectionModal();
+  });
+
+  document.getElementById("add-section-close")?.addEventListener("click", () => closeAddSectionModal());
+  document.getElementById("add-section-modal")?.addEventListener("click", (e) => {
+    if ((e.target as HTMLElement).id === "add-section-modal") closeAddSectionModal();
+  });
+
+  document.getElementById("add-section-presets")?.addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest(".section-preset-btn") as HTMLElement | null;
+    if (!b) return;
+    const name = b.dataset.presetName;
+    const emoji = b.dataset.presetEmoji;
+    const color = parseInt(b.dataset.presetColor || "0", 10);
+    if (!name) return;
+    closeAddSectionModal();
+    void addNewSection(name, emoji || undefined, color);
+  });
+
+  document.getElementById("add-section-custom-submit")?.addEventListener("click", () => {
+    const input = document.getElementById("add-section-custom") as HTMLInputElement | null;
+    const v = input?.value?.trim();
+    if (!v) return;
+    closeAddSectionModal();
+    const n = selectedSession
+      ? orderedSections(selectedSession.sections).length
+      : orderedSections(liveTabSectionsState.sections).length;
+    void addNewSection(v, undefined, n % SECTION_RAIL_VARS.length);
+  });
+
+  document.getElementById("add-section-custom")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      (document.getElementById("add-section-custom-submit") as HTMLButtonElement | null)?.click();
+    }
+  });
+
+  document.getElementById("btn-move-to-section")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    document.getElementById("move-to-section-popover")?.classList.toggle("hidden");
+  });
+
+  document.getElementById("move-to-section-popover")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const btn = (e.target as HTMLElement).closest("[data-move-section-id]") as HTMLElement | null;
+    if (!btn) return;
+    const raw = btn.getAttribute("data-move-section-id");
+    void moveSelectionToSection(raw === "" || raw === null ? null : raw);
+    document.getElementById("move-to-section-popover")?.classList.add("hidden");
+  });
+
+  document.getElementById("move-to-section-wrap")?.addEventListener("click", (e) => e.stopPropagation());
+
+  document.getElementById("tab-section-context-items")?.addEventListener("click", async (e) => {
+    const btn = (e.target as HTMLElement).closest("[data-ctx-section-id]") as HTMLElement | null;
+    if (!btn || !tabSectionContextTarget) return;
+    const raw = btn.getAttribute("data-ctx-section-id");
+    const sectionId = raw === "" || raw === null ? null : raw;
+    const t = tabSectionContextTarget;
+    document.getElementById("tab-section-context-menu")?.classList.add("hidden");
+    tabSectionContextTarget = null;
+    if (t.mode === "session") {
+      await moveSessionTabsToSection([t.url], sectionId);
+    } else {
+      await moveLiveVideosToSection([t.tabId], sectionId);
+    }
+  });
+
+  document.getElementById("section-ctx-rename")?.addEventListener("click", async () => {
+    const ctx = sectionHeaderContextTarget;
+    document.getElementById("section-header-context-menu")?.classList.add("hidden");
+    if (!ctx) return;
+    const sections = currentSectionsForMove();
+    const sec = sections.find((s) => s.id === ctx.sectionId);
+    if (!sec) return;
+    const name = await showNameSessionModal(sec.name, "Rename section");
+    if (name === null) return;
+    await renameSectionById(ctx.sectionId, name);
+    sectionHeaderContextTarget = null;
+  });
+
+  document.getElementById("section-ctx-delete")?.addEventListener("click", async () => {
+    const ctx = sectionHeaderContextTarget;
+    document.getElementById("section-header-context-menu")?.classList.add("hidden");
+    if (!ctx) return;
+    sectionHeaderContextTarget = null;
+    const sections = currentSectionsForMove();
+    const sec = sections.find((s) => s.id === ctx.sectionId);
+    const confirmed = await showConfirm({
+      title: "Delete section",
+      message: `Delete “${sec?.name ?? "section"}”? Videos move to Unsorted.`,
+      confirmLabel: "Delete",
+      confirmDanger: true,
+    });
+    if (confirmed) await deleteSectionById(ctx.sectionId);
+  });
+
+  document.getElementById("tab-list")?.addEventListener("contextmenu", (event) => {
+    const t = event.target as HTMLElement;
+    const sessionRow = t.closest("[data-session-tab-url]") as HTMLElement | null;
+    if (sessionRow && selectedSession) {
+      event.preventDefault();
+      const url = sessionRow.getAttribute("data-session-tab-url");
+      if (url) openTabSectionContextMenu(event.clientX, event.clientY, { mode: "session", url });
+      return;
+    }
+    const liveRow = t.closest("[data-id]") as HTMLElement | null;
+    if (liveRow && !selectedSession) {
+      event.preventDefault();
+      const id = parseInt(liveRow.dataset.id || "0", 10);
+      if (!Number.isNaN(id)) openTabSectionContextMenu(event.clientX, event.clientY, { mode: "live", tabId: id });
+      return;
+    }
+    const titleTarget = t.closest(".section-title-target") as HTMLElement | null;
+    const sid = titleTarget?.dataset.sectionId;
+    if (sid && t.closest(".session-section-shell")) {
+      event.preventDefault();
+      sectionHeaderContextTarget = { sectionId: sid };
+      const menu = document.getElementById("section-header-context-menu");
+      if (menu) {
+        menu.classList.remove("hidden");
+        menu.style.left = `${Math.min(event.clientX, window.innerWidth - 200)}px`;
+        menu.style.top = `${Math.min(event.clientY, window.innerHeight - 120)}px`;
+      }
+    }
+  });
+
+  document.getElementById("tab-list")?.addEventListener("dblclick", async (event) => {
+    const titleEl = (event.target as HTMLElement).closest(".section-title-target") as HTMLElement | null;
+    const sid = titleEl?.dataset.sectionId;
+    if (!sid) return;
+    event.preventDefault();
+    const sections = currentSectionsForMove();
+    const sec = sections.find((s) => s.id === sid);
+    if (!sec) return;
+    const name = await showNameSessionModal(sec.name, "Rename section");
+    if (name === null) return;
+    await renameSectionById(sid, name);
+  });
+
   document.addEventListener("click", () => {
     document.getElementById("sidebar-context-menu")?.classList.add("hidden");
+    document.getElementById("tab-section-context-menu")?.classList.add("hidden");
+    document.getElementById("section-header-context-menu")?.classList.add("hidden");
+    document.getElementById("move-to-section-popover")?.classList.add("hidden");
   });
   document.getElementById("sidebar-context-menu")?.addEventListener("click", (event) => event.stopPropagation());
+  document.getElementById("tab-section-context-menu")?.addEventListener("click", (event) => event.stopPropagation());
+  document.getElementById("section-header-context-menu")?.addEventListener("click", (event) => event.stopPropagation());
   document.addEventListener("contextmenu", () => {
     document.getElementById("sidebar-context-menu")?.classList.add("hidden");
+    document.getElementById("tab-section-context-menu")?.classList.add("hidden");
+    document.getElementById("section-header-context-menu")?.classList.add("hidden");
   });
 
   document.getElementById("btn-settings")?.addEventListener("click", () => {

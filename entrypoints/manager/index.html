@@ -6,7 +6,7 @@
     <title>YouTube Tabs Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Syne:wght@500;600;700&display=swap" rel="stylesheet" />
   </head>
   <body class="font-['Inter',system-ui,sans-serif] bg-surface text-text-primary m-0 p-0 overflow-hidden flex h-full">
     <aside class="w-64 bg-surface-elevated border-r border-border flex flex-col h-full z-10">
@@ -69,6 +69,13 @@
               <div class="flex-1 flex items-center justify-end gap-3 min-w-0">
                    <div id="selection-actions" class="hidden items-center gap-2 mr-4 border-r border-border pr-6 animate-in fade-in slide-in-from-right-4 duration-200">
                        <span id="selection-count" class="text-xs font-bold text-accent whitespace-nowrap">0 selected</span>
+                       <div id="move-to-section-wrap" class="relative hidden">
+                           <button type="button" id="btn-move-to-section" class="px-3 py-1.5 bg-surface-hover hover:bg-surface text-text-secondary hover:text-text-primary text-xs font-medium rounded-md transition-colors border border-border cursor-pointer whitespace-nowrap flex items-center gap-1.5">
+                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg>
+                             Move to…
+                           </button>
+                           <div id="move-to-section-popover" class="hidden absolute right-0 top-full mt-1 z-50 min-w-[200px] max-h-64 overflow-y-auto rounded-xl border border-border bg-surface-elevated/95 backdrop-blur-xl shadow-2xl py-1.5"></div>
+                       </div>
                        <button id="btn-close-selected" class="px-3 py-1.5 bg-surface-hover hover:bg-red-500/10 hover:text-red-500 text-text-secondary text-xs font-medium rounded-md transition-colors border-0 cursor-pointer whitespace-nowrap">
                            Close Selected
                        </button>
@@ -132,6 +139,14 @@
                       <option value="title-asc">Title (A-Z)</option>
                       <option value="channel-asc">Channel (A-Z)</option>
                   </select>
+              </div>
+
+              <div class="ml-auto flex items-center gap-2 pl-3 border-l border-border">
+                  <span class="text-[10px] uppercase font-bold text-text-muted tracking-wider">Sections</span>
+                  <button type="button" id="btn-add-section" class="group inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-border bg-surface-elevated text-xs font-medium text-text-secondary hover:bg-surface-hover hover:border-accent/40 hover:text-text-primary transition-colors" title="Create a new section">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" class="text-accent shrink-0" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                    New section
+                  </button>
               </div>
           </div>
       </header>
@@ -215,8 +230,45 @@
         </div>
     </div>
 
+    <!-- Add / pick section -->
+    <div id="add-section-modal" class="hidden fixed inset-0 z-[56] bg-black/70 backdrop-blur-md" aria-modal="true" role="dialog" aria-labelledby="add-section-title">
+      <div class="flex min-h-full items-center justify-center p-4">
+        <div class="add-section-panel w-full max-w-lg rounded-2xl border border-border/80 bg-surface-elevated/95 p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+          <div class="flex items-start justify-between gap-4 mb-5">
+            <div>
+              <h3 id="add-section-title" class="font-['Syne',sans-serif] text-xl font-semibold text-text-primary tracking-tight">Organize with sections</h3>
+              <p class="text-[13px] text-text-muted mt-1 leading-relaxed">Group videos like playlists—work, podcasts, or anything you need. Sections stay with this session.</p>
+            </div>
+            <button type="button" id="add-section-close" class="shrink-0 p-2 rounded-lg hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 bg-transparent cursor-pointer" aria-label="Close">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
+          </div>
+          <div id="add-section-presets" class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-5"></div>
+          <div class="rounded-xl border border-border/60 bg-surface/80 p-4">
+            <label for="add-section-custom" class="text-[10px] uppercase font-bold text-text-muted tracking-wider">Custom name</label>
+            <div class="flex gap-2 mt-2">
+              <input id="add-section-custom" type="text" class="flex-1 min-w-0 px-3 py-2 text-sm rounded-lg border border-border bg-surface text-text-primary placeholder:text-text-muted/70 focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent/50" placeholder="e.g. Deep work" maxlength="48" />
+              <button type="button" id="add-section-custom-submit" class="px-4 py-2 text-sm font-semibold rounded-lg border-0 bg-accent text-white hover:opacity-90 cursor-pointer shrink-0">Add</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Toast for save confirmation -->
     <div id="toast" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-60 px-4 py-2 rounded-lg bg-surface-elevated border border-border shadow-lg text-sm text-text-primary transition-opacity duration-300" role="status" aria-live="polite"></div>
+
+    <!-- Video / tab context: move to section -->
+    <div id="tab-section-context-menu" class="hidden fixed z-[90] min-w-[220px] max-h-72 overflow-y-auto py-1.5 rounded-xl border border-border bg-surface-elevated/98 backdrop-blur-xl shadow-2xl text-sm custom-scrollbar">
+      <div class="px-3 py-1.5 text-[10px] uppercase font-bold text-text-muted tracking-wider">Move to section</div>
+      <div id="tab-section-context-items" class="px-1"></div>
+    </div>
+
+    <!-- Section header context -->
+    <div id="section-header-context-menu" class="hidden fixed z-[90] min-w-[180px] py-1.5 rounded-xl border border-border bg-surface-elevated/98 backdrop-blur-xl shadow-2xl text-sm">
+      <button type="button" id="section-ctx-rename" class="w-full text-left px-4 py-2.5 hover:bg-surface-hover text-text-primary border-0 bg-transparent cursor-pointer text-sm">Rename…</button>
+      <button type="button" id="section-ctx-delete" class="w-full text-left px-4 py-2.5 hover:bg-red-500/10 text-red-400 border-0 bg-transparent cursor-pointer text-sm">Delete section</button>
+    </div>
 
     <!-- Right-click context menu for sidebar items -->
     <div id="sidebar-context-menu" class="hidden fixed z-100 min-w-[160px] py-1 rounded-lg border border-border bg-surface-elevated shadow-xl text-sm">

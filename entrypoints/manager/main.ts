@@ -2403,6 +2403,7 @@ function setupListeners() {
       selectedSession = null;
       selectedSessionTabUrls.clear();
       currentWindowId = "all";
+      refreshSavedSessionsSidebar();
       render();
     } else if (type === "window") {
       selectedSession = null;
@@ -2410,6 +2411,7 @@ function setupListeners() {
       const id = item.getAttribute("data-window-id");
       if (id) {
         currentWindowId = parseInt(id, 10);
+        refreshSavedSessionsSidebar();
         render();
       }
     } else if (type === "session") {
@@ -2681,7 +2683,7 @@ function setupListeners() {
   document.getElementById("tab-list")?.addEventListener("dragover", (e) => {
     if (!e.dataTransfer?.types.includes(TAB_MANAGER_DRAG_MIME)) return;
     const zone = (e.target as HTMLElement).closest("[data-section-wrapper]");
-    setSectionDropHighlight(zone);
+    setSectionDropHighlight(zone as HTMLElement | null);
     if (zone) {
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";

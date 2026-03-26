@@ -2096,8 +2096,8 @@ function renderSessionGrid(tabs: SavedSessionTab[], sectionColorIndex?: number |
             ${formatCompact(sec)}
           </div>
           <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
-            <div class="w-14 h-14 rounded-full bg-black/50 flex items-center justify-center backdrop-blur-[2px] ring-1 ring-white/15 shadow-lg">
-              <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="white" class="ml-0.5"><path d="M8 5v14l11-7z"/></svg>
+            <div class="w-11 h-11 rounded-full bg-black/45 flex items-center justify-center backdrop-blur-[2px] ring-1 ring-white/20 shadow-md">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="white" class="shrink-0 -translate-x-px" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
             </div>
           </div>
           <div class="absolute top-2 left-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity ${isSelected ? "opacity-100" : ""} session-selection-toggle flex items-center justify-center w-5 h-5">
@@ -2189,8 +2189,8 @@ function renderVideoGrid(videos: VideoData[], sectionColorIndex?: number | "unso
                     </div>
 
                     <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
-                        <div class="w-14 h-14 rounded-full bg-black/50 flex items-center justify-center backdrop-blur-[2px] ring-1 ring-white/15 shadow-lg">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="white" class="ml-0.5"><path d="M8 5v14l11-7z"/></svg>
+                        <div class="w-11 h-11 rounded-full bg-black/45 flex items-center justify-center backdrop-blur-[2px] ring-1 ring-white/20 shadow-md">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="white" class="shrink-0 -translate-x-px" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
                         </div>
                     </div>
 

@@ -11,6 +11,7 @@ import {
   getSavedSessions,
   saveSession,
   deleteSession,
+  renameSession,
   setSessionPinned,
   updateSessionTabs,
   updateSessionSections,
@@ -54,6 +55,11 @@ let lastVisibilityFetch = 0;
 
 let lastTabListFingerprint = "";
 let skippedTabListDom = false;
+let lastSidebarFingerprint = "";
+/** True when `#tab-list` `innerHTML` was replaced this `renderMain()` pass (not when fingerprint short-circuits). */
+let tabListContainerInnerHtmlUpdated = false;
+let lastSelectionRowSyncSig = "";
+let lastMoveToSectionPopoverSig = "";
 
 let sidebarContextTarget: { type: "all" | "window" | "session"; windowId?: number; sessionId?: string } | null = null;
 
@@ -1275,6 +1281,16 @@ function renderSidebar() {
   const totalDuration = allVideos.reduce((acc, video) => acc + video.seconds, 0);
   const totalTabs = allVideos.length;
 
+  const fp = [
+    String(currentWindowId),
+    String(totalTabs),
+    String(totalDuration),
+    windowGroups.map((g) => `${g.id}:${g.label}:${g.duration}:${g.tabs.length}`).join("|"),
+  ].join("\x1f");
+
+  if (fp === lastSidebarFingerprint) return;
+  lastSidebarFingerprint = fp;
+
   document.getElementById("global-stats-count")!.innerText =
     `${totalTabs} videos · ${formatTime(totalDuration)}`;
 
@@ -1684,6 +1700,7 @@ function updateLiveTabListCardsFromState() {
 
 function renderMain() {
   skippedTabListDom = false;
+  tabListContainerInnerHtmlUpdated = false;
   const container = document.getElementById("tab-list");
   const headerTitle = document.getElementById("current-view-title");
   const headerStats = document.getElementById("current-view-stats");
@@ -1781,6 +1798,7 @@ function renderMain() {
     if (fpSession === lastTabListFingerprint) return;
 
     if (tabsToShow.length === 0 && !usesSectionLayoutForSession(session)) {
+      tabListContainerInnerHtmlUpdated = true;
       container.innerHTML = `
       <div class="flex flex-col items-center justify-center py-16 opacity-40">
         <div class="text-4xl mb-4">📺</div>
@@ -1791,6 +1809,7 @@ function renderMain() {
     } else if (usesSectionLayoutForSession(session)) {
       const secs = orderedSections(session.sections);
       const contentHtml = buildSessionSectionedHtml(tabsToShow, secs);
+      tabListContainerInnerHtmlUpdated = true;
       container.innerHTML = `<div class="space-y-2 pb-8">${contentHtml}</div>`;
       wireSectionLayoutInteractivity(container);
       thumbnailCacheBackfill(container);
@@ -1856,6 +1875,7 @@ function renderMain() {
             ? renderSessionGrid(sorted)
             : renderSessionList(sorted);
       }
+      tabListContainerInnerHtmlUpdated = true;
       container.innerHTML = `<div class="space-y-4">${contentHtml}</div>`;
       thumbnailCacheBackfill(container);
       lastTabListFingerprint = fpSession;
@@ -1896,6 +1916,7 @@ function renderMain() {
   }
 
   if (videosToShow.length === 0 && !usesSectionLayoutForLive()) {
+    tabListContainerInnerHtmlUpdated = true;
     container.innerHTML = `
       <div class="flex flex-col items-center justify-center h-full opacity-40">
         <div class="text-4xl mb-4">📺</div>
@@ -1909,15 +1930,10 @@ function renderMain() {
   if (usesSectionLayoutForLive()) {
     const secs = orderedSections(liveTabSectionsState.sections);
     const contentHtml = buildLiveSectionedHtml(videosToShow, secs, liveTabSectionsState.assignments);
+    tabListContainerInnerHtmlUpdated = true;
     container.innerHTML = `<div class="space-y-2 pb-8">${contentHtml}</div>`;
     wireSectionLayoutInteractivity(container);
     thumbnailCacheBackfill(container);
-    setTimeout(() => {
-      document.querySelectorAll("#tab-list input[type='checkbox']").forEach((checkbox) => {
-        const input = checkbox as HTMLInputElement;
-        if (input.hasAttribute("indeterminate")) input.indeterminate = true;
-      });
-    }, 0);
     lastTabListFingerprint = fpLive;
     return;
   }
@@ -1925,9 +1941,11 @@ function renderMain() {
   if (groupingMode === 'none') {
     const sortedVideos = sortVideos(videosToShow);
     if (layoutMode === 'grid') {
+      tabListContainerInnerHtmlUpdated = true;
       container.innerHTML = renderVideoGrid(sortedVideos);
       thumbnailCacheBackfill(container);
     } else {
+      tabListContainerInnerHtmlUpdated = true;
       container.innerHTML = renderVideoList(sortedVideos);
     }
     lastTabListFingerprint = fpLive;
@@ -1957,6 +1975,7 @@ function renderMain() {
       });
     }
 
+    tabListContainerInnerHtmlUpdated = true;
     container.innerHTML = sortedGroups.map(([channel, videos]) => {
       const isCollapsed = collapsedGroups.has(channel);
       const groupDuration = videos.reduce((acc, video) => acc + video.seconds, 0);
@@ -1996,12 +2015,6 @@ function renderMain() {
     }).join('');
 
     thumbnailCacheBackfill(container);
-    setTimeout(() => {
-      document.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
-        const input = checkbox as HTMLInputElement;
-        if (input.hasAttribute("indeterminate")) input.indeterminate = true;
-      });
-    }, 0);
     lastTabListFingerprint = fpLive;
   }
 }
@@ -2260,9 +2273,20 @@ function currentSectionsForMove(): SessionSection[] {
   return orderedSections(liveTabSectionsState.sections);
 }
 
+function moveToSectionPopoverSig(): string {
+  const ctx = selectedSession ? `s:${selectedSession.id}` : "live";
+  const sections = currentSectionsForMove();
+  if (sections.length === 0) return `${ctx}\x1f0`;
+  return `${ctx}\x1f${orderedSections(sections).map((s) => `${s.id}:${s.name}:${s.emoji ?? ""}:${s.colorIndex ?? 0}`).join("|")}`;
+}
+
 function updateMoveToSectionPopover(): void {
   const pop = document.getElementById("move-to-section-popover");
   if (!pop) return;
+  const sig = moveToSectionPopoverSig();
+  if (sig === lastMoveToSectionPopoverSig) return;
+  lastMoveToSectionPopoverSig = sig;
+
   const sections = currentSectionsForMove();
   if (sections.length === 0) {
     pop.innerHTML = `<div class="px-3 py-2 text-[11px] text-text-muted">Create a section first</div>`;
@@ -2284,6 +2308,21 @@ function updateMoveToSectionPopover(): void {
     </button>
   `);
   pop.innerHTML = items.join("");
+}
+
+function selectionRowSyncSig(): string {
+  const inSession = selectedSession != null;
+  const sel = inSession
+    ? [...selectedSessionTabUrls].sort().join("|")
+    : [...selectedTabIds].sort((a, b) => a - b).join(",");
+  return `${inSession ? "s" : "l"}:${selectedSession?.id ?? ""}:${layoutMode}:${sel}`;
+}
+
+function applyTabListCheckboxIndeterminateFromAttr(): void {
+  document.querySelectorAll("#tab-list input[type='checkbox']").forEach((checkbox) => {
+    const input = checkbox as HTMLInputElement;
+    if (input.getAttribute("indeterminate") != null) input.indeterminate = true;
+  });
 }
 
 function updateSelectionUI() {
@@ -2314,45 +2353,51 @@ function updateSelectionUI() {
     document.getElementById("move-to-section-popover")?.classList.add("hidden");
   }
 
-  updateSelectAllCheckbox();
+  const rowSig = selectionRowSyncSig();
+  const skipRowSync = !tabListContainerInnerHtmlUpdated && rowSig === lastSelectionRowSyncSig;
 
-  if (inSessionView) {
-    document.querySelectorAll("#tab-list [data-session-tab-url]").forEach((row) => {
-      const url = (row as HTMLElement).getAttribute("data-session-tab-url");
-      const isSelected = url != null && selectedSessionTabUrls.has(url);
+  if (!skipRowSync) {
+    lastSelectionRowSyncSig = rowSig;
+    updateSelectAllCheckbox();
+
+    if (inSessionView) {
+      document.querySelectorAll("#tab-list [data-session-tab-url]").forEach((row) => {
+        const url = (row as HTMLElement).getAttribute("data-session-tab-url");
+        const isSelected = url != null && selectedSessionTabUrls.has(url);
+        const checkbox = row.querySelector('input[type="checkbox"]') as HTMLInputElement;
+        if (checkbox) checkbox.checked = isSelected;
+        if (isSelected) {
+          row.classList.add("bg-surface-hover", "border-border", "ring-1", "ring-accent/50");
+          row.querySelector(".session-selection-toggle")?.classList.add("opacity-100");
+        } else {
+          row.classList.remove("bg-surface-hover", "border-border", "ring-1", "ring-accent/50");
+          row.querySelector(".session-selection-toggle")?.classList.remove("opacity-100");
+        }
+      });
+      return;
+    }
+
+    document.querySelectorAll('#tab-list [data-id]').forEach((row) => {
+      const id = parseInt((row as HTMLElement).dataset.id || "0");
       const checkbox = row.querySelector('input[type="checkbox"]') as HTMLInputElement;
+      const isSelected = selectedTabIds.has(id);
       if (checkbox) checkbox.checked = isSelected;
-      if (isSelected) {
-        row.classList.add("bg-surface-hover", "border-border", "ring-1", "ring-accent/50");
-        row.querySelector(".session-selection-toggle")?.classList.add("opacity-100");
+
+      if (layoutMode === 'list') {
+        if (isSelected) row.classList.add('bg-surface-hover', 'border-border');
+        else row.classList.remove('bg-surface-hover', 'border-border');
       } else {
-        row.classList.remove("bg-surface-hover", "border-border", "ring-1", "ring-accent/50");
-        row.querySelector(".session-selection-toggle")?.classList.remove("opacity-100");
+        if (isSelected) row.classList.add('bg-surface-hover', 'border-border', 'ring-1', 'ring-accent/50');
+        else row.classList.remove('bg-surface-hover', 'border-border', 'ring-1', 'ring-accent/50');
+
+        const selectionToggle = row.querySelector('.selection-toggle');
+        if (selectionToggle) {
+          if (isSelected) selectionToggle.classList.add('opacity-100');
+          else selectionToggle.classList.remove('opacity-100');
+        }
       }
     });
-    return;
   }
-
-  document.querySelectorAll('#tab-list [data-id]').forEach((row) => {
-    const id = parseInt((row as HTMLElement).dataset.id || "0");
-    const checkbox = row.querySelector('input[type="checkbox"]') as HTMLInputElement;
-    const isSelected = selectedTabIds.has(id);
-    if (checkbox) checkbox.checked = isSelected;
-
-    if (layoutMode === 'list') {
-      if (isSelected) row.classList.add('bg-surface-hover', 'border-border');
-      else row.classList.remove('bg-surface-hover', 'border-border');
-    } else {
-      if (isSelected) row.classList.add('bg-surface-hover', 'border-border', 'ring-1', 'ring-accent/50');
-      else row.classList.remove('bg-surface-hover', 'border-border', 'ring-1', 'ring-accent/50');
-
-      const selectionToggle = row.querySelector('.selection-toggle');
-      if (selectionToggle) {
-        if (isSelected) selectionToggle.classList.add('opacity-100');
-        else selectionToggle.classList.remove('opacity-100');
-      }
-    }
-  });
 }
 
 function setupListeners() {
@@ -2448,10 +2493,12 @@ function setupListeners() {
     } else if (type === "session") {
       sidebarContextTarget = { type: "session", sessionId: item.getAttribute("data-session-id") || undefined };
       const openBtn = document.getElementById("ctx-open-tabs");
+      const renameBtn = document.getElementById("ctx-rename-session");
       const pinBtn = document.getElementById("ctx-pin");
       const pinLabel = document.getElementById("ctx-pin-label");
       const delBtn = document.getElementById("ctx-delete");
       if (openBtn) { openBtn.classList.remove("hidden"); openBtn.classList.add("flex"); }
+      if (renameBtn) { renameBtn.classList.remove("hidden"); renameBtn.classList.add("flex"); }
       if (pinBtn) {
         pinBtn.classList.remove("hidden");
         pinBtn.classList.add("flex");
@@ -2462,7 +2509,7 @@ function setupListeners() {
     }
     menu.classList.remove("hidden");
     const menuLeftPx = Math.min(event.clientX, window.innerWidth - 180);
-    const menuTopPx = Math.min(event.clientY, window.innerHeight - 120);
+    const menuTopPx = Math.min(event.clientY, window.innerHeight - 160);
     menu.style.left = `${menuLeftPx}px`;
     menu.style.top = `${menuTopPx}px`;
   });
@@ -2859,6 +2906,30 @@ function setupListeners() {
     }
   });
 
+  document.getElementById("ctx-rename-session")?.addEventListener("click", async () => {
+    const context = sidebarContextTarget;
+    document.getElementById("sidebar-context-menu")?.classList.add("hidden");
+    if (context?.type !== "session" || !context.sessionId) return;
+    const sessions = await getSavedSessions();
+    const session = sessions.find((saved) => saved.id === context.sessionId);
+    if (!session) return;
+    const name = await showNameSessionModal(session.name, "Rename session");
+    if (name === null) return;
+    const trimmed = name.trim();
+    const nextName = trimmed.length > 0 ? trimmed : "Untitled";
+    if (nextName === session.name) return;
+    try {
+      await renameSession(context.sessionId, nextName);
+      await reloadSelectedSessionFromStorage();
+      await refreshSavedSessionsSidebar();
+      showToast(`Renamed to "${nextName}"`);
+      render();
+    } catch (err) {
+      console.error("Rename session failed:", err);
+      showToast("Could not rename session.");
+    }
+  });
+
   document.getElementById("ctx-pin")?.addEventListener("click", async () => {
     const context = sidebarContextTarget;
     document.getElementById("sidebar-context-menu")?.classList.add("hidden");
@@ -3156,16 +3227,9 @@ function render() {
     renderMain();
     if (!selectedSession && skippedTabListDom) updateLiveTabListCardsFromState();
     updateSelectionUI();
-    attachDynamicListeners();
-  }, 0);
-}
-
-function attachDynamicListeners() {
-  setTimeout(() => {
-    document.querySelectorAll("#tab-list input[type='checkbox']").forEach((checkbox: Element) => {
-      const input = checkbox as HTMLInputElement;
-      if (input.getAttribute("indeterminate") != null) input.indeterminate = true;
-    });
+    if (tabListContainerInnerHtmlUpdated) {
+      setTimeout(() => applyTabListCheckboxIndeterminateFromAttr(), 0);
+    }
   }, 0);
 }
 

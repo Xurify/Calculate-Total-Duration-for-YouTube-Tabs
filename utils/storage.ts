@@ -318,6 +318,17 @@ export async function setSessionPinned(id: string, pinned: boolean): Promise<voi
   await browser.storage.local.set({ [SAVED_SESSIONS_KEY]: sessions });
 }
 
+export async function renameSession(id: string, name: string): Promise<void> {
+  if (!browser.storage?.local) return;
+  const trimmed = name.trim();
+  const nextName = trimmed.length > 0 ? trimmed : "Untitled";
+  const sessions = await getSavedSessions();
+  const session = sessions.find((s) => s.id === id);
+  if (!session) return;
+  session.name = nextName;
+  await browser.storage.local.set({ [SAVED_SESSIONS_KEY]: sessions });
+}
+
 export async function deleteSession(id: string): Promise<void> {
   if (!browser.storage?.local) return;
   const sessions = (await getSavedSessions()).filter((s) => s.id !== id);

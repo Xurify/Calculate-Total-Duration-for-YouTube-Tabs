@@ -387,7 +387,7 @@ function showLoading(): void {
 }
 
 async function getYouTubeTabs(): Promise<void> {
-  showLoading();
+  if (videoData.length === 0) showLoading();
 
   try {
     const now = Date.now();

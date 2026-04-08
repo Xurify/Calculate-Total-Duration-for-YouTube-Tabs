@@ -17,6 +17,18 @@ html {
   scroll-behavior: smooth;
 }
 
+body {
+  -webkit-font-smoothing: antialiased;
+}
+
+.popup-heading {
+  text-wrap: balance;
+}
+
+.popup-body-text {
+  text-wrap: pretty;
+}
+
 [data-v-header] {
   view-transition-name: dashboard-header;
   position: relative;

@@ -35,6 +35,7 @@ html {
 body {
   height: 100%;
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
 }
 
 .custom-scrollbar {
@@ -88,7 +89,7 @@ body {
 }
 
 .section-preset-btn:active {
-  transform: translateY(0);
+  transform: translateY(0) scale(0.96);
 }
 
 .session-section-shell {
@@ -132,6 +133,7 @@ body {
 .session-section-title {
   font-family: "Syne", ui-sans-serif, system-ui, sans-serif;
   letter-spacing: -0.02em;
+  text-wrap: balance;
 }
 
 .session-stat-pill {
@@ -227,4 +229,20 @@ body {
 
 .session-section-animate {
   animation: section-in 0.35s ease both;
+}
+
+.manager-card-thumb {
+  outline: 1px solid rgba(255, 255, 255, 0.06);
+  outline-offset: -1px;
+}
+
+.manager-card-time {
+  font-variant-numeric: tabular-nums;
+}
+
+.tab-ctx-section-item,
+.move-to-section-item {
+  transition-property: background-color;
+  transition-duration: 0.15s;
+  transition-timing-function: ease;
 }

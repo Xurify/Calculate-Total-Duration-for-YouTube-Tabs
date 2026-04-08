@@ -102,15 +102,15 @@ function setupApp() {
       <div class="flex items-center justify-between mb-4">
         <div class="flex items-center gap-2">
           <span id="stat-video-count" class="text-[11px] text-text-muted font-medium">0 videos</span>
-          <button id="refresh-tabs" class="p-1.5 rounded-full hover:bg-surface-hover text-text-muted hover:text-accent transition-all border-0 cursor-pointer group/refresh" title="Refresh tabs">
+          <button id="refresh-tabs" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-hover text-text-muted hover:text-accent transition-colors border-0 cursor-pointer group/refresh active:scale-[0.96]" title="Refresh tabs">
             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="group-active/refresh:rotate-180 transition-transform duration-500"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg>
           </button>
         </div>
         <div class="flex items-center gap-1">
-          <button id="open-manager" class="p-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-all border-0 bg-transparent cursor-pointer" title="Open Manager">
+          <button id="open-manager" class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 bg-transparent cursor-pointer active:scale-[0.96]" title="Open Manager">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
           </button>
-          <button id="go-to-settings" class="p-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-all border-0 bg-transparent cursor-pointer group/settings" title="Settings">
+          <button id="go-to-settings" class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 bg-transparent cursor-pointer group/settings active:scale-[0.96]" title="Settings">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="group-hover/settings:rotate-90 transition-transform duration-500"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
           </button>
         </div>
@@ -131,8 +131,8 @@ function setupApp() {
         <div class="flex items-center gap-2">
           <span class="text-[10px] uppercase tracking-wider text-text-muted font-bold opacity-50">Sort by:</span>
           <div class="flex p-0.5 bg-surface-hover rounded-lg border border-border">
-            <button id="sort-order" class="px-2.5 py-1 text-[10px] font-bold rounded-md cursor-pointer transition-all border-0">Tab</button>
-            <button id="sort-duration" class="px-2.5 py-1 text-[10px] font-bold rounded-md cursor-pointer transition-all border-0">Length</button>
+            <button id="sort-order" class="px-2.5 py-1 text-[10px] font-bold rounded-md cursor-pointer transition-colors border-0 active:scale-[0.96]">Tab</button>
+            <button id="sort-duration" class="px-2.5 py-1 text-[10px] font-bold rounded-md cursor-pointer transition-colors border-0 active:scale-[0.96]">Length</button>
           </div>
         </div>
       </div>
@@ -178,10 +178,10 @@ function updateHeaderStats(totalSeconds: number, totalRemaining: number, videoCo
   const btnTab = document.getElementById("sort-order");
   const btnLen = document.getElementById("sort-duration");
   if (btnTab && btnLen) {
-    btnTab.className = `px-2.5 py-1 text-[10px] font-bold rounded-md cursor-pointer transition-all border-0 ${
+    btnTab.className = `px-2.5 py-1 text-[10px] font-bold rounded-md cursor-pointer transition-colors border-0 active:scale-[0.96] ${
       !sortByDuration ? "bg-accent text-white shadow-sm" : "text-text-muted hover:text-text-secondary"
     }`;
-    btnLen.className = `px-2.5 py-1 text-[10px] font-bold rounded-md cursor-pointer transition-all border-0 ${
+    btnLen.className = `px-2.5 py-1 text-[10px] font-bold rounded-md cursor-pointer transition-colors border-0 active:scale-[0.96] ${
       sortByDuration ? "bg-accent text-white shadow-sm" : "text-text-muted hover:text-text-secondary"
     }`;
   }
@@ -207,7 +207,7 @@ function updateVideoList(videos: VideoData[]) {
       item.id = `video-item-${video.id}`;
       item.dataset.id = video.id.toString();
       item.style.viewTransitionName = `video-${video.id}`;
-      item.className = "group relative py-4 pr-5 border-b border-border last:border-0 transition-all duration-300";
+      item.className = "group relative py-4 pr-5 border-b border-border last:border-0 transition-[background-color,border-color,opacity,padding-left] duration-300";
       item.innerHTML = `
            <div class="flex items-start justify-between gap-3 mb-2.5">
             <div class="flex-1 min-w-0">
@@ -218,7 +218,7 @@ function updateVideoList(videos: VideoData[]) {
           </div>
           <div class="flex items-center gap-3">
             <div class="flex-1 h-1 bg-surface-hover rounded-full overflow-hidden">
-              <div class="meta-progress h-full bg-accent transition-all duration-700 rounded-full" style="width: 0%"></div>
+              <div class="meta-progress h-full bg-accent transition-[width] duration-700 rounded-full" style="width: 0%"></div>
             </div>
             <div class="meta-time text-[10px] text-text-muted font-medium tabular-nums whitespace-nowrap"></div>
           </div>
@@ -228,7 +228,7 @@ function updateVideoList(videos: VideoData[]) {
     }
 
     const activeClasses = video.active ? "bg-accent/[0.03] border-l-4 border-l-accent pl-[17px]" : "pl-5";
-    item.className = `group relative py-4 pr-5 border-b border-border last:border-0 transition-all duration-300 ${activeClasses} ${
+    item.className = `group relative py-4 pr-5 border-b border-border last:border-0 transition-[background-color,border-color,opacity,padding-left] duration-300 ${activeClasses} ${
       video.excluded ? "opacity-40 grayscale" : "opacity-100"
     }`;
 
@@ -256,15 +256,15 @@ function updateVideoList(videos: VideoData[]) {
     // Re-render controls if state changed (simplified for now, just always refresh to be safe or optimize later)
     const controls = item.querySelector(".meta-controls") as HTMLElement;
     controls.innerHTML = `
-          <button class="shrink-0 p-1.5 rounded bg-surface-hover text-text-muted border-0 cursor-pointer transition-all hover:bg-accent hover:text-white jump-btn" title="Jump to tab">
+          <button class="shrink-0 w-7 h-7 flex items-center justify-center rounded bg-surface-hover text-text-muted border-0 cursor-pointer transition-[background-color,color] hover:bg-accent hover:text-white active:scale-[0.96] jump-btn" title="Jump to tab">
             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
           </button>
           ${
             video.suspended
-              ? `<button class="shrink-0 text-[10px] px-2 py-1 rounded bg-amber-500 text-white border-0 cursor-pointer transition-all hover:bg-amber-600 font-bold wake-up-btn">Wake up</button>`
+              ? `<button class="shrink-0 text-[10px] px-2 py-1 rounded bg-amber-500 text-white border-0 cursor-pointer transition-[background-color] hover:bg-amber-600 font-bold active:scale-[0.96] wake-up-btn">Wake up</button>`
               : ""
           }
-          <button class="shrink-0 text-[10px] px-2 py-1 rounded bg-surface-hover text-text-muted border-0 cursor-pointer transition-all hover:bg-accent hover:text-white toggle-btn">${
+          <button class="shrink-0 text-[10px] px-2 py-1 rounded bg-surface-hover text-text-muted border-0 cursor-pointer transition-[background-color,color] hover:bg-accent hover:text-white active:scale-[0.96] toggle-btn">${
             video.excluded ? "Show" : "Hide"
           }</button>
       `;
@@ -311,14 +311,14 @@ function render(): void {
       app.innerHTML = `
           <div data-v-header class="pt-4 px-4 pb-3 border-b border-border bg-gradient-to-b from-surface to-surface-elevated relative">
             <div class="flex items-center gap-3 mb-3">
-              <button id="back-to-dashboard" class="p-2 -ml-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-all border-0 bg-transparent cursor-pointer">
+              <button id="back-to-dashboard" class="w-9 h-9 flex items-center justify-center -ml-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 bg-transparent cursor-pointer active:scale-[0.96]">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
               </button>
-              <h2 class="text-sm font-bold uppercase tracking-widest text-text-primary m-0">Settings</h2>
+              <h2 class="text-sm font-bold uppercase tracking-widest text-text-primary m-0 text-balance">Settings</h2>
             </div>
             <div class="space-y-3">
               <div class="pt-3 border-t border-border">
-                <button id="btn-clear-cache" class="w-full text-left p-3 rounded-lg border border-border bg-surface-hover/20 hover:bg-red-500/10 hover:border-red-500 group/clear transition-all cursor-pointer">
+                <button id="btn-clear-cache" class="w-full text-left p-3 rounded-lg border border-border bg-surface-hover/20 hover:bg-red-500/10 hover:border-red-500 group/clear transition-[background-color,border-color,color] cursor-pointer active:scale-[0.96]">
                   <div class="flex items-center justify-between">
                     <div>
                       <div class="text-[12px] font-semibold group-hover/clear:text-red-500 transition-colors">Clear Metadata Cache</div>
@@ -379,8 +379,8 @@ function render(): void {
 function showLoading(): void {
   const app = document.getElementById("app")!;
   app.innerHTML = `
-    <div class="p-8 text-center">
-      <div class="w-5 h-5 border-2 border-border border-t-accent rounded-full animate-spin mx-auto mb-3"></div>
+    <div class="min-h-[340px] flex flex-col items-center justify-center gap-3">
+      <div class="w-5 h-5 border-2 border-border border-t-accent rounded-full animate-spin"></div>
       <div class="text-xs text-text-muted">Scanning tabs...</div>
     </div>
   `;

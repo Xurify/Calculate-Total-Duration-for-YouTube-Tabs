@@ -2026,7 +2026,7 @@ function renderVideoList(videos: VideoData[], sectionColorIndex?: number | "unso
     const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
 
     return `
-      <div class="group relative flex items-center gap-4 p-3 rounded-lg border border-transparent hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? 'bg-surface-hover border-border' : ''}${dnd.extraClass}" data-id="${video.id}"${dnd.draggableAttr}>
+      <div class="group relative flex items-center gap-4 p-3 rounded-lg border border-transparent hover:border-border hover:bg-surface-hover/50 transition-[background-color,border-color] ${isSelected ? 'bg-surface-hover border-border' : ''}${dnd.extraClass}" data-id="${video.id}"${dnd.draggableAttr}>
         <div class="relative flex items-center justify-center w-5 h-5 cursor-pointer selection-toggle">
           <input type="checkbox" draggable="false" class="peer appearance-none w-4 h-4 rounded border border-text-muted/40 checked:bg-accent checked:border-accent transition-colors cursor-pointer" ${isSelected ? 'checked' : ''}>
           <svg class="absolute w-2.5 h-2.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -2039,7 +2039,7 @@ function renderVideoList(videos: VideoData[], sectionColorIndex?: number | "unso
            </div>
            
            <div class="flex items-center gap-3 w-full max-w-md bg-surface-elevated/50 py-1 px-2 rounded-md">
-             <div class="text-xs font-mono text-text-secondary whitespace-nowrap">
+             <div class="manager-card-time text-xs font-mono text-text-secondary whitespace-nowrap">
                 <span class="manager-card-time-current ${watchedPercent > 0 ? "text-text-primary" : "text-text-muted"}">${formatCompact(video.currentTime)}</span>
                 <span class="mx-0.5 opacity-30">/</span>
                 <span class="manager-card-time-total">${formatCompact(video.seconds)}</span>
@@ -2051,10 +2051,10 @@ function renderVideoList(videos: VideoData[], sectionColorIndex?: number | "unso
         </div>
 
         <div class="absolute right-4 opacity-0 group-hover:opacity-100 flex items-center gap-2 transition-opacity bg-surface-elevated/90 backdrop-blur-sm rounded-md p-1 shadow-sm border border-border/50">
-           <button type="button" draggable="false" class="p-1.5 text-text-muted hover:bg-accent hover:text-white rounded transition-colors duration-200 jump-btn" title="Go to Tab">
+           <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center text-text-muted hover:bg-accent hover:text-white rounded transition-[background-color,color] duration-200 active:scale-[0.96] jump-btn" title="Go to Tab">
              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
            </button>
-           <button type="button" draggable="false" class="p-1.5 text-text-muted hover:bg-accent hover:text-white rounded transition-colors duration-200 close-btn" title="Close Tab">
+           <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center text-text-muted hover:bg-accent hover:text-white rounded transition-[background-color,color] duration-200 active:scale-[0.96] close-btn" title="Close Tab">
              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
            </button>
         </div>
@@ -2099,13 +2099,13 @@ function renderSessionGrid(tabs: SavedSessionTab[], sectionColorIndex?: number |
     const isSelected = selectedSessionTabUrls.has(tab.url);
     const urlAttr = escapeHtml(tab.url);
     return `
-      <div class="group relative flex flex-col rounded-lg border border-transparent overflow-hidden hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? "bg-surface-hover border-border ring-1 ring-accent/50" : ""}${dnd.extraClass}" data-session-tab-url="${urlAttr}"${dnd.draggableAttr}>
+      <div class="group relative flex flex-col rounded-lg border border-transparent overflow-hidden hover:border-border hover:bg-surface-hover/50 transition-[background-color,border-color] ${isSelected ? "bg-surface-hover border-border ring-1 ring-accent/50" : ""}${dnd.extraClass}" data-session-tab-url="${urlAttr}"${dnd.draggableAttr}>
         <div class="relative w-full aspect-video bg-surface-elevated/50 overflow-hidden session-video-click-target cursor-pointer">
           ${thumbnailUrl
         ? `<img ${imgAttr} class="manager-card-thumb w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="eager" decoding="async" alt=""${imgDragOff} />`
         : `<div class="w-full h-full flex items-center justify-center text-text-muted/20"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="12" cy="12" r="3"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>`
       }
-          <div class="absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-mono font-medium text-white backdrop-blur-sm">
+          <div class="absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-mono font-medium text-white backdrop-blur-sm tabular-nums">
             ${formatCompact(sec)}
           </div>
           <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
@@ -2117,11 +2117,11 @@ function renderSessionGrid(tabs: SavedSessionTab[], sectionColorIndex?: number |
             <input type="checkbox" draggable="false" class="peer appearance-none w-4 h-4 rounded border border-white/60 checked:bg-accent checked:border-accent bg-black/40 backdrop-blur-sm transition-colors cursor-pointer" ${isSelected ? "checked" : ""}>
             <svg class="absolute w-2.5 h-2.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
           </div>
-          <div class="absolute top-1 right-1 flex gap-1 transform translate-x-2 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 transition-all duration-200">
-            <button type="button" draggable="false" class="p-1.5 hover:bg-black/60 bg-black/40 text-white rounded-md backdrop-blur-sm transition-colors session-open-new-tab" title="Open in new tab">
+          <div class="absolute top-1 right-1 z-10 flex gap-1 opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 transition-opacity duration-200">
+            <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center hover:bg-black/60 bg-black/40 text-white rounded-md backdrop-blur-sm transition-[background-color] active:scale-[0.96] session-open-new-tab" title="Open in new tab">
               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
             </button>
-            <button type="button" draggable="false" class="p-1.5 hover:bg-red-500/80 bg-black/40 text-white rounded-md backdrop-blur-sm transition-colors session-remove-btn" title="Remove from session">
+            <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center hover:bg-red-500/80 bg-black/40 text-white rounded-md backdrop-blur-sm transition-[background-color] active:scale-[0.96] session-remove-btn" title="Remove from session">
               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
             </button>
           </div>
@@ -2145,7 +2145,7 @@ function renderSessionList(tabs: SavedSessionTab[], sectionColorIndex?: number |
     const isSelected = selectedSessionTabUrls.has(tab.url);
     const urlAttr = escapeHtml(tab.url);
     return `
-      <div class="group relative flex items-center gap-4 p-3 rounded-lg border border-transparent hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? "bg-surface-hover border-border" : ""}${dnd.extraClass}" data-session-tab-url="${urlAttr}"${dnd.draggableAttr}>
+      <div class="group relative flex items-center gap-4 p-3 rounded-lg border border-transparent hover:border-border hover:bg-surface-hover/50 transition-[background-color,border-color] ${isSelected ? "bg-surface-hover border-border" : ""}${dnd.extraClass}" data-session-tab-url="${urlAttr}"${dnd.draggableAttr}>
         <div class="relative flex items-center justify-center w-5 h-5 shrink-0 cursor-pointer session-selection-toggle">
           <input type="checkbox" draggable="false" class="peer appearance-none w-4 h-4 rounded border border-text-muted/40 checked:bg-accent checked:border-accent transition-colors cursor-pointer" ${isSelected ? "checked" : ""}>
           <svg class="absolute w-2.5 h-2.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -2155,13 +2155,13 @@ function renderSessionList(tabs: SavedSessionTab[], sectionColorIndex?: number |
             <h3 class="text-sm font-medium text-text-primary truncate" title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
             <span class="text-[10px] text-text-muted truncate uppercase tracking-tight">${escapeHtml(channel)}</span>
           </div>
-          <div class="text-xs font-mono text-text-muted">${formatCompact(sec)}</div>
+          <div class="text-xs font-mono text-text-muted tabular-nums">${formatCompact(sec)}</div>
         </div>
         <div class="absolute right-4 flex items-center gap-1">
-          <button type="button" draggable="false" class="p-1.5 rounded hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors session-open-new-tab" title="Open in new tab">
+          <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center rounded hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors active:scale-[0.96] session-open-new-tab" title="Open in new tab">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
           </button>
-          <button type="button" draggable="false" class="p-1.5 rounded hover:bg-red-500/20 text-text-muted hover:text-red-500 transition-colors session-remove-btn" title="Remove from session">
+          <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center rounded hover:bg-red-500/20 text-text-muted hover:text-red-500 transition-[background-color,color] active:scale-[0.96] session-remove-btn" title="Remove from session">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
           </button>
         </div>
@@ -2186,14 +2186,14 @@ function renderVideoGrid(videos: VideoData[], sectionColorIndex?: number | "unso
       : `src="${thumbnailUrl}"`;
 
     return `
-            <div class="group relative flex flex-col rounded-lg border border-transparent overflow-hidden hover:border-border hover:bg-surface-hover/50 transition-all ${isSelected ? 'bg-surface-hover border-border ring-1 ring-accent/50' : ''}${dnd.extraClass}" data-id="${video.id}"${dnd.draggableAttr}>
+            <div class="group relative flex flex-col rounded-lg border border-transparent overflow-hidden hover:border-border hover:bg-surface-hover/50 transition-[background-color,border-color] ${isSelected ? 'bg-surface-hover border-border ring-1 ring-accent/50' : ''}${dnd.extraClass}" data-id="${video.id}"${dnd.draggableAttr}>
                 <div class="relative w-full aspect-video bg-surface-elevated/50 overflow-hidden video-click-target cursor-pointer">
                     ${thumbnailUrl
         ? `<img ${imgAttr} class="manager-card-thumb w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="eager" decoding="async" alt=""${imgDragOff} />`
         : `<div class="w-full h-full flex items-center justify-center text-text-muted/20"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="12" cy="12" r="3"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>`
       }
                     
-                    <div class="manager-card-duration absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-mono font-medium text-white backdrop-blur-sm">
+                    <div class="manager-card-duration absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-mono font-medium text-white backdrop-blur-sm tabular-nums">
                         ${video.isLive ? 'LIVE' : formatCompact(video.seconds)}
                     </div>
 
@@ -2212,11 +2212,11 @@ function renderVideoGrid(videos: VideoData[], sectionColorIndex?: number | "unso
                         <svg class="absolute w-2.5 h-2.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                     </div>
 
-                    <div class="absolute top-1 right-1 flex gap-1 transform translate-x-2 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 transition-all duration-200">
-                         <button type="button" draggable="false" class="p-1.5 bg-black/40 hover:bg-accent text-white rounded-md backdrop-blur-sm border border-white/10 hover:border-accent transition-all duration-200 jump-btn" title="Go to Tab">
+                    <div class="absolute top-1 right-1 z-10 flex gap-1 opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 transition-opacity duration-200">
+                         <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center bg-black/40 hover:bg-accent text-white rounded-md backdrop-blur-sm border border-white/10 hover:border-accent transition-[background-color,border-color] duration-200 active:scale-[0.96] jump-btn" title="Go to Tab">
                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
                          </button>
-                         <button type="button" draggable="false" class="p-1.5 bg-black/40 hover:bg-accent text-white rounded-md backdrop-blur-sm border border-white/10 hover:border-accent transition-all duration-200 close-btn" title="Close Tab">
+                         <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center bg-black/40 hover:bg-accent text-white rounded-md backdrop-blur-sm border border-white/10 hover:border-accent transition-[background-color,border-color] duration-200 active:scale-[0.96] close-btn" title="Close Tab">
                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>
                          </button>
                     </div>

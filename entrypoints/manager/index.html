@@ -44,13 +44,13 @@
 
     <main class="flex-1 flex flex-col h-full overflow-hidden bg-surface relative">
       <header class="flex flex-col border-b border-border bg-surface/80 backdrop-blur-md z-10">
-          <div class="h-16 flex items-center px-8">
-              <div class="flex-1 min-w-0">
+          <div class="h-16 grid grid-cols-[minmax(0,1fr)_min(28rem,100%)_minmax(0,1fr)] items-center gap-x-6 px-8">
+              <div class="min-w-0">
                   <h2 id="current-view-title" class="text-xl font-bold truncate text-balance">All Windows</h2>
                   <div id="current-view-stats" class="text-xs text-text-muted mt-0.5 font-medium truncate"></div>
               </div>
     
-              <div class="flex-shrink-0 w-full max-w-md mx-6">
+              <div class="min-w-0 w-full">
                 <div class="relative group">
                     <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-text-muted group-focus-within:text-accent transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -66,7 +66,7 @@
                 </div>
               </div>
     
-              <div class="flex-1 flex items-center justify-end gap-3 min-w-0">
+              <div class="flex items-center justify-end gap-3 min-w-0">
                    <div id="selection-actions" class="hidden items-center gap-2 mr-4 border-r border-border pr-6 animate-in fade-in slide-in-from-right-4 duration-200">
                        <span id="selection-count" class="text-xs font-bold text-accent whitespace-nowrap">0 selected</span>
                        <div id="move-to-section-wrap" class="relative hidden">

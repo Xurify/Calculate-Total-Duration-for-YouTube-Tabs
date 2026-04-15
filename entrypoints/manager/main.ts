@@ -147,7 +147,6 @@ function thumbnailCacheBackfill(container: HTMLElement) {
     const key = img.getAttribute("data-thumbnail-key");
     if (!key || thumbnailBlobCache.has(key)) return;
     const onLoad = () => {
-      img.removeAttribute("data-thumbnail-key");
       img.removeEventListener("load", onLoad);
       fetch(img.src)
         .then((response) => response.blob())
@@ -161,9 +160,11 @@ function thumbnailCacheBackfill(container: HTMLElement) {
             thumbnailBlobCache.delete(oldest);
           }
           thumbnailBlobCache.set(key, blobUrl);
-          img.src = blobUrl;
+          img.removeAttribute("data-thumbnail-key");
         })
-        .catch(() => {});
+        .catch(() => {
+          img.removeAttribute("data-thumbnail-key");
+        });
     };
     img.addEventListener("load", onLoad);
   });
@@ -256,7 +257,7 @@ async function fetchTabs(skipInitialRender = false) {
     .sort((a, b) => b.tabs.length - a.tabs.length);
 
   if (!skipInitialRender) render();
-  await probeTabs();
+  await probeTabsMetadata();
 
   const tabsWithoutDuration = allVideos.filter((video) => video.seconds === 0 && !video.isLive);
   if (tabsWithoutDuration.length > 0 && Date.now() - lastSyncTime >= SYNC_COOLDOWN_MS) {
@@ -270,7 +271,44 @@ async function fetchTabs(skipInitialRender = false) {
   }
 }
 
-async function probeTabs() {
+function recomputeWindowGroupDurations(): void {
+  for (const g of windowGroups) {
+    g.duration = g.tabs.reduce((acc, v) => acc + v.seconds, 0);
+  }
+}
+
+/** After probing tab metadata, patch DOM instead of replacing `#tab-list` to avoid layout shift. */
+function applyProbeResultsToUi(): void {
+  recomputeWindowGroupDurations();
+  updateLiveTabListCardsFromState();
+  if (!selectedSession) {
+    const headerStats = document.getElementById("current-view-stats");
+    if (headerStats) {
+      let videosToShow: VideoData[] = [];
+      if (currentWindowId === "all") {
+        videosToShow = allVideos;
+      } else {
+        const group = windowGroups.find((wg) => wg.id === currentWindowId);
+        if (group) videosToShow = group.tabs;
+      }
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        videosToShow = videosToShow.filter(
+          (v) =>
+            v.title.toLowerCase().includes(q) ||
+            v.channelName.toLowerCase().includes(q)
+        );
+      }
+      const duration = videosToShow.reduce((acc, v) => acc + v.seconds, 0);
+      headerStats.innerText = `${videosToShow.length} videos · ${formatTime(duration)} total duration`;
+    }
+  }
+  renderSidebar();
+  lastTabListFingerprint = tabListFingerprint();
+  updateSelectionUI();
+}
+
+async function probeTabsMetadata() {
   const activeTabPromises = allVideos.map(async (video) => {
     if (video.suspended) return;
 
@@ -501,7 +539,7 @@ async function probeTabs() {
   });
 
   await Promise.all(activeTabPromises);
-  render();
+  applyProbeResultsToUi();
 }
 
 async function loadSessionInNewWindow(sessionId: string) {
@@ -1698,6 +1736,21 @@ function updateLiveTabListCardsFromState() {
   });
 }
 
+function setTabListInnerHTML(container: HTMLElement, html: string): void {
+  const prevTop = container.scrollTop;
+  const prevLeft = container.scrollLeft;
+  container.innerHTML = html;
+  const applyScroll = () => {
+    const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    container.scrollTop = Math.min(prevTop, maxTop);
+    container.scrollLeft = prevLeft;
+  };
+  requestAnimationFrame(() => {
+    applyScroll();
+    requestAnimationFrame(applyScroll);
+  });
+}
+
 function renderMain() {
   skippedTabListDom = false;
   tabListContainerInnerHtmlUpdated = false;
@@ -1799,18 +1852,21 @@ function renderMain() {
 
     if (tabsToShow.length === 0 && !usesSectionLayoutForSession(session)) {
       tabListContainerInnerHtmlUpdated = true;
-      container.innerHTML = `
+      setTabListInnerHTML(
+        container,
+        `
       <div class="flex flex-col items-center justify-center py-16 opacity-40">
         <div class="text-4xl mb-4">📺</div>
         <div>No videos found</div>
       </div>
-    `;
+    `
+      );
       lastTabListFingerprint = fpSession;
     } else if (usesSectionLayoutForSession(session)) {
       const secs = orderedSections(session.sections);
       const contentHtml = buildSessionSectionedHtml(tabsToShow, secs);
       tabListContainerInnerHtmlUpdated = true;
-      container.innerHTML = `<div class="space-y-2 pb-8">${contentHtml}</div>`;
+      setTabListInnerHTML(container, `<div class="space-y-2 pb-8">${contentHtml}</div>`);
       wireSectionLayoutInteractivity(container);
       thumbnailCacheBackfill(container);
       lastTabListFingerprint = fpSession;
@@ -1876,7 +1932,7 @@ function renderMain() {
             : renderSessionList(sorted);
       }
       tabListContainerInnerHtmlUpdated = true;
-      container.innerHTML = `<div class="space-y-4">${contentHtml}</div>`;
+      setTabListInnerHTML(container, `<div class="space-y-4">${contentHtml}</div>`);
       thumbnailCacheBackfill(container);
       lastTabListFingerprint = fpSession;
     }
@@ -1917,12 +1973,15 @@ function renderMain() {
 
   if (videosToShow.length === 0 && !usesSectionLayoutForLive()) {
     tabListContainerInnerHtmlUpdated = true;
-    container.innerHTML = `
+    setTabListInnerHTML(
+      container,
+      `
       <div class="flex flex-col items-center justify-center h-full opacity-40">
         <div class="text-4xl mb-4">📺</div>
         <div>No videos found</div>
       </div>
-    `;
+    `
+    );
     lastTabListFingerprint = fpLive;
     return;
   }
@@ -1931,7 +1990,7 @@ function renderMain() {
     const secs = orderedSections(liveTabSectionsState.sections);
     const contentHtml = buildLiveSectionedHtml(videosToShow, secs, liveTabSectionsState.assignments);
     tabListContainerInnerHtmlUpdated = true;
-    container.innerHTML = `<div class="space-y-2 pb-8">${contentHtml}</div>`;
+    setTabListInnerHTML(container, `<div class="space-y-2 pb-8">${contentHtml}</div>`);
     wireSectionLayoutInteractivity(container);
     thumbnailCacheBackfill(container);
     lastTabListFingerprint = fpLive;
@@ -1942,11 +2001,11 @@ function renderMain() {
     const sortedVideos = sortVideos(videosToShow);
     if (layoutMode === 'grid') {
       tabListContainerInnerHtmlUpdated = true;
-      container.innerHTML = renderVideoGrid(sortedVideos);
+      setTabListInnerHTML(container, renderVideoGrid(sortedVideos));
       thumbnailCacheBackfill(container);
     } else {
       tabListContainerInnerHtmlUpdated = true;
-      container.innerHTML = renderVideoList(sortedVideos);
+      setTabListInnerHTML(container, renderVideoList(sortedVideos));
     }
     lastTabListFingerprint = fpLive;
   } else {
@@ -1976,7 +2035,9 @@ function renderMain() {
     }
 
     tabListContainerInnerHtmlUpdated = true;
-    container.innerHTML = sortedGroups.map(([channel, videos]) => {
+    setTabListInnerHTML(
+      container,
+      sortedGroups.map(([channel, videos]) => {
       const isCollapsed = collapsedGroups.has(channel);
       const groupDuration = videos.reduce((acc, video) => acc + video.seconds, 0);
       const sortedGroupVideos = sortVideos(videos);
@@ -2012,7 +2073,8 @@ function renderMain() {
                 </div>
             </div>
           `;
-    }).join('');
+      }).join("")
+    );
 
     thumbnailCacheBackfill(container);
     lastTabListFingerprint = fpLive;

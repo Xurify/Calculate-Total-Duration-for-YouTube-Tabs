@@ -39,7 +39,7 @@ let selectedTabIds = new Set<number>();
 let metadataCache: Record<string, CachedMetadata> = {};
 
 let searchQuery = "";
-let groupingMode: 'none' | 'channel' = 'none';
+let groupingMode: 'none' | 'channel' | 'language' = 'none';
 let layoutMode: 'list' | 'grid' = 'grid';
 let thumbnailQuality: 'standard' | 'high' = 'high';
 let isSettingsOpen = false;
@@ -229,7 +229,9 @@ async function fetchTabs(skipInitialRender = false) {
       suspended: tab.discarded || false,
       active: tab.active,
       isLive: cached?.isLive || false,
-      windowId: tab.windowId
+      windowId: tab.windowId,
+      language: cached?.language,
+      languageName: cached?.languageName
     };
   });
 
@@ -259,7 +261,7 @@ async function fetchTabs(skipInitialRender = false) {
   if (!skipInitialRender) render();
   await probeTabsMetadata();
 
-  const tabsWithoutDuration = allVideos.filter((video) => video.seconds === 0 && !video.isLive);
+  const tabsWithoutDuration = allVideos.filter((video) => (video.seconds === 0 && !video.isLive) || video.language === undefined);
   if (tabsWithoutDuration.length > 0 && Date.now() - lastSyncTime >= SYNC_COOLDOWN_MS) {
     lastSyncTime = Date.now();
     browser.runtime
@@ -329,6 +331,8 @@ async function probeTabsMetadata() {
         video.seconds = contentMeta.seconds;
         video.currentTime = contentMeta.currentTime;
         video.isLive = contentMeta.isLive;
+        video.language = contentMeta.language;
+        video.languageName = contentMeta.languageName;
         const verifyResults = await browser.scripting.executeScript({
           target: { tabId: video.id },
           world: "MAIN",
@@ -343,6 +347,8 @@ async function probeTabsMetadata() {
             currentTime: video.currentTime,
             isLive: video.isLive,
             videoId: expectedVideoId ?? undefined,
+            language: video.language,
+            languageName: video.languageName,
           });
         }
         return;
@@ -354,7 +360,8 @@ async function probeTabsMetadata() {
     const hasValidMetadata = video.seconds > 0 &&
       video.title !== "YouTube Video" &&
       video.title !== "YouTube" &&
-      !/^\(\d+\)\s*/.test(video.title);
+      !/^\(\d+\)\s*/.test(video.title) &&
+      video.language !== undefined;
 
     try {
       const results = await browser.scripting.executeScript({
@@ -454,13 +461,27 @@ async function probeTabsMetadata() {
             title = title.replace(/^\(\d+\)\s*/g, "");
             title = title.replace(" - YouTube", "").trim();
 
+            // Extract language
+            let language = undefined;
+            let languageName = undefined;
+            try {
+              const captionTracks = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+              if (captionTracks && captionTracks.length > 0) {
+                const track = captionTracks[0];
+                language = track.languageCode;
+                languageName = (track.name?.simpleText || track.languageCode).split('(')[0].trim();
+              }
+            } catch (_) {}
+
             return {
               duration: isLive ? 0 : duration || videoElement?.duration || 0,
               currentTime,
               channelName: channel || videoDetails?.author || "",
               title: title || "YouTube Video",
               isLive,
-              skipMetadata: false
+              skipMetadata: false,
+              language,
+              languageName
             };
           } catch (error) {
             // Fallback if playerResponse access fails or other error
@@ -470,7 +491,9 @@ async function probeTabsMetadata() {
               channelName: channel,
               title: document.title.replace(/^\(\d+\)\s*/g, "").replace(" - YouTube", "").trim() || "YouTube Video",
               isLive: false,
-              skipMetadata: false
+              skipMetadata: false,
+              language: undefined,
+              languageName: undefined
             };
           }
         },
@@ -490,8 +513,10 @@ async function probeTabsMetadata() {
               video.seconds = meta.seconds;
               video.currentTime = meta.currentTime ?? 0;
               video.isLive = meta.isLive ?? false;
+              video.language = meta.language;
+              video.languageName = meta.languageName;
               if (video.seconds > 0 || video.isLive) {
-                requestMetadataUpdate(video.url, { seconds: video.seconds, title: video.title, channelName: video.channelName, currentTime: video.currentTime, isLive: video.isLive, videoId: expectedVideoId ?? undefined });
+                requestMetadataUpdate(video.url, { seconds: video.seconds, title: video.title, channelName: video.channelName, currentTime: video.currentTime, isLive: video.isLive, videoId: expectedVideoId ?? undefined, language: video.language, languageName: video.languageName });
               }
               return true;
             }
@@ -517,6 +542,8 @@ async function probeTabsMetadata() {
             video.seconds = duration;
             video.currentTime = result.currentTime || 0;
             video.isLive = result.isLive || false;
+            video.language = result.language;
+            video.languageName = result.languageName;
 
             // Only cache if we have meaningful data (duration or live status)
             if (duration > 0 || result.isLive) {
@@ -527,6 +554,8 @@ async function probeTabsMetadata() {
                 currentTime: video.currentTime,
                 isLive: video.isLive,
                 videoId: expectedVideoId ?? undefined,
+                language: video.language,
+                languageName: video.languageName,
               });
             }
           }
@@ -890,18 +919,23 @@ function renderSessionTabsInnerHtml(
   collapseScopeId: string
 ): string {
   if (tabs.length === 0) return "";
-  if (groupingMode !== "channel") {
+  if (groupingMode === "none") {
     const sorted = sortSessionTabs(tabs);
     return layoutMode === "grid" ? renderSessionGrid(sorted, sectionColor) : renderSessionList(sorted, sectionColor);
   }
-  const channels = new Map<string, SavedSessionTab[]>();
+  const groups = new Map<string, SavedSessionTab[]>();
   tabs.forEach((tab) => {
-    const name = tab.channelName ?? "Unknown Channel";
-    if (!channels.has(name)) channels.set(name, []);
-    channels.get(name)!.push(tab);
+    let name = "Unknown";
+    if (groupingMode === "channel") {
+      name = tab.channelName ?? "Unknown Channel";
+    } else if (groupingMode === "language") {
+      name = tab.languageName ? tab.languageName.split('(')[0].trim() : (tab.language ? tab.language.toUpperCase() : "Unspecified");
+    }
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name)!.push(tab);
   });
-  let sortedGroups = Array.from(channels.entries());
-  if (sortOption === "channel-asc") {
+  let sortedGroups = Array.from(groups.entries());
+  if (sortOption === "channel-asc" || sortOption === "title-asc") {
     sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
   } else if (sortOption === "duration-desc") {
     sortedGroups.sort((a, b) => {
@@ -917,8 +951,8 @@ function renderSessionTabsInnerHtml(
     });
   }
   return sortedGroups
-    .map(([channel, tabList]) => {
-      const ck = nestedChannelCollapseKey(collapseScopeId, channel);
+    .map(([groupName, tabList]) => {
+      const ck = nestedChannelCollapseKey(collapseScopeId, groupName);
       const isCollapsed = collapsedGroups.has(ck);
       const groupDuration = tabList.reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
       const sortedTabs = sortSessionTabs(tabList);
@@ -930,7 +964,7 @@ function renderSessionTabsInnerHtml(
                 <button type="button" class="p-1 rounded hover:bg-surface-hover text-text-muted transition-transform duration-200 nested-group-toggle ${isCollapsed ? "-rotate-90" : ""}" data-nested-group="${escapeHtml(ck)}">
                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
                 </button>
-                <div class="flex-1 font-medium text-xs text-text-secondary truncate nested-group-toggle cursor-pointer" data-nested-group="${escapeHtml(ck)}">${escapeHtml(channel)}</div>
+                <div class="flex-1 font-medium text-xs text-text-secondary truncate nested-group-toggle cursor-pointer" data-nested-group="${escapeHtml(ck)}">${escapeHtml(groupName)}</div>
                 <div class="text-[10px] text-text-muted font-mono flex items-center gap-2">
                   <span>${tabList.length} videos</span>
                   <span class="w-px h-3 bg-border"></span>
@@ -952,18 +986,24 @@ function renderLiveVideosInnerHtml(
   collapseScopeId: string
 ): string {
   if (videos.length === 0) return "";
-  if (groupingMode !== "channel") {
+  if (groupingMode === "none") {
     const sortedVideos = sortVideos(videos);
     return layoutMode === "grid" ? renderVideoGrid(sortedVideos, sectionColor) : renderVideoList(sortedVideos, sectionColor);
   }
-  const channels = new Map<string, VideoData[]>();
+  const groups = new Map<string, VideoData[]>();
   videos.forEach((video) => {
-    const name = video.channelName || "Unknown Channel";
-    if (!channels.has(name)) channels.set(name, []);
-    channels.get(name)!.push(video);
+    let name = "Unknown";
+    if (groupingMode === "channel") {
+      name = video.channelName || "Unknown Channel";
+    } else if (groupingMode === "language") {
+      const stripped = video.languageName ? video.languageName.split('(')[0].trim() : "";
+      name = stripped ? stripped : (video.language ? video.language.toUpperCase() : "Unspecified");
+    }
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name)!.push(video);
   });
-  let sortedGroups = Array.from(channels.entries());
-  if (sortOption === "channel-asc") {
+  let sortedGroups = Array.from(groups.entries());
+  if (sortOption === "channel-asc" || sortOption === "title-asc") {
     sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
   } else if (sortOption === "duration-desc") {
     sortedGroups.sort((a, b) => {
@@ -979,8 +1019,8 @@ function renderLiveVideosInnerHtml(
     });
   }
   return sortedGroups
-    .map(([channel, groupVideos]) => {
-      const ck = nestedChannelCollapseKey(collapseScopeId, channel);
+    .map(([groupName, groupVideos]) => {
+      const ck = nestedChannelCollapseKey(collapseScopeId, groupName);
       const isCollapsed = collapsedGroups.has(ck);
       const groupDuration = groupVideos.reduce((acc, video) => acc + video.seconds, 0);
       const sortedGroupVideos = sortVideos(groupVideos);
@@ -994,14 +1034,14 @@ function renderLiveVideosInnerHtml(
                     <button type="button" class="p-1 rounded hover:bg-surface-hover text-text-muted transition-transform duration-200 nested-group-toggle ${isCollapsed ? "-rotate-90" : ""}" data-nested-group="${escapeHtml(ck)}">
                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
                     </button>
-                    <div class="relative flex items-center justify-center w-4 h-4 cursor-pointer nested-group-selection-toggle" data-nested-group-scope="${escapeHtml(collapseScopeId)}" data-nested-channel="${escapeHtml(channel)}">
+                    <div class="relative flex items-center justify-center w-4 h-4 cursor-pointer nested-group-selection-toggle" data-nested-group-scope="${escapeHtml(collapseScopeId)}" data-nested-group-name="${escapeHtml(groupName)}">
                       <input type="checkbox" class="peer appearance-none w-3.5 h-3.5 rounded border border-text-muted/40 checked:bg-accent checked:border-accent transition-colors cursor-pointer" ${allSelected ? "checked" : ""} ${someSelected ? "indeterminate" : ""}>
                        <svg class="absolute w-2 h-2 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                        <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 ${someSelected && !allSelected ? "opacity-100" : ""}">
                           <div class="w-2 h-0.5 bg-accent"></div>
                        </div>
                     </div>
-                    <div class="flex-1 font-medium text-xs text-text-secondary truncate nested-group-toggle cursor-pointer" data-nested-group="${escapeHtml(ck)}">${escapeHtml(channel)}</div>
+                    <div class="flex-1 font-medium text-xs text-text-secondary truncate nested-group-toggle cursor-pointer" data-nested-group="${escapeHtml(ck)}">${escapeHtml(groupName)}</div>
                     <div class="text-[10px] text-text-muted font-mono flex items-center gap-2">
                         <span>${groupVideos.length} videos</span>
                         <span class="w-px h-3 bg-border"></span>
@@ -1652,14 +1692,20 @@ function tabListFingerprint(): string {
       .join(";");
     return `${state}\x1fnone:${layoutMode}:${vidSig}`;
   }
-  const channels = new Map<string, VideoData[]>();
+  const groups = new Map<string, VideoData[]>();
   videosToShow.forEach((video) => {
-    const name = video.channelName || "Unknown Channel";
-    if (!channels.has(name)) channels.set(name, []);
-    channels.get(name)!.push(video);
+    let name = "Unknown";
+    if (groupingMode === "channel") {
+      name = video.channelName || "Unknown Channel";
+    } else if (groupingMode === "language") {
+      const stripped = video.languageName ? video.languageName.split('(')[0].trim() : "";
+      name = stripped ? stripped : (video.language ? video.language.toUpperCase() : "Unspecified");
+    }
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name)!.push(video);
   });
-  let sortedGroups = Array.from(channels.entries());
-  if (sortOption === "channel-asc") {
+  let sortedGroups = Array.from(groups.entries());
+  if (sortOption === "channel-asc" || sortOption === "title-asc") {
     sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
   } else if (sortOption === "duration-desc") {
     sortedGroups.sort((a, b) => {
@@ -1675,8 +1721,8 @@ function tabListFingerprint(): string {
     });
   }
   const groupSig = sortedGroups
-    .map(([channel, videos]) => {
-      const collapsed = collapsedGroups.has(channel);
+    .map(([groupName, videos]) => {
+      const collapsed = collapsedGroups.has(groupName);
       const sortedGroupVideos = sortVideos(videos);
       const allSelected = videos.every((video) => selectedTabIds.has(video.id));
       const someSelected = !allSelected && videos.some((video) => selectedTabIds.has(video.id));
@@ -1686,7 +1732,7 @@ function tabListFingerprint(): string {
             `${video.id}|${video.url}|${video.title}|${video.channelName}|${video.seconds}|${video.isLive ? 1 : 0}`
         )
         .join(";");
-      return `${channel}:${collapsed}:${allSelected}:${someSelected}:${vidSig}`;
+      return `${groupName}:${collapsed}:${allSelected}:${someSelected}:${vidSig}`;
     })
     .join("||");
   return `${state}\x1fgrp:${layoutMode}:${groupSig}`;
@@ -1793,20 +1839,24 @@ function renderMain() {
       }
     }
   }
-  const btnGroupNone = document.getElementById('view-list'); // "None" button
+  const btnGroupNone = document.getElementById('view-list');
   const btnGroupChannel = document.getElementById('view-channel');
+  const btnGroupLanguage = document.getElementById('view-language');
 
-  if (btnGroupNone && btnGroupChannel) {
+  if (btnGroupNone && btnGroupChannel && btnGroupLanguage) {
+    [btnGroupNone, btnGroupChannel, btnGroupLanguage].forEach(btn => {
+      btn.classList.remove('text-accent', 'bg-surface-hover');
+      btn.classList.add('text-text-muted');
+    });
     if (groupingMode === 'none') {
       btnGroupNone.classList.add('text-accent', 'bg-surface-hover');
       btnGroupNone.classList.remove('text-text-muted');
-      btnGroupChannel.classList.remove('text-accent', 'bg-surface-hover');
-      btnGroupChannel.classList.add('text-text-muted');
-    } else {
+    } else if (groupingMode === 'channel') {
       btnGroupChannel.classList.add('text-accent', 'bg-surface-hover');
       btnGroupChannel.classList.remove('text-text-muted');
-      btnGroupNone.classList.remove('text-accent', 'bg-surface-hover');
-      btnGroupNone.classList.add('text-text-muted');
+    } else if (groupingMode === 'language') {
+      btnGroupLanguage.classList.add('text-accent', 'bg-surface-hover');
+      btnGroupLanguage.classList.remove('text-text-muted');
     }
   }
 
@@ -1872,14 +1922,19 @@ function renderMain() {
       lastTabListFingerprint = fpSession;
     } else {
       let contentHtml: string;
-      if (groupingMode === "channel") {
-        const channels = new Map<string, SavedSessionTab[]>();
+      if (groupingMode === "channel" || groupingMode === "language") {
+        const groups = new Map<string, SavedSessionTab[]>();
         tabsToShow.forEach((tab) => {
-          const name = tab.channelName ?? "Unknown Channel";
-          if (!channels.has(name)) channels.set(name, []);
-          channels.get(name)!.push(tab);
+          let name = "Unknown";
+          if (groupingMode === "channel") {
+            name = tab.channelName ?? "Unknown Channel";
+          } else if (groupingMode === "language") {
+            name = tab.languageName ? tab.languageName.split('(')[0].trim() : (tab.language ? tab.language.toUpperCase() : "Unspecified");
+          }
+          if (!groups.has(name)) groups.set(name, []);
+          groups.get(name)!.push(tab);
         });
-        let sortedGroups = Array.from(channels.entries());
+        let sortedGroups = Array.from(groups.entries());
         if (sortOption === "channel-asc") {
           sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
         } else if (sortOption === "duration-desc") {
@@ -1896,8 +1951,8 @@ function renderMain() {
           });
         }
         contentHtml = sortedGroups
-          .map(([channel, tabList]) => {
-            const isCollapsed = collapsedGroups.has(channel);
+          .map(([groupName, tabList]) => {
+            const isCollapsed = collapsedGroups.has(groupName);
             const groupDuration = tabList.reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
             const sortedTabs = sortSessionTabs(tabList);
             const gridOrList =
@@ -1907,17 +1962,17 @@ function renderMain() {
             return `
             <div class="mb-4">
               <div class="flex items-center gap-3 px-2 py-2 rounded-md hover:bg-surface-hover/30 group/header select-none">
-                <button class="p-1 rounded hover:bg-surface-hover text-text-muted transition-transform duration-200 group-toggle ${isCollapsed ? "-rotate-90" : ""}" data-group="${escapeHtml(channel)}">
+                <button class="p-1 rounded hover:bg-surface-hover text-text-muted transition-transform duration-200 group-toggle ${isCollapsed ? "-rotate-90" : ""}" data-group="${escapeHtml(groupName)}">
                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
                 </button>
-                <div class="flex-1 font-medium text-sm text-text-primary truncate cursor-pointer group-toggle" data-group="${escapeHtml(channel)}">${escapeHtml(channel)}</div>
+                <div class="flex-1 font-medium text-sm text-text-primary truncate cursor-pointer group-toggle" data-group="${escapeHtml(groupName)}">${escapeHtml(groupName)}</div>
                 <div class="text-[10px] text-text-muted font-mono flex items-center gap-2">
                   <span>${tabList.length} videos</span>
                   <span class="w-px h-3 bg-border"></span>
                   <span>${formatTime(groupDuration)}</span>
                 </div>
               </div>
-              <div class="space-y-1 ml-12 border-l border-border pl-2 mt-1 ${isCollapsed ? "hidden" : ""}" data-flat-group-body="${escapeHtml(channel)}">
+              <div class="space-y-1 ml-12 border-l border-border pl-2 mt-1 ${isCollapsed ? "hidden" : ""}" data-flat-group-body="${escapeHtml(groupName)}">
                 ${gridOrList}
               </div>
             </div>
@@ -2009,14 +2064,19 @@ function renderMain() {
     }
     lastTabListFingerprint = fpLive;
   } else {
-    const channels = new Map<string, VideoData[]>();
+    const groups = new Map<string, VideoData[]>();
     videosToShow.forEach(video => {
-      const name = video.channelName || "Unknown Channel";
-      if (!channels.has(name)) channels.set(name, []);
-      channels.get(name)!.push(video);
+      let name = "Unknown";
+      if (groupingMode === "channel") {
+        name = video.channelName || "Unknown Channel";
+      } else if (groupingMode === "language") {
+        name = video.languageName ? video.languageName.split('(')[0].trim() : (video.language ? video.language.toUpperCase() : "Unspecified");
+      }
+      if (!groups.has(name)) groups.set(name, []);
+      groups.get(name)!.push(video);
     });
 
-    let sortedGroups = Array.from(channels.entries());
+    let sortedGroups = Array.from(groups.entries());
 
     if (sortOption === 'channel-asc') {
       sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
@@ -2037,8 +2097,8 @@ function renderMain() {
     tabListContainerInnerHtmlUpdated = true;
     setTabListInnerHTML(
       container,
-      sortedGroups.map(([channel, videos]) => {
-      const isCollapsed = collapsedGroups.has(channel);
+      sortedGroups.map(([groupName, videos]) => {
+      const isCollapsed = collapsedGroups.has(groupName);
       const groupDuration = videos.reduce((acc, video) => acc + video.seconds, 0);
       const sortedGroupVideos = sortVideos(videos);
 
@@ -2048,11 +2108,11 @@ function renderMain() {
       return `
             <div class="mb-4">
                 <div class="flex items-center gap-3 px-2 py-2 rounded-md hover:bg-surface-hover/30 group/header select-none">
-                    <button class="p-1 rounded hover:bg-surface-hover text-text-muted transition-transform duration-200 group-toggle ${isCollapsed ? '-rotate-90' : ''}" data-group="${channel}">
+                    <button class="p-1 rounded hover:bg-surface-hover text-text-muted transition-transform duration-200 group-toggle ${isCollapsed ? '-rotate-90' : ''}" data-group="${escapeHtml(groupName)}">
                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
                     </button>
                     
-                    <div class="relative flex items-center justify-center w-4 h-4 cursor-pointer group-selection-toggle" data-group="${channel}">
+                    <div class="relative flex items-center justify-center w-4 h-4 cursor-pointer group-selection-toggle" data-group="${escapeHtml(groupName)}">
                       <input type="checkbox" class="peer appearance-none w-3.5 h-3.5 rounded border border-text-muted/40 checked:bg-accent checked:border-accent transition-colors cursor-pointer" ${allSelected ? 'checked' : ''} ${someSelected ? 'indeterminate' : ''}>
                        <svg class="absolute w-2 h-2 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                        <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 ${someSelected && !allSelected ? 'opacity-100' : ''}">
@@ -2060,7 +2120,7 @@ function renderMain() {
                        </div>
                     </div>
 
-                    <div class="flex-1 font-medium text-sm text-text-primary truncate cursor-pointer group-toggle" data-group="${channel}">${channel}</div>
+                    <div class="flex-1 font-medium text-sm text-text-primary truncate cursor-pointer group-toggle" data-group="${escapeHtml(groupName)}">${escapeHtml(groupName)}</div>
                     <div class="text-[10px] text-text-muted font-mono flex items-center gap-2">
                         <span>${videos.length} videos</span>
                         <span class="w-px h-3 bg-border"></span>
@@ -2068,7 +2128,7 @@ function renderMain() {
                     </div>
                 </div>
                 
-                <div class="space-y-1 ml-12 border-l border-border pl-2 mt-1 ${isCollapsed ? 'hidden' : ''}" data-flat-group-body="${escapeHtml(channel)}">
+                <div class="space-y-1 ml-12 border-l border-border pl-2 mt-1 ${isCollapsed ? 'hidden' : ''}" data-flat-group-body="${escapeHtml(groupName)}">
                     ${layoutMode === 'grid' ? renderVideoGrid(sortedGroupVideos) : renderVideoList(sortedGroupVideos)}
                 </div>
             </div>
@@ -2098,6 +2158,7 @@ function renderVideoList(videos: VideoData[], sectionColorIndex?: number | "unso
            <div class="flex items-baseline gap-2 mb-1">
              <h3 class="manager-card-title text-sm font-medium text-text-primary truncate" title="${video.title}">${video.title}</h3>
              <span class="manager-card-channel text-[10px] text-text-muted truncate uppercase tracking-tight">${video.channelName}</span>
+             ${video.languageName ? `<span class="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold ml-1 uppercase shrink-0">${video.languageName.split('(')[0].trim()}</span>` : ''}
            </div>
            
            <div class="flex items-center gap-3 w-full max-w-md bg-surface-elevated/50 py-1 px-2 rounded-md">
@@ -2190,7 +2251,10 @@ function renderSessionGrid(tabs: SavedSessionTab[], sectionColorIndex?: number |
         </div>
         <div class="p-2 session-video-click-target cursor-pointer">
           <h3 class="text-xs font-medium text-text-primary line-clamp-2 leading-snug mb-1 min-h-[2.5em]" title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
-          <div class="text-[10px] text-text-muted truncate">${escapeHtml(channel)}</div>
+          <div class="flex items-center justify-between">
+            <div class="text-[10px] text-text-muted truncate">${escapeHtml(channel)}</div>
+            ${tab.languageName ? `<div class="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0">${escapeHtml(tab.languageName.split('(')[0].trim())}</div>` : ''}
+          </div>
         </div>
       </div>
     `;
@@ -2216,6 +2280,7 @@ function renderSessionList(tabs: SavedSessionTab[], sectionColorIndex?: number |
           <div class="flex items-baseline gap-2 mb-1">
             <h3 class="text-sm font-medium text-text-primary truncate" title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
             <span class="text-[10px] text-text-muted truncate uppercase tracking-tight">${escapeHtml(channel)}</span>
+            ${tab.languageName ? `<span class="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold ml-1 uppercase shrink-0">${escapeHtml(tab.languageName.split('(')[0].trim())}</span>` : ''}
           </div>
           <div class="text-xs font-mono text-text-muted tabular-nums">${formatCompact(sec)}</div>
         </div>
@@ -2288,6 +2353,7 @@ function renderVideoGrid(videos: VideoData[], sectionColorIndex?: number | "unso
                     <h3 class="manager-card-title text-xs font-medium text-text-primary line-clamp-2 leading-snug mb-1 min-h-[2.5em]" title="${video.title}">${video.title}</h3>
                     <div class="flex items-center justify-between text-[10px] text-text-muted">
                         <span class="manager-card-channel truncate hover:text-text-secondary transition-colors">${video.channelName}</span>
+                        ${video.languageName ? `<span class="bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0">${video.languageName.split('(')[0].trim()}</span>` : ''}
                     </div>
                 </div>
             </div>
@@ -2683,17 +2749,25 @@ function setupListeners() {
       event.stopPropagation();
       const el = target.closest(".nested-group-selection-toggle") as HTMLElement;
       const scopeId = el.dataset.nestedGroupScope;
-      const channel = el.dataset.nestedChannel;
-      if (!scopeId || !channel) return;
+      const groupName = el.dataset.nestedGroupName;
+      if (!scopeId || !groupName) return;
       if (selectedSession) {
         const secs = orderedSections(selectedSession.sections);
         const inSection = (tab: SavedSessionTab) => {
           if (scopeId === "__unsorted") return !sessionTabSectionId(tab, secs);
           return sessionTabSectionId(tab, secs) === scopeId;
         };
-        const groupTabs = (selectedSession.tabs ?? []).filter(
-          (t) => inSection(t) && (t.channelName ?? "Unknown Channel") === channel
-        );
+        const groupTabs = (selectedSession.tabs ?? []).filter((t) => {
+          if (!inSection(t)) return false;
+          if (groupingMode === "channel") {
+            return (t.channelName ?? "Unknown Channel") === groupName;
+          } else if (groupingMode === "language") {
+            const stripped = t.languageName ? t.languageName.split('(')[0].trim() : "";
+            const langName = stripped ? stripped : (t.language ? t.language.toUpperCase() : "Unspecified");
+            return langName === groupName;
+          }
+          return false;
+        });
         const urls = groupTabs.map((t) => t.url ?? "").filter(Boolean);
         const allSelected = urls.length > 0 && urls.every((u) => selectedSessionTabUrls.has(u));
         urls.forEach((u) => {
@@ -2708,7 +2782,15 @@ function setupListeners() {
         const groupVideos = scopeVideos.filter((v) => {
           const sid = liveSectionIdForVideo(v);
           const inSec = scopeId === "__unsorted" ? sid === undefined : sid === scopeId;
-          return inSec && (v.channelName || "Unknown Channel") === channel;
+          if (!inSec) return false;
+          if (groupingMode === "channel") {
+            return (v.channelName || "Unknown Channel") === groupName;
+          } else if (groupingMode === "language") {
+            const stripped = v.languageName ? v.languageName.split('(')[0].trim() : "";
+            const langName = stripped ? stripped : (v.language ? v.language.toUpperCase() : "Unspecified");
+            return langName === groupName;
+          }
+          return false;
         });
         const allSelected =
           groupVideos.length > 0 && groupVideos.every((v) => selectedTabIds.has(v.id));
@@ -2741,9 +2823,16 @@ function setupListeners() {
         if (currentWindowId !== "all") {
           scopeVideos = allVideos.filter((video) => video.windowId === currentWindowId);
         }
-        const videosInGroup = scopeVideos.filter(
-          (video) => (video.channelName || "Unknown Channel") === groupName
-        );
+        const videosInGroup = scopeVideos.filter((video) => {
+          if (groupingMode === "channel") {
+            return (video.channelName || "Unknown Channel") === groupName;
+          } else if (groupingMode === "language") {
+            const stripped = video.languageName ? video.languageName.split('(')[0].trim() : "";
+            const langName = stripped ? stripped : (video.language ? video.language.toUpperCase() : "Unspecified");
+            return langName === groupName;
+          }
+          return false;
+        });
         const allSelected = videosInGroup.every((video) => selectedTabIds.has(video.id));
         videosInGroup.forEach((video) => {
           if (allSelected) selectedTabIds.delete(video.id);
@@ -2849,6 +2938,11 @@ function setupListeners() {
   });
   document.getElementById("view-channel")?.addEventListener("click", () => {
     groupingMode = "channel";
+    saveSettings();
+    render();
+  });
+  document.getElementById("view-language")?.addEventListener("click", () => {
+    groupingMode = "language";
     saveSettings();
     render();
   });
@@ -3053,6 +3147,30 @@ function setupListeners() {
   document.getElementById("btn-add-section")?.addEventListener("click", (e) => {
     e.stopPropagation();
     openAddSectionModal();
+  });
+
+  document.getElementById("btn-collapse-all")?.addEventListener("click", () => {
+    const keys = new Set<string>();
+    document.querySelectorAll('[data-section-collapse]').forEach(el => keys.add((el as HTMLElement).dataset.sectionCollapse!));
+    document.querySelectorAll('[data-nested-group-collapse]').forEach(el => keys.add((el as HTMLElement).dataset.nestedGroupCollapse!));
+    document.querySelectorAll('[data-flat-channel-collapse]').forEach(el => keys.add((el as HTMLElement).dataset.flatChannelCollapse!));
+
+    let allCollapsed = true;
+    for (const key of keys) {
+      if (!collapsedGroups.has(key)) {
+        allCollapsed = false;
+        break;
+      }
+    }
+
+    if (allCollapsed) {
+      collapsedGroups.clear();
+    } else {
+      for (const key of keys) {
+        collapsedGroups.add(key);
+      }
+    }
+    render();
   });
 
   document.getElementById("add-section-close")?.addEventListener("click", () => closeAddSectionModal());
@@ -3320,6 +3438,8 @@ document.addEventListener("DOMContentLoaded", () => {
         video.title = message.metadata.title;
         video.channelName = message.metadata.channelName;
         video.isLive = message.metadata.isLive || false;
+        if (message.metadata.language !== undefined) video.language = message.metadata.language;
+        if (message.metadata.languageName !== undefined) video.languageName = message.metadata.languageName;
       }
     }
     if (message.action === "sync-complete") render();

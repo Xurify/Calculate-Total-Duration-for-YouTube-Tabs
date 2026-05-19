@@ -76,7 +76,7 @@ const SYNC_CONCURRENCY = 3;
 const SYNC_DELAY_BETWEEN_REQUESTS_MS = 500;
 const SYNC_IN_PROGRESS = new Set<string>();
 
-function parseMetadataFromHtml(html: string): { duration: number; title: string; channel: string; isLive: boolean; syncedVideoId: string | null } {
+function parseMetadataFromHtml(html: string): { duration: number; title: string; channel: string; isLive: boolean; syncedVideoId: string | null; language?: string | null; languageName?: string | null } {
   let duration = 0;
   let title = "";
   let channel = "";
@@ -116,7 +116,32 @@ function parseMetadataFromHtml(html: string): { duration: number; title: string;
     const authorMatch = html.match(/"author"\s*:\s*"([^"]+)"/) || html.match(/"ownerChannelName"\s*:\s*"([^"]+)"/);
     channel = authorMatch ? authorMatch[1] : "";
   }
-  return { duration, title, channel, isLive, syncedVideoId };
+
+  let language: string | null = null;
+  let languageName: string | null = null;
+  if (playerResponseMatch) {
+    try {
+      const playerResponse = JSON.parse(playerResponseMatch[1]);
+      const captionTracks = playerResponse.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+      if (captionTracks && captionTracks.length > 0) {
+        // Prioritize auto-generated (ASR) track as it represents the actual spoken language
+        const asrTrack = captionTracks.find((t: any) => t.kind === 'asr');
+        const track = asrTrack || captionTracks[0];
+        language = track.languageCode;
+        languageName = (track.name?.simpleText || track.languageCode).split('(')[0].trim();
+      }
+    } catch (_) {}
+  }
+
+  return {
+    duration,
+    title,
+    channel,
+    isLive,
+    syncedVideoId,
+    language,
+    languageName,
+  };
 }
 
 async function fetchOneTab(tab: TabToSync): Promise<boolean> {
@@ -136,7 +161,15 @@ async function fetchOneTab(tab: TabToSync): Promise<boolean> {
     }
     const html = await response.text();
     if (html.includes("consent.youtube.com")) return false;
-    const { duration, title, channel, isLive, syncedVideoId } = parseMetadataFromHtml(html);
+    const {
+      duration,
+      title,
+      channel,
+      isLive,
+      syncedVideoId,
+      language,
+      languageName,
+    } = parseMetadataFromHtml(html);
     if (duration > 0 || title || isLive) {
       const metadata = {
         seconds: duration,
@@ -144,6 +177,8 @@ async function fetchOneTab(tab: TabToSync): Promise<boolean> {
         channelName: channel || "",
         isLive,
         videoId: syncedVideoId ?? undefined,
+        language,
+        languageName,
       };
       pendingCacheUpdates.set(normalizedUrl, { url: tab.url, metadata });
       scheduleFlush();
@@ -159,13 +194,13 @@ async function fetchOneTab(tab: TabToSync): Promise<boolean> {
 
 async function handleStealthSync(tabs: TabToSync[]) {
   const data = await browser.storage.local.get("metadataCache");
-  const cache = (data.metadataCache as Record<string, { seconds?: number; title?: string; channelName?: string; isLive?: boolean; timestamp?: number }>) || {};
+  const cache = (data.metadataCache as Record<string, { seconds?: number; title?: string; channelName?: string; isLive?: boolean; timestamp?: number; language?: string | null; languageName?: string | null }>) || {};
   const toFetch: TabToSync[] = [];
 
   for (const tab of tabs) {
     const normalizedUrl = normalizeYoutubeUrl(tab.url);
     const cached = cache[normalizedUrl];
-    const hasValidCache = cached && (cached.seconds! > 0 || cached.isLive) && cached.title;
+    const hasValidCache = cached && (cached.seconds! > 0 || cached.isLive) && cached.title && cached.language !== undefined;
     const cacheFresh = cached?.timestamp != null && Date.now() - cached.timestamp < CACHE_FRESH_MAX_AGE_MS;
     if (hasValidCache && cacheFresh) {
       browser.runtime.sendMessage({
@@ -176,6 +211,8 @@ async function handleStealthSync(tabs: TabToSync[]) {
           title: cached.title ?? "",
           channelName: cached.channelName ?? "",
           isLive: cached.isLive ?? false,
+          language: cached.language,
+          languageName: cached.languageName
         },
       }).catch(() => {});
       continue;

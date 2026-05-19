@@ -11,6 +11,8 @@ export interface VideoData {
   active: boolean;
   isLive: boolean;
   windowId?: number;
+  language?: string | null;
+  languageName?: string | null;
 }
 
 export const MAX_CACHE_AGE_MS = 48 * 60 * 60 * 1000;
@@ -24,6 +26,8 @@ export interface CachedMetadata {
   timestamp: number;
   /** When set, cache is only used when this matches the tab's video ID (avoids stale SPA metadata). */
   videoId?: string;
+  language?: string | null;
+  languageName?: string | null;
 }
 
 export function isCacheEntryUsable(cached: CachedMetadata | undefined): cached is CachedMetadata {
@@ -74,7 +78,7 @@ export async function saveStorage(
   sortByDuration: boolean,
   thumbnailQuality?: 'standard' | 'high',
   layoutMode?: 'list' | 'grid',
-  groupingMode?: 'none' | 'channel',
+  groupingMode?: 'none' | 'channel' | 'language',
   sortOption?: string
 ): Promise<void> {
   if (!browser.storage?.local) return;
@@ -103,7 +107,7 @@ export async function loadStorage(): Promise<{
   excludedUrls: string[];
   thumbnailQuality: 'standard' | 'high';
   layoutMode: 'list' | 'grid';
-  groupingMode: 'none' | 'channel';
+  groupingMode: 'none' | 'channel' | 'language';
   sortOption: string;
   metadataCache: Record<string, CachedMetadata>;
 }> {
@@ -133,7 +137,7 @@ export async function loadStorage(): Promise<{
     excludedUrls: (data.excludedUrls as string[]) || [],
     thumbnailQuality: (data.thumbnailQuality as 'standard' | 'high') || 'high',
     layoutMode: (data.layoutMode as 'list' | 'grid') || 'grid',
-    groupingMode: (data.groupingMode as 'none' | 'channel') || 'none',
+    groupingMode: (data.groupingMode as 'none' | 'channel' | 'language') || 'none',
     sortOption: (data.sortOption as string) || 'duration-desc',
     metadataCache: (data.metadataCache as Record<string, CachedMetadata>) || {},
   };
@@ -185,6 +189,8 @@ export interface SavedSessionTab {
   seconds?: number;
   /** When set, tab belongs to this section within the saved session */
   sectionId?: string | null;
+  language?: string;
+  languageName?: string;
 }
 
 export interface SavedSession {
@@ -262,6 +268,8 @@ export async function getSavedSessions(): Promise<SavedSession[]> {
           channelName: t?.channelName,
           seconds: t?.seconds,
           sectionId: typeof t?.sectionId === "string" && t.sectionId.length > 0 ? t.sectionId : undefined,
+          language: t?.language,
+          languageName: t?.languageName,
         }))
       : [];
     return {
@@ -300,6 +308,8 @@ export async function saveSession(
       channelName: t?.channelName,
       seconds: t?.seconds,
       sectionId: typeof t?.sectionId === "string" && t.sectionId.length > 0 ? t.sectionId : undefined,
+      language: t?.language,
+      languageName: t?.languageName,
     })),
     pinned: false,
     sections: normalizedSections.length > 0 ? normalizedSections : [],
@@ -346,6 +356,8 @@ export async function updateSessionTabs(sessionId: string, tabs: SavedSessionTab
     channelName: t?.channelName,
     seconds: t?.seconds,
     sectionId: typeof t?.sectionId === "string" && t.sectionId.length > 0 ? t.sectionId : undefined,
+    language: t?.language,
+    languageName: t?.languageName,
   }));
   await browser.storage.local.set({ [SAVED_SESSIONS_KEY]: sessions });
 }
@@ -360,7 +372,14 @@ export async function updateSessionSections(sessionId: string, sections: Session
   session.tabs = session.tabs.map((tab) => {
     const sid = tab.sectionId;
     if (typeof sid === "string" && validIds.has(sid)) return tab;
-    return { url: tab.url, title: tab.title, channelName: tab.channelName, seconds: tab.seconds };
+    return {
+      url: tab.url,
+      title: tab.title,
+      channelName: tab.channelName,
+      seconds: tab.seconds,
+      language: tab.language,
+      languageName: tab.languageName,
+    };
   });
   await browser.storage.local.set({ [SAVED_SESSIONS_KEY]: sessions });
 }

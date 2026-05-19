@@ -19,6 +19,8 @@ interface CachedMetadataPayload {
   seconds: number;
   currentTime: number;
   isLive: boolean;
+  language?: string | null;
+  languageName?: string | null;
 }
 
 let lastMetadata: CachedMetadataPayload = {
@@ -28,6 +30,8 @@ let lastMetadata: CachedMetadataPayload = {
   seconds: 0,
   currentTime: 0,
   isLive: false,
+  language: null,
+  languageName: null,
 };
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -48,6 +52,32 @@ function getVideoIdFromLocation(): string | null {
     // ignore
   }
   return null;
+}
+
+function extractLanguageFromDom(): { language?: string | null; languageName?: string | null } {
+  try {
+    const scripts = Array.from(document.querySelectorAll('script'));
+    const playerResponseScript = scripts.find(s => s.textContent.includes('var ytInitialPlayerResponse ='));
+    if (playerResponseScript) {
+      const text = playerResponseScript.textContent;
+      const match = text.match(/var ytInitialPlayerResponse = (\{.*?\});/);
+      if (match) {
+        const data = JSON.parse(match[1]);
+        const captionTracks = data.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+        if (captionTracks && captionTracks.length > 0) {
+          // Prefer auto-generated or the first one available
+          const track = captionTracks[0];
+          return {
+            language: track.languageCode,
+            languageName: (track.name?.simpleText || track.languageCode).split('(')[0].trim()
+          };
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return { language: null, languageName: null };
 }
 
 function parseDurationFromTimeText(text: string): number {
@@ -99,6 +129,8 @@ function readMetadataFromDom(): CachedMetadataPayload {
     isLive = true;
   }
 
+  const { language, languageName } = extractLanguageFromDom();
+
   return {
     videoId,
     title: title || "YouTube Video",
@@ -106,6 +138,8 @@ function readMetadataFromDom(): CachedMetadataPayload {
     seconds: isLive ? 0 : duration,
     currentTime,
     isLive,
+    language,
+    languageName,
   };
 }
 

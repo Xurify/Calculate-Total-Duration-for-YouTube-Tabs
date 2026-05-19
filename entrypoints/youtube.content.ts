@@ -65,8 +65,9 @@ function extractLanguageFromDom(): { language?: string | null; languageName?: st
         const data = JSON.parse(match[1]);
         const captionTracks = data.captions?.playerCaptionsTracklistRenderer?.captionTracks;
         if (captionTracks && captionTracks.length > 0) {
-          // Prefer auto-generated or the first one available
-          const track = captionTracks[0];
+          // Prioritize auto-generated (ASR) track as it represents the actual spoken language
+          const asrTrack = captionTracks.find(t => t.kind === 'asr');
+          const track = asrTrack || captionTracks[0];
           return {
             language: track.languageCode,
             languageName: (track.name?.simpleText || track.languageCode).split('(')[0].trim()

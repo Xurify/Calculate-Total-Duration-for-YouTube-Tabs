@@ -5,6 +5,49 @@ export function videoIdFromTabUrl(url: string): string | null {
   return getVideoIdFromUrl(normalizeYoutubeUrl(url));
 }
 
+/** Stable key for duplicate detection (video ID when available, else normalized URL). */
+export function videoIdKeyFromUrl(url: string): string {
+  return videoIdFromTabUrl(url) ?? normalizeYoutubeUrl(url);
+}
+
+export function countItemsByVideoId<T>(items: T[], getUrl: (item: T) => string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const url = getUrl(item);
+    if (!url) continue;
+    const key = videoIdKeyFromUrl(url);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
+export interface DuplicateSummary {
+  /** Distinct videos that appear more than once. */
+  duplicateVideoCount: number;
+  /** Total tabs minus unique videos (extra copies). */
+  extraTabCount: number;
+}
+
+export function summarizeDuplicates(counts: Map<string, number>): DuplicateSummary {
+  let duplicateVideoCount = 0;
+  let extraTabCount = 0;
+  for (const count of counts.values()) {
+    if (count > 1) {
+      duplicateVideoCount++;
+      extraTabCount += count - 1;
+    }
+  }
+  return { duplicateVideoCount, extraTabCount };
+}
+
+export function duplicateCountForUrl(counts: Map<string, number>, url: string): number {
+  return counts.get(videoIdKeyFromUrl(url)) ?? 1;
+}
+
+export function isDuplicateUrl(counts: Map<string, number>, url: string): boolean {
+  return duplicateCountForUrl(counts, url) > 1;
+}
+
 export function normalizeSavedSessionTab(tab: SavedSessionTab): SavedSessionTab {
   const url = normalizeYoutubeUrl(tab.url ?? "");
   return {

@@ -36,12 +36,16 @@ import {
 import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl } from "../../utils/format";
 import {
   buildTabsFromVideos,
+  countItemsByVideoId,
+  duplicateCountForUrl,
   findSimilarSession,
   formatSavedAgo,
   sessionsOverlapScore,
   sessionTotalSeconds,
   suggestSessionName,
+  summarizeDuplicates,
   videoIdFromTabUrl,
+  type DuplicateSummary,
   type SaveSessionPayload,
 } from "../../utils/sessions";
 
@@ -64,6 +68,9 @@ let thumbnailQuality: 'standard' | 'high' = 'high';
 let isSettingsOpen = false;
 
 let sortOption: string = 'duration-desc';
+let showDuplicatesOnly = false;
+/** Video-id counts for the current view scope (all windows, one window, or saved session). */
+let scopeVideoIdCounts = new Map<string, number>();
 let collapsedGroups = new Set<string>();
 let renderTimeout: ReturnType<typeof setTimeout> | null = null;
 let searchDebounceTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -689,6 +696,130 @@ function filterUrlsMissingOnly(urls: string[], openIds: Set<string>): string[] {
   });
 }
 
+function duplicateBadgeHtml(url: string): string {
+  const count = duplicateCountForUrl(scopeVideoIdCounts, url);
+  if (count <= 1) return "";
+  return `<span class="text-[10px] bg-amber-500/15 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded-full font-bold shrink-0 tabular-nums" title="This video appears ${count} times in this view">×${count}</span>`;
+}
+
+function shouldShowWindowBadge(): boolean {
+  return selectedSession == null && currentWindowId === "all" && windowGroups.length > 1;
+}
+
+function windowLabelForVideo(video: VideoData): string | null {
+  if (!shouldShowWindowBadge() || video.windowId == null) return null;
+  return windowGroups.find((group) => group.id === video.windowId)?.label ?? null;
+}
+
+function windowBadgeHtml(video: VideoData): string {
+  const label = windowLabelForVideo(video);
+  if (!label) return "";
+  return `<span class="text-[10px] bg-surface-elevated border border-border text-text-secondary px-1.5 py-0.5 rounded-full font-medium shrink-0 tabular-nums" title="Open in ${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+}
+
+function windowThumbnailBadgeHtml(video: VideoData): string {
+  const label = windowLabelForVideo(video);
+  if (!label) return "";
+  return `<span class="absolute bottom-6 left-1 z-[5] px-1.5 py-0.5 bg-black/75 rounded text-[10px] font-medium text-white backdrop-blur-sm tabular-nums pointer-events-none">${escapeHtml(label)}</span>`;
+}
+
+function liveVideoFingerprintPart(video: VideoData): string {
+  return `${video.id}|${video.windowId ?? ""}|${video.url}|${video.title}|${video.channelName}|${video.seconds}|${video.isLive ? 1 : 0}`;
+}
+
+function formatDuplicateStatsSuffix(summary: DuplicateSummary): string {
+  if (summary.duplicateVideoCount === 0) return "";
+  const videosLabel = summary.duplicateVideoCount === 1 ? "duplicate video" : "duplicate videos";
+  const tabsLabel = summary.extraTabCount === 1 ? "extra tab" : "extra tabs";
+  return ` · ${summary.duplicateVideoCount} ${videosLabel} (${summary.extraTabCount} ${tabsLabel})`;
+}
+
+function formatViewStats(count: number, durationSec: number, summary: DuplicateSummary): string {
+  const dupSuffix = formatDuplicateStatsSuffix(summary);
+  if (showDuplicatesOnly && summary.duplicateVideoCount > 0) {
+    return `${count} duplicate tab${count === 1 ? "" : "s"} · ${formatTime(durationSec)} total duration`;
+  }
+  return `${count} video${count === 1 ? "" : "s"}${dupSuffix} · ${formatTime(durationSec)} total duration`;
+}
+
+function refreshScopeVideoIdCountsFromVideos(videos: VideoData[]): void {
+  scopeVideoIdCounts = countItemsByVideoId(videos, (video) => video.url);
+}
+
+function refreshScopeVideoIdCountsFromSessionTabs(tabs: SavedSessionTab[]): void {
+  scopeVideoIdCounts = countItemsByVideoId(tabs, (tab) => tab.url ?? "");
+}
+
+function filterVideosForDisplay(videos: VideoData[]): VideoData[] {
+  refreshScopeVideoIdCountsFromVideos(videos);
+  let result = videos;
+  if (searchQuery) {
+    const searchQueryLower = searchQuery.toLowerCase();
+    result = result.filter(
+      (video) =>
+        video.title.toLowerCase().includes(searchQueryLower) ||
+        video.channelName.toLowerCase().includes(searchQueryLower)
+    );
+  }
+  if (showDuplicatesOnly) {
+    result = result.filter((video) => duplicateCountForUrl(scopeVideoIdCounts, video.url) > 1);
+  }
+  return result;
+}
+
+function filterSessionTabsForDisplay(tabs: SavedSessionTab[]): SavedSessionTab[] {
+  refreshScopeVideoIdCountsFromSessionTabs(tabs);
+  let result = tabs;
+  if (searchQuery) {
+    const searchLower = searchQuery.toLowerCase();
+    result = result.filter(
+      (tab) =>
+        (tab.title ?? "").toLowerCase().includes(searchLower) ||
+        (tab.channelName ?? "").toLowerCase().includes(searchLower)
+    );
+  }
+  if (showDuplicatesOnly) {
+    result = result.filter((tab) => duplicateCountForUrl(scopeVideoIdCounts, tab.url ?? "") > 1);
+  }
+  return result;
+}
+
+function updateDuplicatesFilterButton(summary: DuplicateSummary): void {
+  const btn = document.getElementById("btn-filter-duplicates");
+  const label = document.getElementById("btn-filter-duplicates-label");
+  if (!btn || !label) return;
+
+  const hasDuplicates = summary.duplicateVideoCount > 0;
+  btn.classList.toggle("text-accent", showDuplicatesOnly);
+  btn.classList.toggle("border-accent/40", showDuplicatesOnly);
+  btn.classList.toggle("bg-accent/10", showDuplicatesOnly);
+  btn.classList.toggle("text-text-muted", !showDuplicatesOnly);
+  btn.classList.toggle("opacity-40", !hasDuplicates && !showDuplicatesOnly);
+  btn.toggleAttribute("disabled", !hasDuplicates && !showDuplicatesOnly);
+
+  label.textContent = hasDuplicates ? `Duplicates (${summary.duplicateVideoCount})` : "Duplicates";
+  btn.title = hasDuplicates
+    ? `${summary.duplicateVideoCount} video${summary.duplicateVideoCount === 1 ? "" : "s"} appear more than once (${summary.extraTabCount} extra tab${summary.extraTabCount === 1 ? "" : "s"}). Click to ${showDuplicatesOnly ? "show all" : "show duplicates only"}.`
+    : "No duplicate videos in this view";
+}
+
+function emptyListMessage(): string {
+  if (showDuplicatesOnly) {
+    return `
+      <div class="flex flex-col items-center justify-center h-full opacity-40">
+        <div class="text-4xl mb-4">✓</div>
+        <div>No duplicate videos in this view</div>
+      </div>
+    `;
+  }
+  return `
+      <div class="flex flex-col items-center justify-center h-full opacity-40">
+        <div class="text-4xl mb-4">📺</div>
+        <div>No videos found</div>
+      </div>
+    `;
+}
+
 interface RestoreSessionOptions {
   target: "new" | "current";
   missingOnly: boolean;
@@ -795,6 +926,7 @@ async function showRestoreSessionModal(session: SavedSession): Promise<RestoreSe
 interface SaveSessionModalOptions {
   defaultName: string;
   tabCount: number;
+  duplicateExtraTabs: number;
   sessions: SavedSession[];
   similarSession: SavedSession | null;
   similarScore: number;
@@ -816,7 +948,13 @@ async function showSaveSessionModal(options: SaveSessionModalOptions): Promise<S
     }
 
     input.value = options.defaultName;
-    if (summaryEl) summaryEl.textContent = `Saving ${options.tabCount} tab${options.tabCount === 1 ? "" : "s"} (hidden/excluded tabs omitted)`;
+    const summaryParts = [`Saving ${options.tabCount} tab${options.tabCount === 1 ? "" : "s"} (hidden/excluded tabs omitted)`];
+    if (options.duplicateExtraTabs > 0) {
+      summaryParts.push(
+        `${options.duplicateExtraTabs} duplicate tab${options.duplicateExtraTabs === 1 ? "" : "s"} will be merged into one entry per video`
+      );
+    }
+    if (summaryEl) summaryEl.textContent = summaryParts.join(" · ");
 
     targetSelect.innerHTML = options.sessions
       .map(
@@ -931,10 +1069,13 @@ async function saveVideosAsSession(videos: VideoData[], windowLabel?: string): P
   const sessions = await getSavedSessions();
   const similar = findSimilarSession(sessions, tabs);
   const similarScore = similar ? sessionsOverlapScore(tabs, similar.tabs ?? []) : 0;
+  const includedVideos = videos.filter((video) => !video.excluded);
+  const duplicateExtraTabs = summarizeDuplicates(countItemsByVideoId(includedVideos, (video) => video.url)).extraTabCount;
   const defaultName = suggestSessionName(tabs, windowLabel, sections);
   const payload = await showSaveSessionModal({
     defaultName,
     tabCount: tabs.length,
+    duplicateExtraTabs,
     sessions,
     similarSession: similar,
     similarScore,
@@ -1905,8 +2046,7 @@ function fingerprintLiveVideosInner(videos: VideoData[], collapseScopeId: string
   if (groupingMode !== "channel") {
     return sortVideos(videos)
       .map(
-        (video) =>
-          `${video.id}|${video.url}|${video.title}|${video.channelName}|${video.seconds}|${video.isLive ? 1 : 0}`
+        (video) => liveVideoFingerprintPart(video)
       )
       .join(";");
   }
@@ -1940,10 +2080,7 @@ function fingerprintLiveVideosInner(videos: VideoData[], collapseScopeId: string
       const allSelected = groupVideos.every((video) => selectedTabIds.has(video.id));
       const someSelected = !allSelected && groupVideos.some((video) => selectedTabIds.has(video.id));
       const vidSig = sortedGroupVideos
-        .map(
-          (video) =>
-            `${video.id}|${video.url}|${video.title}|${video.channelName}|${video.seconds}|${video.isLive ? 1 : 0}`
-        )
+        .map((video) => liveVideoFingerprintPart(video))
         .join(";");
       return `${ck}:${collapsed}:${allSelected}:${someSelected}:${vidSig}`;
     })
@@ -1964,21 +2101,14 @@ function liveAssignmentsFingerprintSig(): string {
 function tabListFingerprint(): string {
   if (selectedSession) {
     const session = selectedSession;
-    let tabsToShow: SavedSessionTab[] = session.tabs ?? [];
-    if (searchQuery) {
-      const searchLower = searchQuery.toLowerCase();
-      tabsToShow = tabsToShow.filter(
-        (tab) =>
-          (tab.title ?? "").toLowerCase().includes(searchLower) ||
-          (tab.channelName ?? "").toLowerCase().includes(searchLower)
-      );
-    }
+    const tabsToShow = filterSessionTabsForDisplay(session.tabs ?? []);
     const state = [
       "session",
       session.id,
       session.name,
       String(tabsToShow.length),
       searchQuery,
+      String(showDuplicatesOnly),
       groupingMode,
       layoutMode,
       sortOption,
@@ -2041,26 +2171,19 @@ function tabListFingerprint(): string {
     return `${state}\x1fflat:${vidSig}`;
   }
 
-  let videosToShow: VideoData[] = [];
+  let baseVideos: VideoData[] = [];
   if (currentWindowId === "all") {
-    videosToShow = allVideos;
+    baseVideos = allVideos;
   } else {
     const group = windowGroups.find((windowGroup) => windowGroup.id === currentWindowId);
-    if (group) videosToShow = group.tabs;
-    else videosToShow = [];
+    baseVideos = group ? group.tabs : [];
   }
-  if (searchQuery) {
-    const searchQueryLower = searchQuery.toLowerCase();
-    videosToShow = videosToShow.filter(
-      (video) =>
-        video.title.toLowerCase().includes(searchQueryLower) ||
-        video.channelName.toLowerCase().includes(searchQueryLower)
-    );
-  }
+  const videosToShow = filterVideosForDisplay(baseVideos);
   const state = [
     "live",
     String(currentWindowId),
     searchQuery,
+    String(showDuplicatesOnly),
     groupingMode,
     layoutMode,
     sortOption,
@@ -2092,12 +2215,7 @@ function tabListFingerprint(): string {
   }
   if (groupingMode === "none") {
     const sortedVideos = sortVideos(videosToShow);
-    const vidSig = sortedVideos
-      .map(
-        (video) =>
-          `${video.id}|${video.url}|${video.title}|${video.channelName}|${video.seconds}|${video.isLive ? 1 : 0}`
-      )
-      .join(";");
+    const vidSig = sortedVideos.map((video) => liveVideoFingerprintPart(video)).join(";");
     return `${state}\x1fnone:${layoutMode}:${vidSig}`;
   }
   const groups = new Map<string, VideoData[]>();
@@ -2134,12 +2252,7 @@ function tabListFingerprint(): string {
       const sortedGroupVideos = sortVideos(videos);
       const allSelected = videos.every((video) => selectedTabIds.has(video.id));
       const someSelected = !allSelected && videos.some((video) => selectedTabIds.has(video.id));
-      const vidSig = sortedGroupVideos
-        .map(
-          (video) =>
-            `${video.id}|${video.url}|${video.title}|${video.channelName}|${video.seconds}|${video.isLive ? 1 : 0}`
-        )
-        .join(";");
+      const vidSig = sortedGroupVideos.map((video) => liveVideoFingerprintPart(video)).join(";");
       return `${groupName}:${collapsed}:${allSelected}:${someSelected}:${vidSig}`;
     })
     .join("||");
@@ -2292,33 +2405,19 @@ function renderMain() {
   if (selectedSession) {
     if (viewToolbar) viewToolbar.classList.remove("hidden");
     const session = selectedSession;
-    let tabsToShow: SavedSessionTab[] = session.tabs ?? [];
-    if (searchQuery) {
-      const searchLower = searchQuery.toLowerCase();
-      tabsToShow = tabsToShow.filter(
-        (tab) =>
-          (tab.title ?? "").toLowerCase().includes(searchLower) ||
-          (tab.channelName ?? "").toLowerCase().includes(searchLower)
-      );
-    }
+    const tabsToShow = filterSessionTabsForDisplay(session.tabs ?? []);
+    const duplicateSummary = summarizeDuplicates(scopeVideoIdCounts);
+    updateDuplicatesFilterButton(duplicateSummary);
     const totalSec = tabsToShow.reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
     headerTitle.innerText = session.name;
-    headerStats.innerText = `${tabsToShow.length} videos · ${formatTime(totalSec)} total duration`;
+    headerStats.innerText = formatViewStats(tabsToShow.length, totalSec, duplicateSummary);
 
     const fpSession = tabListFingerprint();
     if (fpSession === lastTabListFingerprint) return;
 
     if (tabsToShow.length === 0 && !usesSectionLayoutForSession(session)) {
       tabListContainerInnerHtmlUpdated = true;
-      setTabListInnerHTML(
-        container,
-        `
-      <div class="flex flex-col items-center justify-center py-16 opacity-40">
-        <div class="text-4xl mb-4">📺</div>
-        <div>No videos found</div>
-      </div>
-    `
-      );
+      setTabListInnerHTML(container, emptyListMessage());
       lastTabListFingerprint = fpSession;
     } else if (usesSectionLayoutForSession(session)) {
       const secs = orderedSections(session.sections);
@@ -2404,29 +2503,23 @@ function renderMain() {
 
   if (viewToolbar) viewToolbar.classList.remove("hidden");
 
-  let videosToShow: VideoData[] = [];
-
+  let baseVideos: VideoData[] = [];
   if (currentWindowId === 'all') {
     headerTitle.innerText = "All Windows";
-    videosToShow = allVideos;
+    baseVideos = allVideos;
   } else {
     const group = windowGroups.find(windowGroup => windowGroup.id === currentWindowId);
     if (group) {
       headerTitle.innerText = group.label;
-      videosToShow = group.tabs;
+      baseVideos = group.tabs;
     }
   }
 
-  if (searchQuery) {
-    const searchQueryLower = searchQuery.toLowerCase();
-    videosToShow = videosToShow.filter(video =>
-      video.title.toLowerCase().includes(searchQueryLower) ||
-      video.channelName.toLowerCase().includes(searchQueryLower)
-    );
-  }
-
+  const videosToShow = filterVideosForDisplay(baseVideos);
+  const duplicateSummary = summarizeDuplicates(scopeVideoIdCounts);
+  updateDuplicatesFilterButton(duplicateSummary);
   const duration = videosToShow.reduce((acc, video) => acc + video.seconds, 0);
-  headerStats.innerText = `${videosToShow.length} videos · ${formatTime(duration)} total duration`;
+  headerStats.innerText = formatViewStats(videosToShow.length, duration, duplicateSummary);
 
   const fpLive = tabListFingerprint();
   if (fpLive === lastTabListFingerprint) {
@@ -2436,15 +2529,7 @@ function renderMain() {
 
   if (videosToShow.length === 0 && !usesSectionLayoutForLive()) {
     tabListContainerInnerHtmlUpdated = true;
-    setTabListInnerHTML(
-      container,
-      `
-      <div class="flex flex-col items-center justify-center h-full opacity-40">
-        <div class="text-4xl mb-4">📺</div>
-        <div>No videos found</div>
-      </div>
-    `
-    );
+    setTabListInnerHTML(container, emptyListMessage());
     lastTabListFingerprint = fpLive;
     return;
   }
@@ -2567,6 +2652,8 @@ function renderVideoList(videos: VideoData[], sectionColorIndex?: number | "unso
              <h3 class="manager-card-title text-sm font-medium text-text-primary truncate" title="${video.title}">${video.title}</h3>
              <span class="manager-card-channel text-[10px] text-text-muted truncate uppercase tracking-tight">${video.channelName}</span>
              ${video.languageName ? `<span class="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold ml-1 uppercase shrink-0">${video.languageName.split('(')[0].trim()}</span>` : ''}
+             ${windowBadgeHtml(video)}
+             ${duplicateBadgeHtml(video.url)}
            </div>
            
            <div class="flex items-center gap-3 w-full max-w-md bg-surface-elevated/50 py-1 px-2 rounded-md">
@@ -2659,9 +2746,12 @@ function renderSessionGrid(tabs: SavedSessionTab[], sectionColorIndex?: number |
         </div>
         <div class="p-2 session-video-click-target cursor-pointer">
           <h3 class="text-xs font-medium text-text-primary line-clamp-2 leading-snug mb-1 min-h-[2.5em]" title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
-          <div class="flex items-center justify-between">
+          <div class="flex items-center justify-between gap-2">
             <div class="text-[10px] text-text-muted truncate">${escapeHtml(channel)}</div>
-            ${tab.languageName ? `<div class="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0">${escapeHtml(tab.languageName.split('(')[0].trim())}</div>` : ''}
+            <div class="flex items-center gap-1 shrink-0">
+              ${duplicateBadgeHtml(tab.url)}
+              ${tab.languageName ? `<div class="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0">${escapeHtml(tab.languageName.split('(')[0].trim())}</div>` : ''}
+            </div>
           </div>
         </div>
       </div>
@@ -2689,6 +2779,7 @@ function renderSessionList(tabs: SavedSessionTab[], sectionColorIndex?: number |
             <h3 class="text-sm font-medium text-text-primary truncate" title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
             <span class="text-[10px] text-text-muted truncate uppercase tracking-tight">${escapeHtml(channel)}</span>
             ${tab.languageName ? `<span class="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold ml-1 uppercase shrink-0">${escapeHtml(tab.languageName.split('(')[0].trim())}</span>` : ''}
+            ${duplicateBadgeHtml(tab.url)}
           </div>
           <div class="text-xs font-mono text-text-muted tabular-nums">${formatCompact(sec)}</div>
         </div>
@@ -2727,7 +2818,7 @@ function renderVideoGrid(videos: VideoData[], sectionColorIndex?: number | "unso
         ? `<img ${imgAttr} class="manager-card-thumb w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="eager" decoding="async" alt=""${imgDragOff} />`
         : `<div class="w-full h-full flex items-center justify-center text-text-muted/20"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="12" cy="12" r="3"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>`
       }
-                    
+                    ${windowThumbnailBadgeHtml(video)}
                     <div class="manager-card-duration absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-mono font-medium text-white backdrop-blur-sm tabular-nums">
                         ${video.isLive ? 'LIVE' : formatCompact(video.seconds)}
                     </div>
@@ -2759,9 +2850,13 @@ function renderVideoGrid(videos: VideoData[], sectionColorIndex?: number | "unso
 
                 <div class="p-2 video-click-target cursor-pointer">
                     <h3 class="manager-card-title text-xs font-medium text-text-primary line-clamp-2 leading-snug mb-1 min-h-[2.5em]" title="${video.title}">${video.title}</h3>
-                    <div class="flex items-center justify-between text-[10px] text-text-muted">
+                    <div class="flex items-center justify-between text-[10px] text-text-muted gap-2">
                         <span class="manager-card-channel truncate hover:text-text-secondary transition-colors">${video.channelName}</span>
-                        ${video.languageName ? `<span class="bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0">${video.languageName.split('(')[0].trim()}</span>` : ''}
+                        <div class="flex items-center gap-1 shrink-0">
+                          ${windowBadgeHtml(video)}
+                          ${duplicateBadgeHtml(video.url)}
+                          ${video.languageName ? `<span class="bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0">${video.languageName.split('(')[0].trim()}</span>` : ''}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -3478,6 +3573,17 @@ function setupListeners() {
   document.getElementById("layout-grid")?.addEventListener("click", () => {
     layoutMode = "grid";
     saveSettings();
+    render();
+  });
+
+  document.getElementById("btn-filter-duplicates")?.addEventListener("click", () => {
+    if (showDuplicatesOnly) {
+      showDuplicatesOnly = false;
+    } else {
+      const summary = summarizeDuplicates(scopeVideoIdCounts);
+      if (summary.duplicateVideoCount === 0) return;
+      showDuplicatesOnly = true;
+    }
     render();
   });
 

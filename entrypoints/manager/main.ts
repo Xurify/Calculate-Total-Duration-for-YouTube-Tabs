@@ -2856,6 +2856,12 @@ function setupListeners() {
         }
         if (target.closest(".session-video-click-target")) {
           event.stopPropagation();
+          if (selectedSessionTabUrls.size > 0) {
+            if (selectedSessionTabUrls.has(url)) selectedSessionTabUrls.delete(url);
+            else selectedSessionTabUrls.add(url);
+            updateSelectionUI();
+            return;
+          }
           void openOrFocusSessionVideo(url);
           return;
         }
@@ -2897,6 +2903,13 @@ function setupListeners() {
       return;
     }
     if (target.closest(".video-click-target")) {
+      event.stopPropagation();
+      if (selectedTabIds.size > 0) {
+        if (selectedTabIds.has(id)) selectedTabIds.delete(id);
+        else selectedTabIds.add(id);
+        updateSelectionUI();
+        return;
+      }
       const video = allVideos.find((candidate) => candidate.id === id);
       if (video) await focusLiveVideoTab(video);
       return;

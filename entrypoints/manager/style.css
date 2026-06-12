@@ -61,6 +61,18 @@ body {
   background: var(--color-surface-hover);
 }
 
+.sidebar-session-row {
+  min-height: 3.25rem;
+}
+
+.sidebar-window-row {
+  min-height: 2.75rem;
+}
+
+.sidebar-all-windows-row {
+  min-height: 2.25rem;
+}
+
 .add-section-panel {
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.04) inset,

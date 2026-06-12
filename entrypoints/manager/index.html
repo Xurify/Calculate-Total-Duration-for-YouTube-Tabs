@@ -10,34 +10,75 @@
   </head>
   <body class="font-['Inter',system-ui,sans-serif] bg-surface text-text-primary m-0 p-0 overflow-hidden flex h-full">
     <aside class="w-64 bg-surface-elevated border-r border-border flex flex-col h-full z-10">
-      <div class="p-6 border-b border-border">
+      <div class="px-2 pt-5 pb-4 border-b border-border">
+        <div class="px-2.5">
         <h1 class="text-lg font-bold tracking-tight mb-1 flex items-center gap-2">
            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="3" x2="21" y1="9" y2="9"/><line x1="9" x2="9" y1="21" y2="9"/></svg>
            Tab Manager
         </h1>
         <div class="text-[11px] text-text-muted font-medium">Never get lost in your tabs again</div>
+        </div>
       </div>
       
       <div class="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1" id="window-list">
-        <div id="window-list-windows" class="min-h-[7.5rem]">
-          <!-- Placeholder to prevent layout shift when Windows load; replaced by renderSidebar() -->
-          <div class="sidebar-item w-full text-left px-3 py-2 rounded-md mb-1 flex items-center justify-between text-text-muted opacity-60" aria-hidden="true">
+        <div id="window-list-windows" class="min-h-[13.5rem]">
+          <!-- Placeholders reserve space before renderSidebar() / saved sessions load -->
+          <div class="sidebar-item w-full text-left px-2.5 py-2 rounded-md mb-1 flex items-center justify-between text-text-muted opacity-60 min-h-[2.25rem]" aria-hidden="true">
             <span class="text-xs font-semibold">All Windows</span>
-            <span class="text-[10px] bg-surface-elevated border border-border px-1.5 rounded-full">—</span>
+            <span class="text-[10px] bg-surface-elevated border border-border px-1.5 rounded-full tabular-nums">—</span>
           </div>
-          <div class="w-full px-3 py-2 rounded-md mb-1 flex items-center justify-between text-text-muted opacity-40" aria-hidden="true">
-            <div class="h-4 w-24 rounded bg-surface-elevated/50 animate-pulse"></div>
-            <span class="text-[10px] bg-surface-elevated/50 px-1.5 rounded-full">—</span>
+          <div class="w-full px-2.5 py-2 rounded-md mb-1 flex items-center justify-between text-text-muted opacity-40 min-h-[2.75rem]" aria-hidden="true">
+            <div class="min-w-0 flex-1 pr-2">
+              <div class="h-3.5 w-20 rounded bg-surface-elevated/50 animate-pulse mb-1"></div>
+              <div class="h-2.5 w-14 rounded bg-surface-elevated/40 animate-pulse"></div>
+            </div>
+            <span class="text-[10px] bg-surface-elevated/50 px-1.5 rounded-full tabular-nums">—</span>
+          </div>
+          <div class="w-full px-2.5 py-2 rounded-md mb-1 flex items-center justify-between text-text-muted opacity-40 min-h-[2.75rem]" aria-hidden="true">
+            <div class="min-w-0 flex-1 pr-2">
+              <div class="h-3.5 w-20 rounded bg-surface-elevated/50 animate-pulse mb-1"></div>
+              <div class="h-2.5 w-14 rounded bg-surface-elevated/40 animate-pulse"></div>
+            </div>
+            <span class="text-[10px] bg-surface-elevated/50 px-1.5 rounded-full tabular-nums">—</span>
+          </div>
+          <div class="w-full px-2.5 py-2 rounded-md mb-1 flex items-center justify-between text-text-muted opacity-40 min-h-[2.75rem]" aria-hidden="true">
+            <div class="min-w-0 flex-1 pr-2">
+              <div class="h-3.5 w-20 rounded bg-surface-elevated/50 animate-pulse mb-1"></div>
+              <div class="h-2.5 w-14 rounded bg-surface-elevated/40 animate-pulse"></div>
+            </div>
+            <span class="text-[10px] bg-surface-elevated/50 px-1.5 rounded-full tabular-nums">—</span>
           </div>
         </div>
-        <div class="h-px bg-border my-2 mx-2"></div>
-        <div class="px-2 py-1 text-[10px] uppercase font-bold text-text-muted tracking-wider">Saved</div>
-        <div id="saved-sessions-sidebar" class="space-y-1"></div>
+        <div class="h-px bg-border my-2.5"></div>
+        <div class="px-2.5 py-1.5 mb-1 text-[10px] uppercase font-bold text-text-muted tracking-wider">Saved</div>
+        <div class="px-2.5 mb-1.5">
+          <input type="text" id="session-sidebar-search" class="w-full px-2.5 py-1.5 text-[11px] border border-border rounded-md bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:border-text-muted" placeholder="Filter sessions…" />
+        </div>
+        <div id="saved-sessions-sidebar" class="space-y-1 min-h-[10.5rem]" aria-busy="true">
+          <div class="sidebar-session-skeleton w-full px-2.5 py-2 rounded-md mb-1 min-h-[3.25rem] flex items-center opacity-40" aria-hidden="true">
+            <div class="min-w-0 flex-1">
+              <div class="h-3.5 w-32 max-w-[85%] rounded bg-surface-elevated/50 animate-pulse mb-1"></div>
+              <div class="h-2.5 w-24 max-w-[65%] rounded bg-surface-elevated/40 animate-pulse"></div>
+            </div>
+          </div>
+          <div class="sidebar-session-skeleton w-full px-2.5 py-2 rounded-md mb-1 min-h-[3.25rem] flex items-center opacity-40" aria-hidden="true">
+            <div class="min-w-0 flex-1">
+              <div class="h-3.5 w-32 max-w-[85%] rounded bg-surface-elevated/50 animate-pulse mb-1"></div>
+              <div class="h-2.5 w-24 max-w-[65%] rounded bg-surface-elevated/40 animate-pulse"></div>
+            </div>
+          </div>
+          <div class="sidebar-session-skeleton w-full px-2.5 py-2 rounded-md mb-1 min-h-[3.25rem] flex items-center opacity-40" aria-hidden="true">
+            <div class="min-w-0 flex-1">
+              <div class="h-3.5 w-32 max-w-[85%] rounded bg-surface-elevated/50 animate-pulse mb-1"></div>
+              <div class="h-2.5 w-24 max-w-[65%] rounded bg-surface-elevated/40 animate-pulse"></div>
+            </div>
+          </div>
+        </div>
       </div>
       
-      <div class="p-4 border-t border-border mt-auto">
-         <div class="flex items-center justify-between text-xs text-text-muted">
-             <span id="global-stats-count">Loading...</span>
+      <div class="px-2 py-3 border-t border-border mt-auto shrink-0">
+         <div class="px-2.5 flex items-center justify-between text-xs text-text-muted min-h-[1rem]">
+             <span id="global-stats-count" class="tabular-nums whitespace-nowrap">0 videos · 00:00:00</span>
          </div>
       </div>
     </aside>
@@ -181,6 +222,17 @@
                  </div>
 
                  <div class="pt-4 border-t border-border">
+                     <div class="text-[10px] uppercase font-bold text-text-muted tracking-wider mb-2">Saved sessions</div>
+                     <div class="flex gap-2">
+                       <button type="button" id="btn-export-sessions" class="flex-1 px-3 py-2 text-xs font-medium rounded-md border border-border bg-surface-hover hover:bg-surface text-text-secondary hover:text-text-primary transition-colors cursor-pointer active:scale-[0.96]">Export JSON</button>
+                       <label class="flex-1 px-3 py-2 text-xs font-medium rounded-md border border-border bg-surface-hover hover:bg-surface text-text-secondary hover:text-text-primary transition-colors cursor-pointer text-center active:scale-[0.96]">
+                         Import
+                         <input type="file" id="import-sessions-file" accept="application/json,.json" class="hidden" />
+                       </label>
+                     </div>
+                 </div>
+
+                 <div class="pt-4 border-t border-border">
                      <button id="btn-clear-cache" class="w-full text-left px-4 py-3 rounded-lg border border-border bg-surface-hover/20 hover:bg-red-500/10 hover:border-red-500 group/clear transition-[background-color,border-color,color]">
                         <div class="flex items-center justify-between">
                             <div>
@@ -211,7 +263,52 @@
         </div>
     </div>
 
-    <!-- Name session modal (replaces browser prompt) -->
+    <!-- Save session modal -->
+    <div id="save-session-modal" class="hidden fixed inset-0 z-[55] bg-black/60 backdrop-blur-sm" aria-modal="true" role="dialog" aria-labelledby="save-session-title">
+        <div class="bg-surface-elevated border border-border rounded-lg shadow-xl w-full max-w-md p-5 mx-4 animate-in zoom-in-95 duration-200">
+            <h3 id="save-session-title" class="text-lg font-bold text-text-primary mb-2">Save session</h3>
+            <p id="save-session-summary" class="text-xs text-text-muted mb-3"></p>
+            <label for="save-session-input" class="text-[10px] uppercase font-bold text-text-muted tracking-wider">Name</label>
+            <input type="text" id="save-session-input" class="w-full px-3 py-2 mt-1 mb-4 text-sm border border-border rounded-md bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:border-text-muted" placeholder="Session name" />
+            <div id="save-session-options" class="space-y-3 mb-4">
+              <div class="text-[10px] uppercase font-bold text-text-muted tracking-wider">Action</div>
+              <label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer"><input type="radio" name="save-session-mode" value="new" class="accent-accent" checked /> Save as new session</label>
+              <label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer"><input type="radio" name="save-session-mode" value="replace" class="accent-accent" /> Replace existing session</label>
+              <label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer"><input type="radio" name="save-session-mode" value="merge" class="accent-accent" /> Merge into existing session</label>
+              <select id="save-session-target" class="hidden w-full mt-1 px-3 py-2 text-sm border border-border rounded-md bg-surface text-text-primary focus:outline-none focus:border-text-muted"></select>
+              <p id="save-session-duplicate-hint" class="hidden text-xs text-accent leading-relaxed"></p>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button type="button" id="save-session-cancel" class="px-4 py-2 text-sm font-medium rounded-md border border-border bg-surface-hover text-text-primary hover:bg-surface transition-colors cursor-pointer active:scale-[0.96]">Cancel</button>
+                <button type="button" id="save-session-confirm" class="px-4 py-2 text-sm font-medium rounded-md border-0 bg-accent text-white hover:opacity-90 cursor-pointer transition-opacity active:scale-[0.96]">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Restore session modal -->
+    <div id="restore-session-modal" class="hidden fixed inset-0 z-[55] bg-black/60 backdrop-blur-sm" aria-modal="true" role="dialog" aria-labelledby="restore-session-title">
+        <div class="bg-surface-elevated border border-border rounded-lg shadow-xl w-full max-w-md p-5 mx-4 animate-in zoom-in-95 duration-200">
+            <h3 id="restore-session-title" class="text-lg font-bold text-text-primary mb-2">Open session</h3>
+            <p id="restore-session-summary" class="text-xs text-text-muted mb-4"></p>
+            <div class="space-y-3 mb-5">
+              <div>
+                <label for="restore-target-window" class="text-[10px] uppercase font-bold text-text-muted tracking-wider">Open in</label>
+                <select id="restore-target-window" class="w-full mt-1 px-3 py-2 text-sm border border-border rounded-md bg-surface text-text-primary focus:outline-none focus:border-text-muted">
+                  <option value="new">New window</option>
+                  <option value="current">Current window</option>
+                </select>
+              </div>
+              <label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer"><input type="checkbox" id="restore-missing-only" class="accent-accent rounded" /> Open only tabs not already open</label>
+              <label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer"><input type="checkbox" id="restore-by-sections" class="accent-accent rounded" /> One window per section (when sections exist)</label>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button type="button" id="restore-session-cancel" class="px-4 py-2 text-sm font-medium rounded-md border border-border bg-surface-hover text-text-primary hover:bg-surface transition-colors cursor-pointer active:scale-[0.96]">Cancel</button>
+                <button type="button" id="restore-session-confirm" class="px-4 py-2 text-sm font-medium rounded-md border-0 bg-accent text-white hover:opacity-90 cursor-pointer transition-opacity active:scale-[0.96]">Open tabs</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Name session modal (rename / section rename) -->
     <div id="name-session-modal" class="hidden fixed inset-0 z-[55] bg-black/60 backdrop-blur-sm" aria-modal="true" role="dialog" aria-labelledby="name-session-title">
         <div class="bg-surface-elevated border border-border rounded-lg shadow-xl w-full max-w-sm p-5 mx-4 animate-in zoom-in-95 duration-200">
             <h3 id="name-session-title" class="text-lg font-bold text-text-primary mb-2">Name this session</h3>
@@ -283,7 +380,15 @@
         </button>
         <button type="button" id="ctx-open-tabs" class="sidebar-ctx-item hidden w-full text-left px-4 py-2 items-center gap-2 hover:bg-surface-hover text-text-primary border-0 bg-transparent cursor-pointer">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
-            Open in New Window
+            Open tabs…
+        </button>
+        <button type="button" id="ctx-add-to-session" class="sidebar-ctx-item hidden w-full text-left px-4 py-2 items-center gap-2 hover:bg-surface-hover text-text-primary border-0 bg-transparent cursor-pointer">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+            Add current tabs
+        </button>
+        <button type="button" id="ctx-duplicate-session" class="sidebar-ctx-item hidden w-full text-left px-4 py-2 items-center gap-2 hover:bg-surface-hover text-text-primary border-0 bg-transparent cursor-pointer">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+            Duplicate
         </button>
         <button type="button" id="ctx-rename-session" class="sidebar-ctx-item hidden w-full text-left px-4 py-2 items-center gap-2 hover:bg-surface-hover text-text-primary border-0 bg-transparent cursor-pointer">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>

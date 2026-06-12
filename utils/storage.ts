@@ -277,6 +277,11 @@ export interface SavedSessionTab {
   languageName?: string;
 }
 
+/** Max saved sessions before oldest unpinned entries are trimmed. */
+export const MAX_SAVED_SESSIONS = 50;
+
+export const SESSIONS_EXPORT_VERSION = 1;
+
 export interface SavedSession {
   id: string;
   name: string;
@@ -289,6 +294,85 @@ export interface SavedSession {
 
 const SAVED_SESSIONS_KEY = "savedSessions";
 const LIVE_TAB_SECTIONS_KEY = "liveTabSections";
+
+function sessionTabVideoId(tab: SavedSessionTab): string {
+  const id = getVideoIdFromUrl(normalizeYoutubeUrl(tab.url ?? ""));
+  return id ?? tab.url ?? "";
+}
+
+function mergeSessionTabsInline(existing: SavedSessionTab[], incoming: SavedSessionTab[]): SavedSessionTab[] {
+  const merged = existing.map(mapSavedTab);
+  const seen = new Set(merged.map(sessionTabVideoId));
+  for (const tab of incoming.map(mapSavedTab)) {
+    const id = sessionTabVideoId(tab);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    merged.push(tab);
+  }
+  return merged;
+}
+
+function mergeSessionSectionsInline(existing: SessionSection[], incoming: SessionSection[]): SessionSection[] {
+  const byId = new Map(existing.map((s) => [s.id, s]));
+  const merged = [...existing];
+  for (const sec of incoming) {
+    if (!byId.has(sec.id)) {
+      merged.push(sec);
+      byId.set(sec.id, sec);
+    }
+  }
+  return merged.sort((a, b) => a.order - b.order);
+}
+
+function mapSavedTab(t: SavedSessionTab): SavedSessionTab {
+  const url = normalizeYoutubeUrl(t?.url ?? "");
+  return {
+    url,
+    title: t?.title,
+    channelName: t?.channelName,
+    seconds: t?.seconds,
+    sectionId: typeof t?.sectionId === "string" && t.sectionId.length > 0 ? t.sectionId : undefined,
+    language: t?.language,
+    languageName: t?.languageName,
+  };
+}
+
+function trimSessionsForRetention(sessions: SavedSession[]): SavedSession[] {
+  if (sessions.length <= MAX_SAVED_SESSIONS) return sessions;
+  const pinned = sessions.filter((s) => s.pinned);
+  const unpinned = sessions
+    .filter((s) => !s.pinned)
+    .sort((a, b) => b.savedAt - a.savedAt);
+  const slots = Math.max(0, MAX_SAVED_SESSIONS - pinned.length);
+  const keptUnpinned = unpinned.slice(0, slots);
+  return [...pinned, ...keptUnpinned].sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1;
+    if (!a.pinned && b.pinned) return 1;
+    return b.savedAt - a.savedAt;
+  });
+}
+
+async function persistSavedSessions(sessions: SavedSession[]): Promise<void> {
+  if (!browser.storage?.local) throw new Error("Storage not available");
+  let trimmed = trimSessionsForRetention(sessions);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      await browser.storage.local.set({ [SAVED_SESSIONS_KEY]: trimmed });
+      return;
+    } catch (err) {
+      const unpinned = trimmed.filter((s) => !s.pinned);
+      if (unpinned.length === 0) {
+        throw new Error(
+          err instanceof Error ? err.message : "Storage quota exceeded. Unpin or delete sessions to free space."
+        );
+      }
+      const removeCount = Math.max(1, Math.ceil(unpinned.length * 0.2));
+      const removeIds = new Set(unpinned.slice(-removeCount).map((s) => s.id));
+      trimmed = trimmed.filter((s) => !removeIds.has(s.id));
+    }
+  }
+  throw new Error("Could not save sessions: storage quota exceeded.");
+}
 
 export interface LiveTabSectionsState {
   sections: SessionSection[];
@@ -346,15 +430,7 @@ export async function getSavedSessions(): Promise<SavedSession[]> {
     const sectionsRaw = Array.isArray(s.sections) ? s.sections : [];
     const sections = sectionsRaw.map((sec, i) => normalizeSessionSection(sec, i)).sort((a, b) => a.order - b.order);
     const tabs = Array.isArray(s.tabs)
-      ? s.tabs.map((t) => ({
-          url: t?.url ?? "",
-          title: t?.title,
-          channelName: t?.channelName,
-          seconds: t?.seconds,
-          sectionId: typeof t?.sectionId === "string" && t.sectionId.length > 0 ? t.sectionId : undefined,
-          language: t?.language,
-          languageName: t?.languageName,
-        }))
+      ? s.tabs.map((t) => mapSavedTab(t))
       : [];
     return {
       id: s.id,
@@ -377,7 +453,6 @@ export async function saveSession(
   tabs: SavedSessionTab[],
   sections?: SessionSection[]
 ): Promise<SavedSession> {
-  if (!browser.storage?.local) throw new Error("Storage not available");
   const tabList = Array.isArray(tabs) ? tabs : [];
   const sectionList = Array.isArray(sections) ? sections : [];
   const sessions = await getSavedSessions();
@@ -386,21 +461,113 @@ export async function saveSession(
     id: crypto.randomUUID(),
     name,
     savedAt: Date.now(),
-    tabs: tabList.map((t) => ({
-      url: t?.url ?? "",
-      title: t?.title,
-      channelName: t?.channelName,
-      seconds: t?.seconds,
-      sectionId: typeof t?.sectionId === "string" && t.sectionId.length > 0 ? t.sectionId : undefined,
-      language: t?.language,
-      languageName: t?.languageName,
-    })),
+    tabs: tabList.map(mapSavedTab),
     pinned: false,
     sections: normalizedSections.length > 0 ? normalizedSections : [],
   };
   sessions.unshift(session);
-  await browser.storage.local.set({ [SAVED_SESSIONS_KEY]: sessions });
+  await persistSavedSessions(sessions);
   return session;
+}
+
+export async function replaceSession(
+  id: string,
+  name: string,
+  tabs: SavedSessionTab[],
+  sections?: SessionSection[]
+): Promise<SavedSession | null> {
+  const sessions = await getSavedSessions();
+  const session = sessions.find((s) => s.id === id);
+  if (!session) return null;
+  const sectionList = Array.isArray(sections) ? sections : [];
+  session.name = name.trim() || session.name;
+  session.savedAt = Date.now();
+  session.tabs = tabs.map(mapSavedTab);
+  session.sections = sectionList.map((sec, i) => normalizeSessionSection(sec, i)).sort((a, b) => a.order - b.order);
+  await persistSavedSessions(sessions);
+  return session;
+}
+
+export async function mergeIntoSession(
+  id: string,
+  tabs: SavedSessionTab[],
+  sections?: SessionSection[]
+): Promise<SavedSession | null> {
+  const sessions = await getSavedSessions();
+  const session = sessions.find((s) => s.id === id);
+  if (!session) return null;
+  session.tabs = mergeSessionTabsInline(session.tabs ?? [], tabs);
+  if (sections && sections.length > 0) {
+    session.sections = mergeSessionSectionsInline(session.sections ?? [], sections);
+  }
+  session.savedAt = Date.now();
+  await persistSavedSessions(sessions);
+  return session;
+}
+
+export async function duplicateSession(id: string, newName?: string): Promise<SavedSession | null> {
+  const sessions = await getSavedSessions();
+  const source = sessions.find((s) => s.id === id);
+  if (!source) return null;
+  const copy: SavedSession = {
+    id: crypto.randomUUID(),
+    name: newName?.trim() || `Copy of ${source.name}`,
+    savedAt: Date.now(),
+    tabs: (source.tabs ?? []).map(mapSavedTab),
+    pinned: false,
+    sections: (source.sections ?? []).map((sec, i) => normalizeSessionSection(sec, i)),
+  };
+  sessions.unshift(copy);
+  await persistSavedSessions(sessions);
+  return copy;
+}
+
+export async function exportSessionsJson(): Promise<string> {
+  const sessions = await getSavedSessions();
+  return JSON.stringify(
+    { version: SESSIONS_EXPORT_VERSION, exportedAt: Date.now(), sessions },
+    null,
+    2
+  );
+}
+
+export async function importSessionsJson(
+  json: string,
+  mode: "merge" | "replace" = "merge"
+): Promise<number> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw new Error("Invalid JSON file.");
+  }
+  if (!parsed || typeof parsed !== "object") throw new Error("Invalid export format.");
+  const root = parsed as { sessions?: unknown; version?: number };
+  if (!Array.isArray(root.sessions)) throw new Error("Export must contain a sessions array.");
+
+  const imported: SavedSession[] = root.sessions.map((raw) => {
+    const s = raw as SavedSession;
+    const sectionsRaw = Array.isArray(s.sections) ? s.sections : [];
+    const sections = sectionsRaw.map((sec, i) => normalizeSessionSection(sec, i));
+    const tabs = Array.isArray(s.tabs) ? s.tabs.map(mapSavedTab) : [];
+    return {
+      id: crypto.randomUUID(),
+      name: typeof s.name === "string" && s.name.trim() ? s.name.trim() : "Imported session",
+      savedAt: typeof s.savedAt === "number" ? s.savedAt : Date.now(),
+      tabs,
+      pinned: Boolean(s.pinned),
+      sections,
+    };
+  });
+
+  if (mode === "replace") {
+    await persistSavedSessions(imported);
+    return imported.length;
+  }
+
+  const existing = await getSavedSessions();
+  await persistSavedSessions([...imported, ...existing]);
+  return imported.length;
 }
 
 export async function setSessionPinned(id: string, pinned: boolean): Promise<void> {
@@ -409,7 +576,7 @@ export async function setSessionPinned(id: string, pinned: boolean): Promise<voi
   const session = sessions.find((s) => s.id === id);
   if (!session) return;
   session.pinned = pinned;
-  await browser.storage.local.set({ [SAVED_SESSIONS_KEY]: sessions });
+  await persistSavedSessions(sessions);
 }
 
 export async function renameSession(id: string, name: string): Promise<void> {
@@ -420,13 +587,14 @@ export async function renameSession(id: string, name: string): Promise<void> {
   const session = sessions.find((s) => s.id === id);
   if (!session) return;
   session.name = nextName;
-  await browser.storage.local.set({ [SAVED_SESSIONS_KEY]: sessions });
+  session.savedAt = Date.now();
+  await persistSavedSessions(sessions);
 }
 
 export async function deleteSession(id: string): Promise<void> {
   if (!browser.storage?.local) return;
   const sessions = (await getSavedSessions()).filter((s) => s.id !== id);
-  await browser.storage.local.set({ [SAVED_SESSIONS_KEY]: sessions });
+  await persistSavedSessions(sessions);
 }
 
 export async function updateSessionTabs(sessionId: string, tabs: SavedSessionTab[]): Promise<void> {
@@ -434,16 +602,9 @@ export async function updateSessionTabs(sessionId: string, tabs: SavedSessionTab
   const sessions = await getSavedSessions();
   const session = sessions.find((s) => s.id === sessionId);
   if (!session) return;
-  session.tabs = tabs.map((t) => ({
-    url: t?.url ?? "",
-    title: t?.title,
-    channelName: t?.channelName,
-    seconds: t?.seconds,
-    sectionId: typeof t?.sectionId === "string" && t.sectionId.length > 0 ? t.sectionId : undefined,
-    language: t?.language,
-    languageName: t?.languageName,
-  }));
-  await browser.storage.local.set({ [SAVED_SESSIONS_KEY]: sessions });
+  session.tabs = tabs.map(mapSavedTab);
+  session.savedAt = Date.now();
+  await persistSavedSessions(sessions);
 }
 
 export async function updateSessionSections(sessionId: string, sections: SessionSection[]): Promise<void> {
@@ -456,14 +617,15 @@ export async function updateSessionSections(sessionId: string, sections: Session
   session.tabs = session.tabs.map((tab) => {
     const sid = tab.sectionId;
     if (typeof sid === "string" && validIds.has(sid)) return tab;
-    return {
+    return mapSavedTab({
       url: tab.url,
       title: tab.title,
       channelName: tab.channelName,
       seconds: tab.seconds,
       language: tab.language,
       languageName: tab.languageName,
-    };
+    });
   });
-  await browser.storage.local.set({ [SAVED_SESSIONS_KEY]: sessions });
+  session.savedAt = Date.now();
+  await persistSavedSessions(sessions);
 }

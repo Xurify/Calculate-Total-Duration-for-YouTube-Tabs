@@ -10,6 +10,11 @@ import {
   clearCache,
   getSavedSessions,
   saveSession,
+  replaceSession,
+  mergeIntoSession,
+  duplicateSession,
+  exportSessionsJson,
+  importSessionsJson,
   deleteSession,
   renameSession,
   setSessionPinned,
@@ -29,6 +34,16 @@ import {
   type StoreState,
 } from "../../utils/store";
 import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl } from "../../utils/format";
+import {
+  buildTabsFromVideos,
+  findSimilarSession,
+  formatSavedAgo,
+  sessionsOverlapScore,
+  sessionTotalSeconds,
+  suggestSessionName,
+  videoIdFromTabUrl,
+  type SaveSessionPayload,
+} from "../../utils/sessions";
 
 interface WindowGroup {
   id: number;
@@ -69,6 +84,8 @@ let sidebarContextTarget: { type: "all" | "window" | "session"; windowId?: numbe
 
 /** When set, main view shows this session's tab list instead of live windows. */
 let selectedSession: SavedSession | null = null;
+let sessionSidebarSearch = "";
+let lastSavedSessionsFingerprint = "";
 /** When viewing a saved session, URLs of tabs selected in the grid/list (for remove-from-session). */
 let selectedSessionTabUrls = new Set<string>();
 
@@ -632,15 +649,319 @@ async function probeTabsMetadata() {
   applyProbeResultsToUi();
 }
 
+const TAB_CREATE_BATCH = 8;
+const TAB_CREATE_DELAY_MS = 40;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getOpenVideoIds(): Promise<Set<string>> {
+  const tabs = await browser.tabs.query({});
+  const ids = new Set<string>();
+  for (const tab of tabs) {
+    if (!tab.url) continue;
+    const id = videoIdFromTabUrl(tab.url);
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+async function createTabsBatched(urls: string[], windowId?: number): Promise<number> {
+  let opened = 0;
+  for (let i = 0; i < urls.length; i += TAB_CREATE_BATCH) {
+    const batch = urls.slice(i, i + TAB_CREATE_BATCH);
+    await Promise.all(
+      batch.map((url) =>
+        windowId != null ? browser.tabs.create({ windowId, url }) : browser.tabs.create({ url })
+      )
+    );
+    opened += batch.length;
+    if (i + TAB_CREATE_BATCH < urls.length) await sleep(TAB_CREATE_DELAY_MS);
+  }
+  return opened;
+}
+
+function filterUrlsMissingOnly(urls: string[], openIds: Set<string>): string[] {
+  return urls.filter((url) => {
+    const id = videoIdFromTabUrl(url);
+    return id ? !openIds.has(id) : true;
+  });
+}
+
+interface RestoreSessionOptions {
+  target: "new" | "current";
+  missingOnly: boolean;
+  bySections: boolean;
+}
+
+async function restoreSession(session: SavedSession, options: RestoreSessionOptions): Promise<number> {
+  const tabs = session.tabs ?? [];
+  if (tabs.length === 0) return 0;
+
+  const openIds = options.missingOnly ? await getOpenVideoIds() : null;
+
+  if (options.bySections && orderedSections(session.sections).length > 0) {
+    const secs = orderedSections(session.sections);
+    const { blocks, unsorted } = partitionSessionTabsBySection(tabs, secs);
+    const groups: SavedSessionTab[][] = blocks.map((b) => b.tabs);
+    if (unsorted.length > 0) groups.push(unsorted);
+
+    let opened = 0;
+    for (const group of groups) {
+      let urls = group.map((t) => normalizeYoutubeUrl(t.url)).filter((u) => u.length > 0);
+      if (openIds) urls = filterUrlsMissingOnly(urls, openIds);
+      if (urls.length === 0) continue;
+
+      if (options.target === "current") {
+        const currentWin = await browser.windows.getCurrent();
+        opened += await createTabsBatched(urls, currentWin.id);
+        continue;
+      }
+
+      const win = await browser.windows.create({ url: urls[0] });
+      if (!win?.id) continue;
+      opened += 1;
+      if (urls.length > 1) opened += await createTabsBatched(urls.slice(1), win.id);
+    }
+    return opened;
+  }
+
+  let urls = tabs.map((t) => normalizeYoutubeUrl(t.url)).filter((u) => u.length > 0);
+  if (openIds) urls = filterUrlsMissingOnly(urls, openIds);
+  if (urls.length === 0) return 0;
+
+  if (options.target === "current") {
+    const currentWin = await browser.windows.getCurrent();
+    return createTabsBatched(urls, currentWin.id);
+  }
+
+  const win = await browser.windows.create({ url: urls[0] });
+  if (!win?.id) return 0;
+  if (urls.length === 1) return 1;
+  return 1 + (await createTabsBatched(urls.slice(1), win.id));
+}
+
+async function showRestoreSessionModal(session: SavedSession): Promise<RestoreSessionOptions | null> {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("restore-session-modal");
+    const titleEl = document.getElementById("restore-session-title");
+    const summaryEl = document.getElementById("restore-session-summary");
+    const targetSelect = document.getElementById("restore-target-window") as HTMLSelectElement;
+    const missingOnly = document.getElementById("restore-missing-only") as HTMLInputElement;
+    const bySections = document.getElementById("restore-by-sections") as HTMLInputElement;
+    const cancelBtn = document.getElementById("restore-session-cancel");
+    const confirmBtn = document.getElementById("restore-session-confirm");
+    if (!modal || !targetSelect || !missingOnly || !bySections || !cancelBtn || !confirmBtn) {
+      resolve(null);
+      return;
+    }
+    if (titleEl) titleEl.textContent = `Open "${session.name}"`;
+    const tabCount = session.tabs?.length ?? 0;
+    const duration = formatTime(sessionTotalSeconds(session.tabs ?? []));
+    if (summaryEl) summaryEl.textContent = `${tabCount} tabs · ${duration} total watch time`;
+    const hasSections = orderedSections(session.sections).length > 0;
+    bySections.disabled = !hasSections;
+    bySections.checked = false;
+    missingOnly.checked = false;
+    targetSelect.value = "new";
+
+    const close = (result: RestoreSessionOptions | null) => {
+      modal.classList.add("hidden");
+      modal.classList.remove("flex", "items-center", "justify-center");
+      resolve(result);
+      cancelBtn.removeEventListener("click", onCancel);
+      confirmBtn.removeEventListener("click", onConfirm);
+      modal.removeEventListener("click", onBackdrop);
+    };
+    const onCancel = () => close(null);
+    const onConfirm = () =>
+      close({
+        target: targetSelect.value === "current" ? "current" : "new",
+        missingOnly: missingOnly.checked,
+        bySections: bySections.checked && hasSections,
+      });
+    const onBackdrop = (event: MouseEvent) => {
+      if ((event.target as HTMLElement).id === "restore-session-modal") close(null);
+    };
+    cancelBtn.addEventListener("click", onCancel);
+    confirmBtn.addEventListener("click", onConfirm);
+    modal.addEventListener("click", onBackdrop);
+    modal.classList.remove("hidden");
+    modal.classList.add("flex", "items-center", "justify-center");
+  });
+}
+
+interface SaveSessionModalOptions {
+  defaultName: string;
+  tabCount: number;
+  sessions: SavedSession[];
+  similarSession: SavedSession | null;
+  similarScore: number;
+}
+
+async function showSaveSessionModal(options: SaveSessionModalOptions): Promise<SaveSessionPayload | null> {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("save-session-modal");
+    const input = document.getElementById("save-session-input") as HTMLInputElement;
+    const summaryEl = document.getElementById("save-session-summary");
+    const targetSelect = document.getElementById("save-session-target") as HTMLSelectElement;
+    const hintEl = document.getElementById("save-session-duplicate-hint");
+    const cancelBtn = document.getElementById("save-session-cancel");
+    const confirmBtn = document.getElementById("save-session-confirm");
+    const modeInputs = modal?.querySelectorAll('input[name="save-session-mode"]') as NodeListOf<HTMLInputElement> | undefined;
+    if (!modal || !input || !targetSelect || !cancelBtn || !confirmBtn || !modeInputs) {
+      resolve(null);
+      return;
+    }
+
+    input.value = options.defaultName;
+    if (summaryEl) summaryEl.textContent = `Saving ${options.tabCount} tab${options.tabCount === 1 ? "" : "s"} (hidden/excluded tabs omitted)`;
+
+    targetSelect.innerHTML = options.sessions
+      .map(
+        (s) =>
+          `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)} (${s.tabs?.length ?? 0} tabs)</option>`
+      )
+      .join("");
+
+    const syncTargetVisibility = () => {
+      const mode = [...modeInputs].find((r) => r.checked)?.value ?? "new";
+      const showTarget = mode === "replace" || mode === "merge";
+      targetSelect.classList.toggle("hidden", !showTarget || options.sessions.length === 0);
+      if (showTarget && options.similarSession && !targetSelect.value) {
+        targetSelect.value = options.similarSession.id;
+      }
+    };
+
+    if (options.similarSession && hintEl) {
+      const pct = Math.round(options.similarScore * 100);
+      hintEl.textContent = `${pct}% overlap with "${options.similarSession.name}". Consider replacing or merging instead of creating another copy.`;
+      hintEl.classList.remove("hidden");
+    } else if (hintEl) {
+      hintEl.classList.add("hidden");
+    }
+
+    if (options.similarSession) {
+      const replaceRadio = [...modeInputs].find((r) => r.value === "replace");
+      if (replaceRadio) replaceRadio.checked = true;
+      targetSelect.value = options.similarSession.id;
+    } else {
+      const newRadio = [...modeInputs].find((r) => r.value === "new");
+      if (newRadio) newRadio.checked = true;
+    }
+    syncTargetVisibility();
+
+    const close = (result: SaveSessionPayload | null) => {
+      modal.classList.add("hidden");
+      modal.classList.remove("flex", "items-center", "justify-center");
+      modeInputs.forEach((r) => r.removeEventListener("change", syncTargetVisibility));
+      resolve(result);
+      cancelBtn.removeEventListener("click", onCancel);
+      confirmBtn.removeEventListener("click", onConfirm);
+      modal.removeEventListener("click", onBackdrop);
+      input.removeEventListener("keydown", onKeydown);
+    };
+    const onCancel = () => close(null);
+    const onConfirm = () => {
+      const mode = ([...modeInputs].find((r) => r.checked)?.value ?? "new") as SaveSessionPayload["mode"];
+      const name = input.value.trim() || options.defaultName;
+      if ((mode === "replace" || mode === "merge") && !targetSelect.value) {
+        showToast("Choose a session to update.");
+        return;
+      }
+      close({
+        name,
+        mode,
+        targetSessionId: mode === "new" ? undefined : targetSelect.value,
+      });
+    };
+    const onBackdrop = (event: MouseEvent) => {
+      if ((event.target as HTMLElement).id === "save-session-modal") close(null);
+    };
+    const onKeydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close(null);
+      if (event.key === "Enter") onConfirm();
+    };
+    modeInputs.forEach((r) => r.addEventListener("change", syncTargetVisibility));
+    cancelBtn.addEventListener("click", onCancel);
+    confirmBtn.addEventListener("click", onConfirm);
+    modal.addEventListener("click", onBackdrop);
+    input.addEventListener("keydown", onKeydown);
+    modal.classList.remove("hidden");
+    modal.classList.add("flex", "items-center", "justify-center");
+    requestAnimationFrame(() => input.focus());
+  });
+}
+
+async function executeSaveSession(
+  payload: SaveSessionPayload,
+  tabs: SavedSessionTab[],
+  sections: SessionSection[]
+): Promise<void> {
+  const secs = sections.length > 0 ? sections : undefined;
+  if (payload.mode === "replace" && payload.targetSessionId) {
+    const updated = await replaceSession(payload.targetSessionId, payload.name, tabs, secs);
+    if (!updated) throw new Error("Session not found");
+    showToast(`Updated "${payload.name}" (${tabs.length} tabs)`);
+    return;
+  }
+  if (payload.mode === "merge" && payload.targetSessionId) {
+    const merged = await mergeIntoSession(payload.targetSessionId, tabs, secs);
+    if (!merged) throw new Error("Session not found");
+    showToast(`Merged into "${merged.name}"`);
+    return;
+  }
+  await saveSession(payload.name, tabs, secs);
+  showToast(`Saved "${payload.name}" (${tabs.length} tabs)`);
+}
+
+async function saveVideosAsSession(videos: VideoData[], windowLabel?: string): Promise<void> {
+  const liveSecs = orderedSections(liveTabSectionsState.sections);
+  const { tabs, sections } = buildTabsFromVideos(
+    videos,
+    liveTabSectionsState.assignments,
+    liveSecs,
+    { excludeHidden: true }
+  );
+  if (tabs.length === 0) {
+    showToast("No YouTube tabs to save.");
+    return;
+  }
+  const sessions = await getSavedSessions();
+  const similar = findSimilarSession(sessions, tabs);
+  const similarScore = similar ? sessionsOverlapScore(tabs, similar.tabs ?? []) : 0;
+  const defaultName = suggestSessionName(tabs, windowLabel, sections);
+  const payload = await showSaveSessionModal({
+    defaultName,
+    tabCount: tabs.length,
+    sessions,
+    similarSession: similar,
+    similarScore,
+  });
+  if (!payload) return;
+  try {
+    await executeSaveSession(payload, tabs, sections);
+    lastSavedSessionsFingerprint = "";
+    await refreshSavedSessionsSidebar();
+  } catch (err) {
+    console.error("Save session failed:", err);
+    showToast(err instanceof Error ? err.message : "Could not save session.");
+  }
+}
+
 async function loadSessionInNewWindow(sessionId: string) {
   const sessions = await getSavedSessions();
   const session = sessions.find((saved) => saved.id === sessionId);
-  const tabs = session?.tabs;
-  if (!session || !Array.isArray(tabs) || tabs.length === 0) return;
-  const win = await browser.windows.create({ url: tabs[0].url });
-  if (!win?.id) return;
-  for (let i = 1; i < tabs.length; i++) {
-    await browser.tabs.create({ windowId: win.id, url: tabs[i].url });
+  if (!session) return;
+  const options = await showRestoreSessionModal(session);
+  if (!options) return;
+  try {
+    const opened = await restoreSession(session, options);
+    showToast(opened > 0 ? `Opened ${opened} tab${opened === 1 ? "" : "s"}` : "All tabs from this session are already open.");
+  } catch (err) {
+    console.error("Restore session failed:", err);
+    showToast("Could not open session tabs.");
   }
 }
 
@@ -672,6 +993,13 @@ async function focusLiveVideoTab(video: VideoData) {
   if (video.windowId != null) {
     await browser.windows.update(video.windowId, { focused: true });
   }
+}
+
+function sessionTabMatchesUrl(tab: SavedSessionTab, url: string): boolean {
+  const a = videoIdFromTabUrl(tab.url ?? "");
+  const b = videoIdFromTabUrl(url);
+  if (a && b) return a === b;
+  return (tab.url ?? "") === url;
 }
 
 function escapeHtml(raw: string): string {
@@ -1428,25 +1756,25 @@ function renderSidebar() {
   if (fp === lastSidebarFingerprint) return;
   lastSidebarFingerprint = fp;
 
-  document.getElementById("global-stats-count")!.innerText =
+  document.getElementById("global-stats-count")!.textContent =
     `${totalTabs} videos · ${formatTime(totalDuration)}`;
 
   let html = `
-    <button type="button" class="sidebar-item w-full text-left px-3 py-2 rounded-md mb-1 flex items-center justify-between transition-colors ${currentWindowId === 'all' ? 'bg-surface-hover text-text-primary' : 'text-text-muted hover:bg-surface-hover/50 hover:text-text-secondary'}" data-sidebar-type="all">
+    <button type="button" class="sidebar-item sidebar-all-windows-row w-full text-left px-2.5 py-2 rounded-md mb-1 flex items-center justify-between transition-colors ${currentWindowId === 'all' ? 'bg-surface-hover text-text-primary' : 'text-text-muted hover:bg-surface-hover/50 hover:text-text-secondary'}" data-sidebar-type="all">
       <span class="text-xs font-semibold">All Windows</span>
-      <span class="text-[10px] bg-surface-elevated border border-border px-1.5 rounded-full">${totalTabs}</span>
+      <span class="text-[10px] bg-surface-elevated border border-border px-1.5 rounded-full tabular-nums">${totalTabs}</span>
     </button>
   `;
 
   windowGroups.forEach(group => {
     const isActive = currentWindowId === group.id;
     html += `
-      <button type="button" class="sidebar-item w-full text-left px-3 py-2 rounded-md mb-1 flex items-center justify-between transition-colors ${isActive ? 'bg-surface-hover text-text-primary' : 'text-text-muted hover:bg-surface-hover/50 hover:text-text-secondary'}" data-sidebar-type="window" data-window-id="${group.id}">
-        <div class="truncate pr-2">
+      <button type="button" class="sidebar-item sidebar-window-row w-full text-left px-2.5 py-2 rounded-md mb-1 flex items-center justify-between transition-colors ${isActive ? 'bg-surface-hover text-text-primary' : 'text-text-muted hover:bg-surface-hover/50 hover:text-text-secondary'}" data-sidebar-type="window" data-window-id="${group.id}">
+        <div class="truncate pr-2 min-w-0">
             <div class="text-xs font-semibold truncate">${group.label}</div>
-            <div class="text-[10px] font-mono opacity-60">${formatTime(group.duration)}</div>
+            <div class="text-[10px] font-mono opacity-60 tabular-nums">${formatTime(group.duration)}</div>
         </div>
-        <span class="text-[10px] bg-surface-elevated border border-border px-1.5 rounded-full">${group.tabs.length}</span>
+        <span class="text-[10px] bg-surface-elevated border border-border px-1.5 rounded-full tabular-nums shrink-0">${group.tabs.length}</span>
       </button>
     `;
   });
@@ -1456,28 +1784,50 @@ function renderSidebar() {
 
 async function refreshSavedSessionsSidebar() {
   const sessions = await getSavedSessions();
+  const query = sessionSidebarSearch.trim().toLowerCase();
+  const filtered = query
+    ? sessions.filter((s) => s.name.toLowerCase().includes(query))
+    : sessions;
+
+  const fp = [
+    query,
+    selectedSession?.id ?? "",
+    filtered.map((s) => `${s.id}:${s.name}:${s.savedAt}:${s.tabs?.length ?? 0}:${s.pinned ? 1 : 0}`).join("|"),
+  ].join("\x1f");
+  if (fp === lastSavedSessionsFingerprint) return;
+  lastSavedSessionsFingerprint = fp;
+
   const container = document.getElementById("saved-sessions-sidebar");
   if (!container) return;
-  if (sessions.length === 0) {
-    container.innerHTML = `<div class="px-3 py-2 text-[11px] text-text-muted">No saved sessions</div>`;
+  container.setAttribute("aria-busy", "false");
+
+  const emptyMessage = (text: string) =>
+    `<div class="px-2.5 py-2 min-h-[3.25rem] flex items-center text-[11px] text-text-muted">${text}</div>`;
+
+  if (filtered.length === 0) {
+    container.innerHTML = query
+      ? emptyMessage(`No sessions match "${escapeHtml(query)}"`)
+      : emptyMessage("No saved sessions");
     return;
   }
   const isSelected = (sid: string) => selectedSession?.id === sid;
-  container.innerHTML = sessions
-    .map(
-      (savedSession) => {
-        const active = isSelected(savedSession.id);
-        return `
-    <button type="button" class="sidebar-item sidebar-item-session w-full text-left px-3 py-2 rounded-md mb-1 flex items-center gap-2 transition-colors ${active ? "bg-surface-hover text-text-primary" : "text-text-muted hover:bg-surface-hover/50 hover:text-text-secondary"}" data-sidebar-type="session" data-session-id="${savedSession.id}" data-pinned="${savedSession.pinned ? "1" : "0"}">
-      ${savedSession.pinned ? `<svg class="shrink-0 w-3 h-3 text-accent" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>` : ""}
+  const pinIcon = `<svg class="shrink-0 w-3 h-3 text-accent" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>`;
+  container.innerHTML = filtered
+    .map((savedSession) => {
+      const active = isSelected(savedSession.id);
+      const tabCount = savedSession.tabs?.length ?? 0;
+      const duration = formatTime(sessionTotalSeconds(savedSession.tabs ?? []));
+      const ago = formatSavedAgo(savedSession.savedAt);
+      return `
+    <button type="button" class="sidebar-item sidebar-session-row sidebar-item-session w-full text-left px-2.5 py-2 rounded-md mb-1 flex items-center gap-2 transition-colors ${active ? "bg-surface-hover text-text-primary" : "text-text-muted hover:bg-surface-hover/50 hover:text-text-secondary"}" data-sidebar-type="session" data-session-id="${savedSession.id}" data-pinned="${savedSession.pinned ? "1" : "0"}">
+      ${savedSession.pinned ? pinIcon : ""}
       <div class="truncate min-w-0 flex-1">
-        <div class="text-xs font-semibold truncate">${escapeHtml(savedSession.name)}</div>
-        <div class="text-[10px] font-mono opacity-60">${(savedSession.tabs?.length ?? 0)} tabs</div>
+        <div class="text-xs font-semibold truncate leading-snug">${escapeHtml(savedSession.name)}</div>
+        <div class="text-[10px] font-mono opacity-60 truncate tabular-nums leading-snug">${tabCount} tabs · ${duration} · ${ago}</div>
       </div>
     </button>
   `;
-      }
-    )
+    })
     .join("");
 }
 
@@ -2693,7 +3043,9 @@ function setupListeners() {
         confirmDanger: true,
       });
       if (!confirmed) return;
-      const newTabs = (selectedSession.tabs ?? []).filter((sessionTab) => !urls.includes(sessionTab.url ?? ""));
+      const newTabs = (selectedSession.tabs ?? []).filter(
+        (sessionTab) => !urls.some((u) => sessionTabMatchesUrl(sessionTab, u))
+      );
       await updateSessionTabs(selectedSession.id, newTabs);
       selectedSession.tabs = newTabs;
       selectedSessionTabUrls.clear();
@@ -2770,11 +3122,15 @@ function setupListeners() {
     } else if (type === "session") {
       sidebarContextTarget = { type: "session", sessionId: item.getAttribute("data-session-id") || undefined };
       const openBtn = document.getElementById("ctx-open-tabs");
+      const addBtn = document.getElementById("ctx-add-to-session");
+      const dupBtn = document.getElementById("ctx-duplicate-session");
       const renameBtn = document.getElementById("ctx-rename-session");
       const pinBtn = document.getElementById("ctx-pin");
       const pinLabel = document.getElementById("ctx-pin-label");
       const delBtn = document.getElementById("ctx-delete");
       if (openBtn) { openBtn.classList.remove("hidden"); openBtn.classList.add("flex"); }
+      if (addBtn && allVideos.length > 0) { addBtn.classList.remove("hidden"); addBtn.classList.add("flex"); }
+      if (dupBtn) { dupBtn.classList.remove("hidden"); dupBtn.classList.add("flex"); }
       if (renameBtn) { renameBtn.classList.remove("hidden"); renameBtn.classList.add("flex"); }
       if (pinBtn) {
         pinBtn.classList.remove("hidden");
@@ -2824,7 +3180,7 @@ function setupListeners() {
       if (url != null) {
         if (target.closest(".session-remove-btn")) {
           event.stopPropagation();
-          const tab = (selectedSession.tabs ?? []).find((sessionTab) => (sessionTab.url ?? "") === url);
+          const tab = (selectedSession.tabs ?? []).find((sessionTab) => sessionTabMatchesUrl(sessionTab, url));
           const title = tab?.title ?? "this video";
           const confirmed = await showConfirm({
             title: "Remove from session",
@@ -2833,7 +3189,7 @@ function setupListeners() {
             confirmDanger: true,
           });
           if (!confirmed) return;
-          const newTabs = (selectedSession.tabs ?? []).filter((sessionTab) => (sessionTab.url ?? "") !== url);
+          const newTabs = (selectedSession.tabs ?? []).filter((sessionTab) => !sessionTabMatchesUrl(sessionTab, url));
           await updateSessionTabs(selectedSession.id, newTabs);
           selectedSession.tabs = newTabs;
           selectedSessionTabUrls.delete(url);
@@ -3126,38 +3482,7 @@ function setupListeners() {
   });
 
   document.getElementById("btn-save-session")?.addEventListener("click", async () => {
-    if (allVideos.length === 0) {
-      showToast("No YouTube tabs to save.");
-      return;
-    }
-    const defaultName = `Session ${new Date().toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}`;
-    const name = await showNameSessionModal(defaultName);
-    if (name === null) return;
-    const liveSecs = orderedSections(liveTabSectionsState.sections);
-    const valid = validSectionIds(liveSecs);
-    const tabs: SavedSessionTab[] = allVideos.map((video) => {
-      const key = normalizeYoutubeUrl(video.url);
-      const sid = liveTabSectionsState.assignments[key];
-      return {
-        url: video.url,
-        title: video.title,
-        channelName: video.channelName,
-        seconds: video.seconds,
-        sectionId: sid && valid.has(sid) ? sid : undefined,
-      };
-    });
-    const referenced = new Set(
-      tabs.map((t) => t.sectionId).filter((x): x is string => typeof x === "string" && x.length > 0)
-    );
-    const secsToSave = liveSecs.filter((s) => referenced.has(s.id));
-    try {
-      await saveSession(name, tabs, secsToSave.length > 0 ? secsToSave : undefined);
-      await refreshSavedSessionsSidebar();
-      showToast(`Saved "${name}" (${tabs.length} tabs)`);
-    } catch (err) {
-      console.error("Save session failed:", err);
-      showToast("Could not save session.");
-    }
+    await saveVideosAsSession(allVideos);
   });
 
   document.getElementById("select-all-checkbox")?.addEventListener("click", (event) => {
@@ -3187,37 +3512,65 @@ function setupListeners() {
     if (!context || (context.type !== "all" && context.type !== "window")) return;
     const videosToSave =
       context.type === "all" ? allVideos : allVideos.filter((video) => video.windowId === context.windowId);
-    if (videosToSave.length === 0) {
-      showToast("No YouTube tabs to save.");
+    const windowLabel =
+      context.type === "window"
+        ? windowGroups.find((g) => g.id === context.windowId)?.label
+        : undefined;
+    await saveVideosAsSession(videosToSave, windowLabel);
+  });
+
+  document.getElementById("ctx-add-to-session")?.addEventListener("click", async () => {
+    const context = sidebarContextTarget;
+    document.getElementById("sidebar-context-menu")?.classList.add("hidden");
+    if (context?.type !== "session" || !context.sessionId) return;
+    const liveSecs = orderedSections(liveTabSectionsState.sections);
+    const { tabs, sections } = buildTabsFromVideos(
+      allVideos,
+      liveTabSectionsState.assignments,
+      liveSecs,
+      { excludeHidden: true }
+    );
+    if (tabs.length === 0) {
+      showToast("No YouTube tabs to add.");
       return;
     }
-    const defaultName = `Session ${new Date().toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}`;
-    const name = await showNameSessionModal(defaultName);
-    if (name === null) return;
-    const liveSecs = orderedSections(liveTabSectionsState.sections);
-    const valid = validSectionIds(liveSecs);
-    const tabs: SavedSessionTab[] = videosToSave.map((video) => {
-      const key = normalizeYoutubeUrl(video.url);
-      const sid = liveTabSectionsState.assignments[key];
-      return {
-        url: video.url,
-        title: video.title,
-        channelName: video.channelName,
-        seconds: video.seconds,
-        sectionId: sid && valid.has(sid) ? sid : undefined,
-      };
+    const sessions = await getSavedSessions();
+    const session = sessions.find((s) => s.id === context.sessionId);
+    if (!session) return;
+    const confirmed = await showConfirm({
+      title: "Add to session",
+      message: `Add ${tabs.length} tab${tabs.length === 1 ? "" : "s"} to "${session.name}"?`,
+      confirmLabel: "Add",
     });
-    const referenced = new Set(
-      tabs.map((t) => t.sectionId).filter((x): x is string => typeof x === "string" && x.length > 0)
-    );
-    const secsToSave = liveSecs.filter((s) => referenced.has(s.id));
+    if (!confirmed) return;
     try {
-      await saveSession(name, tabs, secsToSave.length > 0 ? secsToSave : undefined);
+      const merged = await mergeIntoSession(context.sessionId, tabs, sections.length > 0 ? sections : undefined);
+      lastSavedSessionsFingerprint = "";
       await refreshSavedSessionsSidebar();
-      showToast(`Saved "${name}" (${tabs.length} tabs)`);
+      if (selectedSession?.id === context.sessionId) await reloadSelectedSessionFromStorage();
+      showToast(merged ? `Added tabs to "${merged.name}"` : "Could not update session.");
+      render();
     } catch (err) {
-      console.error("Save session failed:", err);
-      showToast("Could not save session.");
+      console.error("Add to session failed:", err);
+      showToast(err instanceof Error ? err.message : "Could not add tabs.");
+    }
+  });
+
+  document.getElementById("ctx-duplicate-session")?.addEventListener("click", async () => {
+    const context = sidebarContextTarget;
+    document.getElementById("sidebar-context-menu")?.classList.add("hidden");
+    if (context?.type !== "session" || !context.sessionId) return;
+    const sessions = await getSavedSessions();
+    const session = sessions.find((s) => s.id === context.sessionId);
+    if (!session) return;
+    try {
+      const copy = await duplicateSession(context.sessionId);
+      lastSavedSessionsFingerprint = "";
+      await refreshSavedSessionsSidebar();
+      showToast(copy ? `Duplicated as "${copy.name}"` : "Could not duplicate session.");
+    } catch (err) {
+      console.error("Duplicate session failed:", err);
+      showToast(err instanceof Error ? err.message : "Could not duplicate session.");
     }
   });
 
@@ -3261,6 +3614,7 @@ function setupListeners() {
     const session = sessions.find((saved) => saved.id === context.sessionId);
     if (!session) return;
     await setSessionPinned(context.sessionId, !session.pinned);
+    lastSavedSessionsFingerprint = "";
     refreshSavedSessionsSidebar();
   });
 
@@ -3275,9 +3629,23 @@ function setupListeners() {
       confirmDanger: true,
     });
     if (confirmed) {
-      await deleteSession(context.sessionId);
+      const deletedId = context.sessionId;
+      await deleteSession(deletedId);
+      if (selectedSession?.id === deletedId) {
+        selectedSession = null;
+        selectedSessionTabUrls.clear();
+        currentWindowId = "all";
+        render();
+      }
+      lastSavedSessionsFingerprint = "";
       refreshSavedSessionsSidebar();
     }
+  });
+
+  document.getElementById("session-sidebar-search")?.addEventListener("input", (event) => {
+    sessionSidebarSearch = (event.target as HTMLInputElement).value;
+    lastSavedSessionsFingerprint = "";
+    void refreshSavedSessionsSidebar();
   });
 
   function openTabSectionContextMenu(
@@ -3535,6 +3903,60 @@ function setupListeners() {
     }
   });
 
+  document.getElementById("btn-export-sessions")?.addEventListener("click", async () => {
+    try {
+      const json = await exportSessionsJson();
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `youtube-tab-sessions-${new Date().toISOString().slice(0, 10)}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      showToast("Sessions exported.");
+    } catch (err) {
+      console.error("Export failed:", err);
+      showToast("Could not export sessions.");
+    }
+  });
+
+  document.getElementById("import-sessions-file")?.addEventListener("change", async (event) => {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const merge = await showConfirm({
+        title: "Import sessions",
+        message: "Merge imported sessions with your existing saved sessions?",
+        confirmLabel: "Merge",
+        cancelLabel: "Not now",
+      });
+      if (!merge) {
+        const replace = await showConfirm({
+          title: "Replace all sessions?",
+          message: "Replace every saved session with only the sessions from this file? This cannot be undone.",
+          confirmLabel: "Replace all",
+          confirmDanger: true,
+        });
+        if (!replace) return;
+        const count = await importSessionsJson(text, "replace");
+        lastSavedSessionsFingerprint = "";
+        await refreshSavedSessionsSidebar();
+        showToast(`Replaced with ${count} imported session${count === 1 ? "" : "s"}.`);
+        return;
+      }
+      const count = await importSessionsJson(text, "merge");
+      lastSavedSessionsFingerprint = "";
+      await refreshSavedSessionsSidebar();
+      showToast(`Imported ${count} session${count === 1 ? "" : "s"}.`);
+    } catch (err) {
+      console.error("Import failed:", err);
+      showToast(err instanceof Error ? err.message : "Could not import sessions.");
+    }
+  });
+
   document.getElementById("btn-perf-refresh")?.addEventListener("click", async () => {
     const container = document.getElementById("dev-perf-list");
     if (!container) return;
@@ -3582,8 +4004,7 @@ function render() {
 
 document.addEventListener("DOMContentLoaded", () => {
   setupListeners();
-  refreshSavedSessionsSidebar();
-  fetchTabs();
+  void refreshSavedSessionsSidebar().then(() => fetchTabs());
 
   browser.tabs.onRemoved.addListener(scheduleFetchTabsFromEvents);
   browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {

@@ -237,8 +237,8 @@ async function setPlaybackVolume(tabId: number, volume: number): Promise<Playbac
   }
 }
 
-const PLAY_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
-const PAUSE_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>`;
+const PLAY_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
+const PAUSE_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>`;
 
 function getThumbnailUrl(url: string): string | null {
   const id = getVideoIdFromUrl(url);
@@ -274,7 +274,7 @@ function renderNow(): void {
   if (videoData.length === 0) {
     resetVideoListFingerprint();
     app.innerHTML = `
-          <div class="flex flex-col items-center justify-center min-h-[37.5rem] px-8 text-center">
+          <div class="flex flex-col items-center justify-center min-h-popup px-8 text-center">
             <div class="w-14 h-10 rounded-lg bg-accent flex items-center justify-center mb-5 shadow-[0_4px_20px_rgba(255,0,0,0.35)]">
               <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
             </div>
@@ -422,62 +422,84 @@ function setupApp() {
   if (document.getElementById("stat-total")) return;
 
   app.innerHTML = `
-    <div class="flex flex-col h-[37.5rem] min-h-[37.5rem] w-full bg-surface">
-      <header data-v-header class="shrink-0 border-b border-white/10 bg-surface">
-        <div class="flex items-center gap-2 px-3 py-2">
-          <div class="w-8 h-6 rounded-md bg-accent flex items-center justify-center shrink-0">
+    <div class="flex flex-col h-popup max-h-popup w-full bg-surface overflow-hidden">
+      <header data-v-header class="shrink-0 border-b border-white/10 bg-surface pb-2.5">
+        <div class="flex items-center gap-2.5 px-3 pt-2.5 pb-2">
+          <div class="w-8 h-6 rounded-md bg-accent flex items-center justify-center shrink-0 shadow-[0_1px_8px_rgba(255,0,0,0.35)]">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
           </div>
           <div class="min-w-0 flex-1">
-            <div class="text-[13px] font-bold text-text-primary leading-none">Watch Queue</div>
-            <div id="stat-video-count" class="text-[11px] text-text-muted tabular-nums leading-tight mt-0.5">0 videos</div>
+            <div class="text-[13px] font-bold text-text-primary leading-none tracking-tight">Watch Queue</div>
+            <div class="text-[11px] text-text-muted leading-tight mt-0.5">YouTube tabs in this window</div>
           </div>
-          <button id="refresh-tabs" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 cursor-pointer group/refresh active:scale-95" title="Refresh tabs">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="group-active/refresh:rotate-180 transition-transform duration-500"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg>
-          </button>
-          <button id="open-manager" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 cursor-pointer active:scale-95" title="Open full manager">
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
-          </button>
-          <button id="go-to-settings" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 cursor-pointer group/settings active:scale-95" title="Settings">
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="group-hover/settings:rotate-90 transition-transform duration-500"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-          </button>
+          <div class="flex items-center gap-0.5 p-0.5 rounded-full bg-surface-elevated ring-1 ring-inset ring-white/10 shrink-0">
+            <button id="refresh-tabs" class="w-7 h-7 flex items-center justify-center rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 cursor-pointer group/refresh active:scale-95" title="Refresh tabs">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="group-active/refresh:rotate-180 transition-transform duration-500"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg>
+            </button>
+            <button id="open-manager" class="w-7 h-7 flex items-center justify-center rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 cursor-pointer active:scale-95" title="Open full manager">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
+            </button>
+            <button id="go-to-settings" class="w-7 h-7 flex items-center justify-center rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 cursor-pointer group/settings active:scale-95" title="Settings">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="group-hover/settings:rotate-90 transition-transform duration-500"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+            </button>
+          </div>
         </div>
-        <div class="flex items-center gap-2 px-3 py-1.5 bg-surface-elevated/60 text-[11px] tabular-nums border-t border-white/5">
-          <span class="text-text-muted shrink-0">Left</span>
-          <span id="stat-remaining" class="text-accent font-semibold truncate min-w-0">--:--</span>
-          <span class="text-white/15 shrink-0">·</span>
-          <span class="text-text-muted shrink-0">Total</span>
-          <span id="stat-total" class="font-semibold text-text-primary truncate min-w-0">--:--</span>
-          <div class="flex-1 min-w-6 h-1 rounded-full bg-white/10 overflow-hidden ml-1">
-            <div id="stat-overall-progress" class="h-full bg-accent transition-[width] duration-700" style="width: 0%"></div>
+        <div class="mx-3 rounded-xl p-3 bg-surface-elevated/90 ring-1 ring-inset ring-white/10">
+          <div class="flex items-end justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-[10px] font-medium uppercase tracking-wider text-text-muted leading-none">Time left</p>
+              <p id="stat-remaining" class="text-[15px] font-bold tabular-nums text-text-primary leading-tight mt-1 truncate">--:--</p>
+            </div>
+            <div class="text-right shrink-0">
+              <p class="text-[10px] font-medium uppercase tracking-wider text-text-muted leading-none">Watched</p>
+              <p id="stat-watched" class="text-[15px] font-bold tabular-nums text-accent leading-tight mt-1">--:--</p>
+            </div>
+          </div>
+          <div class="mt-3">
+            <div class="flex items-center justify-between gap-2 text-[10px] text-text-muted mb-1.5">
+              <span id="stat-video-count" class="tabular-nums">0 videos</span>
+              <span id="stat-watched-pct" class="tabular-nums font-medium text-text-secondary">0%</span>
+            </div>
+            <div class="h-1.5 rounded-full bg-white/10 overflow-hidden">
+              <div id="stat-overall-progress" class="h-full rounded-full bg-gradient-to-r from-accent to-red-400 transition-[width] duration-700" style="width: 0%"></div>
+            </div>
+            <p class="mt-1.5 text-[10px] text-text-muted tabular-nums">
+              <span>Total queue</span>
+              <span id="stat-total" class="ml-1 text-text-secondary font-medium">--:--</span>
+            </p>
           </div>
         </div>
       </header>
 
       <section id="now-playing" class="hidden shrink-0 border-b border-white/10 bg-surface-elevated/40">
-        <div id="np-card" class="px-3 py-2 transition-all duration-300">
-          <div class="flex items-center gap-2">
-            <button id="np-thumb-btn" type="button" class="relative shrink-0 w-[5.5rem] aspect-video rounded-md overflow-hidden bg-surface-hover ring-1 ring-white/10 group/thumb border-0 p-0 cursor-pointer" title="Open tab">
-              <img id="np-thumb" alt="" class="w-full h-full object-cover" />
-              <div class="absolute bottom-0 inset-x-0 h-0.5 bg-black/50">
+        <div id="np-card" class="px-3 py-1.5 transition-all duration-300">
+          <div class="flex gap-2 items-center">
+            <button id="np-thumb-btn" type="button" class="relative shrink-0 w-[9rem] aspect-video rounded-sm overflow-hidden bg-surface-hover border border-white/10 group/thumb p-0 cursor-pointer" title="Open tab">
+              <img id="np-thumb" alt="" class="w-full h-full object-cover transition-transform duration-300 group-hover/thumb:scale-105" />
+              <div class="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/20 transition-colors"></div>
+              <div class="absolute bottom-0 left-0 right-0 h-px bg-black/50">
                 <div id="np-progress" class="h-full bg-accent transition-[width] duration-500" style="width: 0%"></div>
               </div>
             </button>
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-1 mb-0.5">
-                <span class="np-indicator w-1.5 h-1.5 rounded-full bg-text-muted shrink-0"></span>
-                <span id="np-status" class="text-[10px] font-bold uppercase tracking-wider text-text-muted">Paused</span>
+            <div class="flex-1 min-w-0 flex flex-col gap-1">
+              <div class="min-w-0">
+                <div class="flex items-center gap-1">
+                  <span class="np-indicator w-1.5 h-1.5 rounded-full bg-text-muted shrink-0"></span>
+                  <span id="np-status" class="text-[10px] font-bold uppercase tracking-wider text-text-muted">Paused</span>
+                </div>
+                <h2 id="np-title" class="text-[13px] font-medium text-text-primary line-clamp-1 leading-tight cursor-pointer hover:underline decoration-white/30 underline-offset-2" title="Open tab"></h2>
+                <p id="np-channel" class="hidden text-[11px] text-text-secondary truncate"></p>
               </div>
-              <h2 id="np-title" class="text-[13px] font-medium text-text-primary line-clamp-1 leading-tight cursor-pointer hover:underline decoration-white/30 underline-offset-2" title="Open tab"></h2>
-              <p id="np-channel" class="hidden text-[11px] text-text-secondary truncate"></p>
+              <div class="flex items-center gap-1.5 min-h-0">
+                <button id="np-play-pause" class="w-7 h-7 shrink-0 flex items-center justify-center rounded-full bg-accent text-white border-0 cursor-pointer hover:bg-[#e60000] active:scale-95 transition-all" title="Play / Pause"></button>
+                <span id="np-time" class="text-[11px] text-text-muted tabular-nums shrink-0"></span>
+                <svg id="np-volume-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-text-muted"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+                <div class="flex-1 min-w-0 flex items-center h-3">
+                  <input id="np-volume" type="range" min="0" max="100" value="100" class="w-full h-1 m-0 p-0 cursor-pointer appearance-none rounded-full bg-white/15 accent-accent" aria-label="Volume" />
+                </div>
+                <button id="np-go-to-tab" class="shrink-0 px-1.5 py-0.5 rounded text-[11px] text-text-muted hover:text-text-primary hover:bg-surface-hover border-0 bg-transparent cursor-pointer transition-colors" title="Go to tab">Open tab</button>
+              </div>
             </div>
-            <button id="np-play-pause" class="w-8 h-8 shrink-0 flex items-center justify-center rounded-full bg-accent text-white border-0 cursor-pointer hover:bg-[#e60000] active:scale-95 transition-all" title="Play / Pause"></button>
-            <span id="np-time" class="text-[11px] text-text-muted tabular-nums shrink-0 text-right"></span>
-          </div>
-          <div class="flex items-center gap-2 mt-1.5 pl-[6rem]">
-            <svg id="np-volume-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-text-muted"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-            <input id="np-volume" type="range" min="0" max="100" value="100" class="flex-1 h-1 min-w-0 cursor-pointer appearance-none rounded-full bg-white/15 accent-accent" aria-label="Volume" />
-            <button id="np-go-to-tab" class="shrink-0 px-2 py-0.5 rounded text-[11px] text-text-muted hover:text-text-primary hover:bg-surface-hover border-0 bg-transparent cursor-pointer transition-colors" title="Go to tab">Open tab</button>
           </div>
         </div>
       </section>
@@ -490,7 +512,7 @@ function setupApp() {
         </div>
       </div>
 
-      <div id="video-list" class="flex-1 min-h-0 overflow-y-auto px-2 pb-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-track]:bg-transparent"></div>
+      <div id="video-list" class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-2 pb-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-track]:bg-transparent"></div>
     </div>
   `;
 
@@ -629,10 +651,8 @@ function updateNowPlayingControls(state: PlaybackState): void {
     }`;
   }
   if (card) {
-    card.className = `px-3 py-2 transition-all duration-300 ${
-      isPlaying
-        ? "bg-accent/5 ring-1 ring-inset ring-accent/30"
-        : ""
+    card.className = `px-3 py-1.5 transition-all duration-300 ${
+      isPlaying ? "bg-accent/5 shadow-[inset_2px_0_0_0_#ff0000]" : ""
     }`;
   }
   if (indicator) {
@@ -726,9 +746,19 @@ function updateHeaderStats(
   document.getElementById("stat-total")!.innerText = formatTime(totalSeconds);
   document.getElementById("stat-video-count")!.innerText = `${videoCount} video${videoCount === 1 ? "" : "s"}`;
 
+  const watchedEl = document.getElementById("stat-watched");
+  if (watchedEl) watchedEl.innerText = formatTime(totalWatched);
+
+  const percent = totalSeconds > 0 ? (totalWatched / totalSeconds) * 100 : 0;
+  const watchedPctEl = document.getElementById("stat-watched-pct");
+  if (watchedPctEl) {
+    const rounded = Math.round(percent);
+    watchedPctEl.textContent =
+      rounded >= 100 ? "Done" : rounded > 0 ? `${rounded}%` : "0%";
+  }
+
   const overallProgress = document.getElementById("stat-overall-progress");
   if (overallProgress) {
-    const percent = totalSeconds > 0 ? (totalWatched / totalSeconds) * 100 : 0;
     overallProgress.style.width = `${percent}%`;
   }
 
@@ -750,11 +780,11 @@ function updateVideoListItem(item: HTMLElement, video: VideoData): void {
   const isNowPlaying = nowPlayingId === video.id;
   const isActiveTab = video.active && !isNowPlaying;
   const stateClasses = isNowPlaying
-    ? "bg-gradient-to-r from-accent/15 via-accent/5 to-transparent ring-1 ring-inset ring-accent/25"
+    ? "bg-accent/5 shadow-[inset_2px_0_0_0_#ff0000]"
     : isActiveTab
-      ? "ring-1 ring-inset ring-white/10"
+      ? "shadow-[inset_2px_0_0_0_rgba(255,255,255,0.12)]"
       : "hover:bg-white/5";
-  item.className = `group relative flex gap-2 p-1.5 rounded-lg transition-all duration-200 ${stateClasses} ${
+  item.className = `group relative flex h-[4.625rem] shrink-0 items-center gap-2 overflow-hidden p-1 transition-all duration-200 ${stateClasses} ${
     video.excluded ? "opacity-40 grayscale" : "opacity-100"
   }`;
 
@@ -781,7 +811,11 @@ function updateVideoListItem(item: HTMLElement, video: VideoData): void {
   titleEl.innerText = video.title;
   titleEl.title = video.title;
 
-  (item.querySelector(".meta-progress") as HTMLElement).style.width = `${watchedPercent}%`;
+  const progressTrack = item.querySelector(".meta-progress-track") as HTMLElement | null;
+  if (progressTrack) progressTrack.classList.toggle("hidden", isNowPlaying);
+
+  const progressEl = item.querySelector(".meta-progress") as HTMLElement;
+  progressEl.style.width = `${watchedPercent}%`;
 
   const badgeEl = item.querySelector(".meta-duration-badge") as HTMLElement;
   const timeEl = item.querySelector(".meta-time") as HTMLElement;
@@ -862,12 +896,13 @@ function updateVideoList(videos: VideoData[]) {
       item.id = `video-item-${video.id}`;
       item.dataset.id = video.id.toString();
       item.style.viewTransitionName = `video-${video.id}`;
-      item.className = "group relative flex gap-2 p-1.5 rounded-lg transition-all duration-200";
+      item.className =
+        "group relative flex h-[4.625rem] shrink-0 items-center gap-2 overflow-hidden p-1 transition-all duration-200";
       item.innerHTML = `
-            <div class="relative shrink-0 w-[5.5rem] aspect-video rounded-md overflow-hidden bg-surface-hover ring-1 ring-white/10">
+            <div class="relative shrink-0 w-[5.5rem] aspect-video rounded-sm overflow-hidden bg-surface-hover border border-white/10">
               <img class="meta-thumb w-full h-full object-cover hidden" alt="" />
-              <div class="meta-duration-badge absolute bottom-1 right-1 px-1 py-px rounded text-[10px] font-medium bg-black/80 text-white tabular-nums leading-none"></div>
-              <div class="absolute bottom-0 inset-x-0 h-0.5 bg-black/40">
+              <div class="meta-duration-badge absolute bottom-1 right-1 px-1 py-px rounded-sm text-[10px] font-medium bg-black/80 text-white tabular-nums leading-none"></div>
+              <div class="meta-progress-track absolute bottom-0 left-0 right-0 h-px bg-black/40">
                 <div class="meta-progress h-full bg-accent transition-[width] duration-700" style="width: 0%"></div>
               </div>
             </div>

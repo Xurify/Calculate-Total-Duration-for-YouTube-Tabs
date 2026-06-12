@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
 @theme {
+  /* Chrome action popups are capped at 600px tall — do not exceed this. */
+  --height-popup: 600px;
   --color-surface: #0f0f0f;
   --color-surface-elevated: #212121;
   --color-surface-hover: #3f3f3f;
@@ -15,4 +17,15 @@
 
 [data-v-header] {
   view-transition-name: dashboard-header;
+}
+
+html,
+body {
+  overflow: hidden;
+}
+
+#app {
+  height: var(--height-popup);
+  max-height: var(--height-popup);
+  overflow: hidden;
 }

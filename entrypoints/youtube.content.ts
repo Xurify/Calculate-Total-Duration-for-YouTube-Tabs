@@ -35,6 +35,11 @@ let lastMetadata: CachedMetadataPayload = {
 };
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let cachedLanguageVideoId: string | null = null;
+let cachedLanguage: { language?: string | null; languageName?: string | null } = {
+  language: null,
+  languageName: null,
+};
 
 function getVideoIdFromLocation(): string | null {
   try {
@@ -156,7 +161,18 @@ function readMetadataFromDom(): CachedMetadataPayload {
     isLive = true;
   }
 
-  const { language, languageName } = extractLanguageFromDom();
+  let language: string | null | undefined;
+  let languageName: string | null | undefined;
+  if (videoId && videoId === cachedLanguageVideoId) {
+    language = cachedLanguage.language;
+    languageName = cachedLanguage.languageName;
+  } else {
+    const extracted = extractLanguageFromDom();
+    cachedLanguageVideoId = videoId;
+    cachedLanguage = extracted;
+    language = extracted.language;
+    languageName = extracted.languageName;
+  }
 
   return {
     videoId,
@@ -184,6 +200,41 @@ function scheduleRead(ctx: { setTimeout: (fn: () => void, ms: number) => unknown
 function isWatchOrShorts(): boolean {
   const path = window.location.pathname;
   return path.startsWith("/watch") || path.startsWith("/shorts/");
+}
+
+function getPlaybackState() {
+  const videoEl = document.querySelector("video");
+  if (!videoEl) {
+    return { paused: true, volume: 1, muted: false, currentTime: 0 };
+  }
+  return {
+    paused: videoEl.paused,
+    volume: videoEl.volume,
+    muted: videoEl.muted,
+    currentTime: videoEl.currentTime,
+  };
+}
+
+function togglePlayback() {
+  const videoEl = document.querySelector("video");
+  if (!videoEl) return getPlaybackState();
+  if (videoEl.paused) {
+    void videoEl.play();
+  } else {
+    videoEl.pause();
+  }
+  return getPlaybackState();
+}
+
+function setPlaybackVolume(volume: number) {
+  const videoEl = document.querySelector("video");
+  if (!videoEl) return getPlaybackState();
+  const clamped = Math.min(1, Math.max(0, volume));
+  videoEl.volume = clamped;
+  if (clamped > 0 && videoEl.muted) {
+    videoEl.muted = false;
+  }
+  return getPlaybackState();
 }
 
 export default defineContentScript({
@@ -217,12 +268,31 @@ export default defineContentScript({
     ctx.addEventListener(document, "yt-navigate-finish", () => scheduleRead(ctx));
 
     browser.runtime.onMessage.addListener(
-      (message: { action: string; reset?: boolean }, _sender: unknown, sendResponse: (r: unknown) => void) => {
+      (
+        message: { action: string; reset?: boolean; volume?: number },
+        _sender: unknown,
+        sendResponse: (r: unknown) => void
+      ) => {
         if (message?.action === "get-metadata") {
           if (isWatchOrShorts()) {
-            lastMetadata = readMetadataFromDom();
+            const currentId = getVideoIdFromLocation();
+            if (currentId !== lastMetadata.videoId) {
+              lastMetadata = readMetadataFromDom();
+            }
           }
           sendResponse(lastMetadata);
+          return;
+        }
+        if (message?.action === "get-playback-state") {
+          sendResponse(getPlaybackState());
+          return;
+        }
+        if (message?.action === "toggle-play") {
+          sendResponse(togglePlayback());
+          return;
+        }
+        if (message?.action === "set-volume" && typeof message.volume === "number") {
+          sendResponse(setPlaybackVolume(message.volume));
           return;
         }
         if (message?.action === "get-perf-stats") {

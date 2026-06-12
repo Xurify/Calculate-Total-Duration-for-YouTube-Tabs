@@ -146,8 +146,7 @@ function thumbnailCacheBackfill(container: HTMLElement) {
   container.querySelectorAll<HTMLImageElement>("img[data-thumbnail-key]").forEach((img) => {
     const key = img.getAttribute("data-thumbnail-key");
     if (!key || thumbnailBlobCache.has(key)) return;
-    const onLoad = () => {
-      img.removeEventListener("load", onLoad);
+    const cacheFromSrc = () => {
       fetch(img.src)
         .then((response) => response.blob())
         .then((blob) => {
@@ -166,7 +165,15 @@ function thumbnailCacheBackfill(container: HTMLElement) {
           img.removeAttribute("data-thumbnail-key");
         });
     };
-    img.addEventListener("load", onLoad);
+    if (img.complete && img.naturalWidth > 0) {
+      cacheFromSrc();
+    } else {
+      const onLoad = () => {
+        img.removeEventListener("load", onLoad);
+        cacheFromSrc();
+      };
+      img.addEventListener("load", onLoad);
+    }
   });
 }
 
@@ -3449,6 +3456,7 @@ document.addEventListener("DOMContentLoaded", () => {
         video.isLive = message.metadata.isLive || false;
         if (message.metadata.language !== undefined) video.language = message.metadata.language;
         if (message.metadata.languageName !== undefined) video.languageName = message.metadata.languageName;
+        applyProbeResultsToUi();
       }
     }
     if (message.action === "sync-complete") render();

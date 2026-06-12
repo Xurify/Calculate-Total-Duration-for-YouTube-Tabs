@@ -252,6 +252,8 @@ let renderTimeout: ReturnType<typeof setTimeout> | null = null;
 let probeRenderTimeout: ReturnType<typeof setTimeout> | null = null;
 const PROBE_RENDER_DEBOUNCE_MS = 100;
 let lastVideoListFingerprint = "";
+const LIVE_TICK_MS = 1000;
+let liveTickInterval: ReturnType<typeof setInterval> | null = null;
 
 const app = document.getElementById("app")!;
 
@@ -270,8 +272,67 @@ function videoListStructureFingerprint(videos: VideoData[]): string {
   return `${sortByDuration ? 1 : 0}|np:${nowPlayingId ?? 0}|${sig}`;
 }
 
+function getQueueStats(): {
+  totalSeconds: number;
+  totalWatched: number;
+  totalRemaining: number;
+  videoCount: number;
+} {
+  const includedVideos = videoData.filter((video) => !video.excluded);
+  const totalSeconds = includedVideos.reduce((sum, video) => sum + video.seconds, 0);
+  const totalWatched = includedVideos.reduce((sum, video) => sum + video.currentTime, 0);
+  return {
+    totalSeconds,
+    totalWatched,
+    totalRemaining: Math.max(0, totalSeconds - totalWatched),
+    videoCount: includedVideos.length,
+  };
+}
+
+function refreshQueueStatsFromState(): void {
+  const { totalSeconds, totalWatched, totalRemaining, videoCount } = getQueueStats();
+  updateHeaderStats(totalSeconds, totalRemaining, videoCount, totalWatched);
+}
+
+function startLiveTick(): void {
+  if (liveTickInterval != null) return;
+  liveTickInterval = setInterval(() => void livePlaybackTick(), LIVE_TICK_MS);
+}
+
+function stopLiveTick(): void {
+  if (liveTickInterval != null) {
+    clearInterval(liveTickInterval);
+    liveTickInterval = null;
+  }
+}
+
+async function livePlaybackTick(): Promise<void> {
+  if (currentView !== "dashboard" || !document.getElementById("stat-remaining")) return;
+
+  const video = getNowPlayingVideo();
+  if (!video) {
+    refreshQueueStatsFromState();
+    return;
+  }
+
+  const playback = await getPlaybackState(video.id);
+  if (playback) {
+    video.currentTime = playback.currentTime;
+    video.paused = playback.paused;
+    video.audible = !playback.paused && !playback.muted && playback.volume > 0;
+    updateNowPlayingControls(playback);
+  }
+
+  refreshQueueStatsFromState();
+  updateNowPlayingTimeFromVideo(video);
+
+  const listItem = document.getElementById(`video-item-${video.id}`);
+  if (listItem) updateVideoListItem(listItem, video);
+}
+
 function renderNow(): void {
   if (videoData.length === 0) {
+    stopLiveTick();
     resetVideoListFingerprint();
     app.innerHTML = `
           <div class="flex flex-col items-center justify-center min-h-popup px-8 text-center">
@@ -286,6 +347,7 @@ function renderNow(): void {
   }
 
   if (currentView === "settings") {
+    stopLiveTick();
     resetVideoListFingerprint();
     app.innerHTML = `
           <div data-v-header class="pt-4 px-4 pb-3 border-b border-border bg-gradient-to-b from-surface to-surface-elevated relative">
@@ -345,13 +407,11 @@ function renderNow(): void {
 
   setupApp();
 
-  const includedVideos = videoData.filter((video) => !video.excluded);
-  const totalSeconds = includedVideos.reduce((sum, video) => sum + video.seconds, 0);
-  const totalWatched = includedVideos.reduce((sum, video) => sum + video.currentTime, 0);
-  const totalRemaining = Math.max(0, totalSeconds - totalWatched);
-
-  updateHeaderStats(totalSeconds, totalRemaining, includedVideos.length, totalWatched);
+  const { totalSeconds, totalWatched, totalRemaining, videoCount } = getQueueStats();
+  updateHeaderStats(totalSeconds, totalRemaining, videoCount, totalWatched);
   void updateNowPlaying();
+  startLiveTick();
+  void livePlaybackTick();
 
   const sorted = getSortedVideos();
   const fp = videoListStructureFingerprint(sorted);
@@ -663,6 +723,27 @@ function updateNowPlayingControls(state: PlaybackState): void {
   }
 }
 
+function updateNowPlayingTimeFromVideo(video: VideoData): void {
+  const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
+  const progressEl = document.getElementById("np-progress");
+  if (progressEl) progressEl.style.width = `${watchedPercent}%`;
+
+  const timeEl = document.getElementById("np-time");
+  if (!timeEl) return;
+
+  if (video.isLive) {
+    timeEl.innerHTML = `<span class="px-1.5 py-0.5 rounded bg-red-500/20 text-red-500 text-[9px] font-bold">🔴 LIVE</span>`;
+  } else if (video.seconds > 0) {
+    timeEl.innerHTML = `
+      <span class="${watchedPercent > 0 ? "text-text-secondary" : ""}">${formatCompact(video.currentTime)}</span>
+      <span class="mx-0.5 opacity-30">/</span>
+      <span>${formatCompact(video.seconds)}</span>
+    `;
+  } else {
+    timeEl.innerText = formatCompact(video.currentTime);
+  }
+}
+
 async function updateNowPlaying(): Promise<void> {
   const section = document.getElementById("now-playing");
   const video = getNowPlayingVideo();
@@ -701,21 +782,7 @@ async function updateNowPlaying(): Promise<void> {
     }
   }
 
-  const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
-  (document.getElementById("np-progress") as HTMLElement).style.width = `${watchedPercent}%`;
-
-  const timeEl = document.getElementById("np-time") as HTMLElement;
-  if (video.isLive) {
-    timeEl.innerHTML = `<span class="px-1.5 py-0.5 rounded bg-red-500/20 text-red-500 text-[9px] font-bold">🔴 LIVE</span>`;
-  } else if (video.seconds > 0) {
-    timeEl.innerHTML = `
-      <span class="${watchedPercent > 0 ? "text-text-secondary" : ""}">${formatCompact(video.currentTime)}</span>
-      <span class="mx-0.5 opacity-30">/</span>
-      <span>${formatCompact(video.seconds)}</span>
-    `;
-  } else {
-    timeEl.innerText = formatCompact(video.currentTime);
-  }
+  updateNowPlayingTimeFromVideo(video);
 
   const playback = await getPlaybackState(video.id);
   if (playback) {
@@ -1309,3 +1376,12 @@ async function getYouTubeTabs(): Promise<void> {
 }
 
 document.addEventListener("DOMContentLoaded", getYouTubeTabs);
+window.addEventListener("pagehide", stopLiveTick);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    stopLiveTick();
+  } else if (currentView === "dashboard" && document.getElementById("stat-remaining")) {
+    startLiveTick();
+    void livePlaybackTick();
+  }
+});

@@ -1,4 +1,4 @@
-import { normalizeYoutubeUrl } from "../utils/storage";
+import { normalizeYoutubeUrl, toDurableMetadata } from "../utils/storage";
 import { getVideoIdFromUrl } from "../utils/format";
 
 const BATCH_FLUSH_MS = 80;
@@ -26,12 +26,13 @@ async function applyBatchCacheUpdates(batch: Map<string, { url: string; metadata
     const isPlaceholderTitle = !metadata.title || metadata.title === "YouTube Video" || metadata.title === "YouTube";
     const shouldUpdateTitle = !isPlaceholderTitle || !existing?.title || existing.title === "YouTube Video" || existing.title === "YouTube";
     const videoId = metadata.videoId ?? getVideoIdFromUrl(url) ?? undefined;
+    const durable = toDurableMetadata(metadata);
     cache[normalizedUrl] = {
       ...(existing || {}),
-      ...metadata,
+      ...durable,
       videoId: videoId ?? existing?.videoId,
-      seconds: shouldUpdateDuration ? metadata.seconds : existing?.seconds,
-      title: shouldUpdateTitle ? metadata.title : existing?.title,
+      seconds: shouldUpdateDuration ? durable.seconds : existing?.seconds,
+      title: shouldUpdateTitle ? durable.title : existing?.title,
       timestamp: Date.now(),
     };
   }

@@ -2,8 +2,9 @@ import "./style.css";
 import packageJson from "../../package.json";
 import {
   VideoData,
-  loadStorage,
-  saveStorage as saveStorageUtil,
+  loadPrefsAndMetadataCache,
+  lookupCachedMetadata,
+  savePrefs,
   normalizeYoutubeUrl,
   CachedMetadata,
   requestMetadataUpdate,
@@ -17,11 +18,11 @@ import {
   updateSessionSections,
   getLiveTabSections,
   setLiveTabSections,
-  isCacheEntryUsable,
   type SavedSessionTab,
   type SavedSession,
   type SessionSection,
   type LiveTabSectionsState,
+  type UserPrefs,
 } from "../../utils/storage";
 import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl } from "../../utils/format";
 
@@ -126,9 +127,62 @@ function parseTabManagerDrag(raw: string): { kind: "session"; url: string } | { 
   return null;
 }
 
-const STORAGE_READ_SKIP_MS = 2000;
-let lastStorageLoadTime = 0;
-let lastStorageData: Awaited<ReturnType<typeof loadStorage>> | null = null;
+const BOOTSTRAP_CACHE_MS = 2000;
+let lastBootstrapLoadTime = 0;
+let cachedBootstrap: { prefs: UserPrefs; metadataCache: Record<string, CachedMetadata> } | null = null;
+
+async function getBootstrap(): Promise<{ prefs: UserPrefs; metadataCache: Record<string, CachedMetadata> }> {
+  const now = Date.now();
+  if (cachedBootstrap && now - lastBootstrapLoadTime < BOOTSTRAP_CACHE_MS) {
+    metadataCache = cachedBootstrap.metadataCache;
+    return cachedBootstrap;
+  }
+  cachedBootstrap = await loadPrefsAndMetadataCache();
+  metadataCache = cachedBootstrap.metadataCache;
+  lastBootstrapLoadTime = now;
+  return cachedBootstrap;
+}
+
+function invalidateBootstrapCache(): void {
+  lastBootstrapLoadTime = 0;
+  cachedBootstrap = null;
+  metadataCache = {};
+}
+
+function titleFromTab(tab: Browser.tabs.Tab): string {
+  const raw = tab.title?.replace(/^\(\d+\)\s*/g, "").replace(" - YouTube", "").trim();
+  return raw && raw !== "YouTube" ? raw : "YouTube Video";
+}
+
+function applyCachedMetadataToVideo(video: VideoData, cached: CachedMetadata): void {
+  video.title = cached.title || video.title;
+  video.channelName = cached.channelName || "";
+  video.seconds = cached.seconds || 0;
+  video.isLive = cached.isLive || false;
+  video.language = cached.language;
+  video.languageName = cached.languageName;
+}
+
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if (
+    changes.sortByDuration ||
+    changes.excludedUrls ||
+    changes.thumbnailQuality ||
+    changes.layoutMode ||
+    changes.groupingMode ||
+    changes.sortOption
+  ) {
+    invalidateBootstrapCache();
+  }
+  if (changes.metadataCache?.newValue) {
+    metadataCache = changes.metadataCache.newValue as Record<string, CachedMetadata>;
+    if (cachedBootstrap) {
+      cachedBootstrap = { ...cachedBootstrap, metadataCache };
+      lastBootstrapLoadTime = Date.now();
+    }
+  }
+});
 
 const THUMBNAIL_CACHE_MAX = 60;
 const thumbnailBlobCache = new Map<string, string>();
@@ -178,26 +232,25 @@ function thumbnailCacheBackfill(container: HTMLElement) {
 }
 
 async function fetchTabs(skipInitialRender = false) {
-  const now = Date.now();
-  const storage =
-    lastStorageData && now - lastStorageLoadTime < STORAGE_READ_SKIP_MS
-      ? lastStorageData
-      : await (async () => {
-          const storage = await loadStorage();
-          lastStorageData = storage;
-          lastStorageLoadTime = Date.now();
-          return storage;
-        })();
-  metadataCache = storage.metadataCache;
-  const excludedUrls = storage.excludedUrls;
-  thumbnailQuality = storage.thumbnailQuality;
-  groupingMode = storage.groupingMode;
-  layoutMode = storage.layoutMode;
-  sortOption = storage.sortOption;
+  const tabIdsBefore = skipInitialRender
+    ? allVideos
+        .map((video) => video.id)
+        .sort((a, b) => a - b)
+        .join(",")
+    : "";
 
-  liveTabSectionsState = await getLiveTabSections();
+  const [{ prefs, metadataCache: metadataRecord }, allTabs, sectionsState] = await Promise.all([
+    getBootstrap(),
+    browser.tabs.query({}),
+    getLiveTabSections(),
+  ]);
 
-  const allTabs = await browser.tabs.query({});
+  thumbnailQuality = prefs.thumbnailQuality;
+  groupingMode = prefs.groupingMode;
+  layoutMode = prefs.layoutMode;
+  sortOption = prefs.sortOption;
+  liveTabSectionsState = sectionsState;
+
   const youtubeTabs = allTabs.filter(tab => {
     if (!tab.url) return false;
     try {
@@ -214,32 +267,23 @@ async function fetchTabs(skipInitialRender = false) {
   allVideos = youtubeTabs.map((tab, index) => {
     const url = tab.url!;
     const normalizedUrl = normalizeYoutubeUrl(url);
-    const rawCached = metadataCache[normalizedUrl];
-    const expectedVideoId = getVideoIdFromUrl(url);
-    const cached =
-      rawCached &&
-      rawCached.videoId !== undefined &&
-      rawCached.videoId === expectedVideoId &&
-      isCacheEntryUsable(rawCached)
-        ? rawCached
-        : undefined;
-
-    return {
+    const video: VideoData = {
       id: tab.id || 0,
-      title: cached?.title || "YouTube Video",
-      channelName: cached?.channelName || "",
-      seconds: cached?.seconds || 0,
-      currentTime: cached?.currentTime || parseTimeParam(url),
-      excluded: excludedUrls.includes(normalizedUrl),
-      index: index,
-      url: url,
+      title: titleFromTab(tab),
+      channelName: "",
+      seconds: 0,
+      currentTime: parseTimeParam(url),
+      excluded: prefs.excludedUrls.includes(normalizedUrl),
+      index,
+      url,
       suspended: tab.discarded || false,
       active: tab.active,
-      isLive: cached?.isLive || false,
+      isLive: false,
       windowId: tab.windowId,
-      language: cached?.language,
-      languageName: cached?.languageName
     };
+    const cached = lookupCachedMetadata(metadataRecord, url);
+    if (cached) applyCachedMetadataToVideo(video, cached);
+    return video;
   });
 
   const groups = new Map<number, VideoData[]>();
@@ -265,7 +309,13 @@ async function fetchTabs(skipInitialRender = false) {
     })
     .sort((a, b) => b.tabs.length - a.tabs.length);
 
-  if (!skipInitialRender) render();
+  const tabIdsAfter = allVideos
+    .map((video) => video.id)
+    .sort((a, b) => a - b)
+    .join(",");
+  const tabsStructureChanged = skipInitialRender && tabIdsBefore !== tabIdsAfter;
+
+  if (!skipInitialRender || tabsStructureChanged) render();
   await probeTabsMetadata();
 
   const tabsWithoutDuration = allVideos.filter((video) => (video.seconds === 0 && !video.isLive) || video.language === undefined);
@@ -289,6 +339,13 @@ function recomputeWindowGroupDurations(): void {
 /** After probing tab metadata, patch DOM instead of replacing `#tab-list` to avoid layout shift. */
 function applyProbeResultsToUi(): void {
   recomputeWindowGroupDurations();
+
+  const nextFingerprint = tabListFingerprint();
+  if (!selectedSession && nextFingerprint !== lastTabListFingerprint) {
+    render();
+    return;
+  }
+
   updateLiveTabListCardsFromState();
   if (!selectedSession) {
     const headerStats = document.getElementById("current-view-stats");
@@ -313,7 +370,6 @@ function applyProbeResultsToUi(): void {
     }
   }
   renderSidebar();
-  lastTabListFingerprint = tabListFingerprint();
   updateSelectionUI();
 }
 
@@ -1347,17 +1403,16 @@ function showConfirm(options: ConfirmOptions): Promise<boolean> {
   });
 }
 
-async function saveSettings() {
-  const storage = await loadStorage();
-  await saveStorageUtil(
-    allVideos,
-    storage.sortByDuration,
+function saveSettings(): void {
+  void savePrefs({
     thumbnailQuality,
     layoutMode,
     groupingMode,
-    sortOption
-  );
-  lastStorageLoadTime = 0;
+    sortOption,
+  }).catch((err) => {
+    console.warn("Failed to save settings:", err);
+  });
+  invalidateBootstrapCache();
 }
 
 function renderSidebar() {
@@ -1453,7 +1508,6 @@ function scheduleFetchTabsFromEvents() {
   if (fetchTabsFromEventsTimeout != null) clearTimeout(fetchTabsFromEventsTimeout);
   fetchTabsFromEventsTimeout = setTimeout(() => {
     fetchTabsFromEventsTimeout = null;
-    if (Date.now() - lastVisibilityFetch < VISIBILITY_REFETCH_MS) return;
     fetchTabs();
   }, FETCH_TABS_DEBOUNCE_MS);
 }
@@ -3377,7 +3431,7 @@ function setupListeners() {
     });
     if (confirmed) {
       await clearCache();
-      metadataCache = {};
+      invalidateBootstrapCache();
       await fetchTabs();
       isSettingsOpen = false;
       document.getElementById("settings-modal")?.classList.add("hidden");
@@ -3454,6 +3508,7 @@ document.addEventListener("DOMContentLoaded", () => {
         video.title = message.metadata.title;
         video.channelName = message.metadata.channelName;
         video.isLive = message.metadata.isLive || false;
+        video.suspended = false;
         if (message.metadata.language !== undefined) video.language = message.metadata.language;
         if (message.metadata.languageName !== undefined) video.languageName = message.metadata.languageName;
         applyProbeResultsToUi();

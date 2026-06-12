@@ -2,12 +2,14 @@ import "./style.css";
 import packageJson from "../../package.json";
 import {
   VideoData,
-  loadStorage,
+  CachedMetadata,
+  UserPrefs,
+  loadPrefsAndMetadataCache,
+  lookupCachedMetadata,
   saveStorage as saveStorageUtil,
   requestMetadataUpdate,
   normalizeYoutubeUrl,
   clearCache,
-  isCacheEntryUsable
 } from "../../utils/storage";
 import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl } from "../../utils/format";
 
@@ -21,14 +23,88 @@ let lastPlayingTabId: number | null = null;
 
 const LAST_PLAYING_SESSION_KEY = "lastPlayingByWindow";
 
-const POPUP_STORAGE_READ_SKIP_MS = 2000;
-let lastStorageLoadTime = 0;
-let lastStorageData: Awaited<ReturnType<typeof loadStorage>> | null = null;
+const BOOTSTRAP_CACHE_MS = 2000;
+let lastBootstrapLoadTime = 0;
+let cachedBootstrap: { prefs: UserPrefs; metadataCache: Record<string, CachedMetadata> } | null = null;
 
-async function saveStorage(): Promise<void> {
-  await saveStorageUtil(videoData, sortByDuration);
-  lastStorageLoadTime = 0;
+async function getBootstrap(): Promise<{ prefs: UserPrefs; metadataCache: Record<string, CachedMetadata> }> {
+  const now = Date.now();
+  if (cachedBootstrap && now - lastBootstrapLoadTime < BOOTSTRAP_CACHE_MS) return cachedBootstrap;
+  cachedBootstrap = await loadPrefsAndMetadataCache();
+  lastBootstrapLoadTime = now;
+  return cachedBootstrap;
 }
+
+function invalidateBootstrapCache(): void {
+  lastBootstrapLoadTime = 0;
+  cachedBootstrap = null;
+}
+
+/** Persist prefs in background — UI already updated in memory. */
+function saveStorage(): void {
+  void saveStorageUtil(videoData, sortByDuration).catch((err) => {
+    console.warn("Failed to save prefs:", err);
+  });
+  invalidateBootstrapCache();
+}
+
+function titleFromTab(tab: Browser.tabs.Tab): string {
+  const raw = tab.title?.replace(/^\(\d+\)\s*/g, "").replace(" - YouTube", "").trim();
+  return raw && raw !== "YouTube" ? raw : "YouTube Video";
+}
+
+function applyCachedMetadataToVideo(video: VideoData, cached: CachedMetadata): void {
+  video.title = cached.title || video.title;
+  video.channelName = cached.channelName || "";
+  video.seconds = cached.seconds || 0;
+  video.isLive = cached.isLive || false;
+  video.paused = cached.paused;
+}
+
+function buildVideoFromTab(
+  tab: Browser.tabs.Tab,
+  index: number,
+  excludedUrls: string[]
+): VideoData {
+  const url = tab.url!;
+  const normalizedUrl = normalizeYoutubeUrl(url);
+  return {
+    id: tab.id || 0,
+    title: titleFromTab(tab),
+    channelName: "",
+    seconds: 0,
+    currentTime: parseTimeParam(url),
+    excluded: excludedUrls.includes(normalizedUrl),
+    index,
+    url,
+    suspended: tab.discarded || false,
+    active: tab.active,
+    audible: tab.audible || false,
+    isLive: false,
+    windowId: tab.windowId,
+  };
+}
+
+browser.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if (
+    changes.sortByDuration ||
+    changes.excludedUrls ||
+    changes.thumbnailQuality ||
+    changes.layoutMode ||
+    changes.groupingMode ||
+    changes.sortOption
+  ) {
+    invalidateBootstrapCache();
+  }
+  if (changes.metadataCache?.newValue && cachedBootstrap) {
+    cachedBootstrap = {
+      ...cachedBootstrap,
+      metadataCache: changes.metadataCache.newValue as Record<string, CachedMetadata>,
+    };
+    lastBootstrapLoadTime = Date.now();
+  }
+});
 
 // Global listener for background cache updates (content script + auto sync for suspended tabs)
 browser.runtime.onMessage.addListener((message) => {
@@ -397,6 +473,7 @@ function renderNow(): void {
       });
       if (confirmed) {
         await clearCache();
+        invalidateBootstrapCache();
         await getYouTubeTabs();
         currentView = "dashboard";
         render();
@@ -662,8 +739,8 @@ function setupApp() {
     }
     if (button.classList.contains("toggle-btn")) {
       video.excluded = !video.excluded;
-      await saveStorage();
       render();
+      saveStorage();
       return;
     }
     if (button.classList.contains("wake-up-btn")) {
@@ -1003,38 +1080,17 @@ function render(): void {
   }, 0);
 }
 
-function showLoading(): void {
-  resetVideoListFingerprint();
-  const app = document.getElementById("app")!;
-  app.innerHTML = `
-    <div class="min-h-[22rem] flex flex-col items-center justify-center gap-4 px-8">
-      <div class="w-10 h-10 rounded-full border-2 border-white/10 border-t-accent animate-spin"></div>
-      <p class="text-sm text-text-muted">Scanning your tabs…</p>
-    </div>
-  `;
-}
-
 async function getYouTubeTabs(): Promise<void> {
-  if (videoData.length === 0) showLoading();
-
   try {
-    const currentWindow = await browser.windows.getCurrent();
+    const [{ prefs, metadataCache }, allTabs, currentWindow] = await Promise.all([
+      getBootstrap(),
+      browser.tabs.query({}),
+      browser.windows.getCurrent(),
+    ]);
+
     popupWindowId = currentWindow.id ?? null;
+    sortByDuration = prefs.sortByDuration;
 
-    const now = Date.now();
-    const storage =
-      lastStorageData && now - lastStorageLoadTime < POPUP_STORAGE_READ_SKIP_MS
-        ? lastStorageData
-        : await (async () => {
-            const s = await loadStorage();
-            lastStorageData = s;
-            lastStorageLoadTime = Date.now();
-            return s;
-          })();
-    const { sortByDuration: savedSort, excludedUrls, metadataCache } = storage;
-    sortByDuration = savedSort;
-
-    const allTabs = await browser.tabs.query({});
     const tabs = allTabs.filter((tab) => {
       if (!tab.url) return false;
       try {
@@ -1051,34 +1107,10 @@ async function getYouTubeTabs(): Promise<void> {
 
     resetVideoListFingerprint();
     videoData = tabs.map((tab, index) => {
-      const url = tab.url!;
-      const normalizedUrl = normalizeYoutubeUrl(url);
-      const rawCached = metadataCache[normalizedUrl];
-      const expectedVideoId = getVideoIdFromUrl(url);
-      const cached =
-        rawCached &&
-        rawCached.videoId !== undefined &&
-        rawCached.videoId === expectedVideoId &&
-        isCacheEntryUsable(rawCached)
-          ? rawCached
-          : undefined;
-
-        return {
-          id: tab.id || 0,
-          title: cached?.title || "YouTube Video",
-          channelName: cached?.channelName || "",
-          seconds: cached?.seconds || 0,
-          currentTime: cached?.currentTime || parseTimeParam(url),
-          excluded: excludedUrls.includes(normalizedUrl),
-          index: index,
-          url: url,
-          suspended: tab.discarded || false,
-          active: tab.active,
-          audible: tab.audible || false,
-          paused: cached?.paused,
-          isLive: cached?.isLive || false,
-          windowId: tab.windowId,
-        };
+      const video = buildVideoFromTab(tab, index, prefs.excludedUrls);
+      const cached = lookupCachedMetadata(metadataCache, video.url);
+      if (cached) applyCachedMetadataToVideo(video, cached);
+      return video;
     });
 
     if (popupWindowId != null) {
@@ -1101,7 +1133,6 @@ async function getYouTubeTabs(): Promise<void> {
       }
     }
 
-    // Render immediately so user sees the list with whatever we have (cached or tab title / 0:00 defaults)
     render();
 
     const activeTabPromises = videoData.map(async (video) => {

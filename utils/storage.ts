@@ -1,3 +1,5 @@
+import { getVideoIdFromUrl } from "./format";
+
 export interface VideoData {
   id: number;
   title: string;
@@ -40,6 +42,123 @@ export function isCacheEntryUsable(cached: CachedMetadata | undefined): cached i
   return cached.timestamp != null && Date.now() - cached.timestamp < MAX_CACHE_AGE_MS;
 }
 
+export interface UserPrefs {
+  sortByDuration: boolean;
+  excludedUrls: string[];
+  thumbnailQuality: "standard" | "high";
+  layoutMode: "list" | "grid";
+  groupingMode: "none" | "channel" | "language";
+  sortOption: string;
+}
+
+const DEFAULT_PREFS: UserPrefs = {
+  sortByDuration: false,
+  excludedUrls: [],
+  thumbnailQuality: "high",
+  layoutMode: "grid",
+  groupingMode: "none",
+  sortOption: "duration-desc",
+};
+
+const PREFS_STORAGE_KEYS = [
+  "sortByDuration",
+  "excludedUrls",
+  "thumbnailQuality",
+  "layoutMode",
+  "groupingMode",
+  "sortOption",
+] as const;
+
+function parsePrefs(data: Record<string, unknown>): UserPrefs {
+  return {
+    sortByDuration: Boolean(data.sortByDuration),
+    excludedUrls: (data.excludedUrls as string[]) || [],
+    thumbnailQuality: (data.thumbnailQuality as UserPrefs["thumbnailQuality"]) || DEFAULT_PREFS.thumbnailQuality,
+    layoutMode: (data.layoutMode as UserPrefs["layoutMode"]) || DEFAULT_PREFS.layoutMode,
+    groupingMode: (data.groupingMode as UserPrefs["groupingMode"]) || DEFAULT_PREFS.groupingMode,
+    sortOption: (data.sortOption as string) || DEFAULT_PREFS.sortOption,
+  };
+}
+
+/** Fast read — small prefs blob only, no metadata cache. */
+export async function loadPrefs(): Promise<UserPrefs> {
+  if (!browser.storage?.local) {
+    console.warn("Storage API not available.");
+    return { ...DEFAULT_PREFS };
+  }
+  const data = await browser.storage.local.get([...PREFS_STORAGE_KEYS]);
+  return parsePrefs(data);
+}
+
+/** Single storage round-trip for tab bootstrap (prefs + metadata cache). */
+export async function loadPrefsAndMetadataCache(): Promise<{
+  prefs: UserPrefs;
+  metadataCache: Record<string, CachedMetadata>;
+}> {
+  if (!browser.storage?.local) {
+    return { prefs: { ...DEFAULT_PREFS }, metadataCache: {} };
+  }
+  const data = await browser.storage.local.get([...PREFS_STORAGE_KEYS, "metadataCache"]);
+  return {
+    prefs: parsePrefs(data),
+    metadataCache: (data.metadataCache as Record<string, CachedMetadata>) || {},
+  };
+}
+
+/** Merge partial prefs and persist. */
+export async function savePrefs(updates: Partial<UserPrefs>): Promise<void> {
+  if (!browser.storage?.local) return;
+  const current = await loadPrefs();
+  await browser.storage.local.set({ ...current, ...updates });
+}
+
+/** Read metadata cache only. */
+export async function loadMetadataCache(): Promise<Record<string, CachedMetadata>> {
+  if (!browser.storage?.local) return {};
+  const data = await browser.storage.local.get("metadataCache");
+  return (data.metadataCache as Record<string, CachedMetadata>) || {};
+}
+
+/** Resolve cache entry by normalized URL or matching videoId. */
+export function lookupCachedMetadata(
+  cache: Record<string, CachedMetadata>,
+  url: string
+): CachedMetadata | undefined {
+  const normalizedUrl = normalizeYoutubeUrl(url);
+  const expectedVideoId = getVideoIdFromUrl(url);
+  const byUrl = cache[normalizedUrl];
+  if (
+    byUrl &&
+    byUrl.videoId !== undefined &&
+    byUrl.videoId === expectedVideoId &&
+    isCacheEntryUsable(byUrl)
+  ) {
+    return byUrl;
+  }
+  if (expectedVideoId) {
+    for (const entry of Object.values(cache)) {
+      if (entry.videoId === expectedVideoId && isCacheEntryUsable(entry)) {
+        return entry;
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Strip playback state before persisting durable metadata. */
+export function toDurableMetadata(metadata: Omit<CachedMetadata, "timestamp">): Omit<CachedMetadata, "timestamp"> {
+  return {
+    seconds: metadata.seconds,
+    title: metadata.title,
+    channelName: metadata.channelName,
+    currentTime: 0,
+    isLive: metadata.isLive,
+    videoId: metadata.videoId,
+    language: metadata.language,
+    languageName: metadata.languageName,
+  };
+}
+
 export function normalizeYoutubeUrl(url: string): string {
   try {
     const urlObj = new URL(url);
@@ -74,80 +193,35 @@ export async function requestMetadataUpdate(
   await browser.runtime.sendMessage({
     action: "update-cache",
     url,
-    metadata,
+    metadata: toDurableMetadata(metadata),
   }).catch(() => {});
 }
 
 export async function saveStorage(
   videoData: VideoData[],
   sortByDuration: boolean,
-  thumbnailQuality?: 'standard' | 'high',
-  layoutMode?: 'list' | 'grid',
-  groupingMode?: 'none' | 'channel' | 'language',
+  thumbnailQuality?: UserPrefs["thumbnailQuality"],
+  layoutMode?: UserPrefs["layoutMode"],
+  groupingMode?: UserPrefs["groupingMode"],
   sortOption?: string
 ): Promise<void> {
-  if (!browser.storage?.local) return;
-  
-  const current = await browser.storage.local.get(["excludedUrls"]);
-  let excludedUrls = (current.excludedUrls as string[]) || [];
-  
+  const updates: Partial<UserPrefs> = { sortByDuration };
   if (videoData.length > 0) {
-    excludedUrls = videoData
+    updates.excludedUrls = videoData
       .filter((video) => video.excluded)
       .map((video) => normalizeYoutubeUrl(video.url));
   }
-
-  const data: any = {
-    sortByDuration,
-    excludedUrls,
-  };
-  if (thumbnailQuality) data.thumbnailQuality = thumbnailQuality;
-  if (layoutMode) data.layoutMode = layoutMode;
-  if (groupingMode) data.groupingMode = groupingMode;
-  if (sortOption) data.sortOption = sortOption;
-  
-  await browser.storage.local.set(data);
+  if (thumbnailQuality) updates.thumbnailQuality = thumbnailQuality;
+  if (layoutMode) updates.layoutMode = layoutMode;
+  if (groupingMode) updates.groupingMode = groupingMode;
+  if (sortOption) updates.sortOption = sortOption;
+  await savePrefs(updates);
 }
 
-export async function loadStorage(): Promise<{
-  sortByDuration: boolean;
-  excludedUrls: string[];
-  thumbnailQuality: 'standard' | 'high';
-  layoutMode: 'list' | 'grid';
-  groupingMode: 'none' | 'channel' | 'language';
-  sortOption: string;
-  metadataCache: Record<string, CachedMetadata>;
-}> {
-  if (!browser.storage?.local) {
-    console.warn("Storage API not available.");
-    return { 
-      sortByDuration: false, 
-      excludedUrls: [], 
-      thumbnailQuality: 'high', 
-      layoutMode: 'grid', 
-      groupingMode: 'none', 
-      sortOption: 'duration-desc', 
-      metadataCache: {} 
-    };
-  }
-  const data = await browser.storage.local.get([
-    "sortByDuration", 
-    "excludedUrls", 
-    "thumbnailQuality", 
-    "layoutMode", 
-    "groupingMode", 
-    "sortOption", 
-    "metadataCache"
-  ]);
-  return {
-    sortByDuration: Boolean(data.sortByDuration),
-    excludedUrls: (data.excludedUrls as string[]) || [],
-    thumbnailQuality: (data.thumbnailQuality as 'standard' | 'high') || 'high',
-    layoutMode: (data.layoutMode as 'list' | 'grid') || 'grid',
-    groupingMode: (data.groupingMode as 'none' | 'channel' | 'language') || 'none',
-    sortOption: (data.sortOption as string) || 'duration-desc',
-    metadataCache: (data.metadataCache as Record<string, CachedMetadata>) || {},
-  };
+/** Full load — prefer loadPrefs + loadMetadataCache in parallel for faster UI. */
+export async function loadStorage(): Promise<UserPrefs & { metadataCache: Record<string, CachedMetadata> }> {
+  const [prefs, metadataCache] = await Promise.all([loadPrefs(), loadMetadataCache()]);
+  return { ...prefs, metadataCache };
 }
 
 

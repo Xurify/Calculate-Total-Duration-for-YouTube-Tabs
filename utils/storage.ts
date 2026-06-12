@@ -13,6 +13,9 @@ export interface VideoData {
   windowId?: number;
   language?: string | null;
   languageName?: string | null;
+  videoId?: string | null;
+  audible?: boolean;
+  paused?: boolean;
 }
 
 export const MAX_CACHE_AGE_MS = 48 * 60 * 60 * 1000;
@@ -28,6 +31,9 @@ export interface CachedMetadata {
   videoId?: string;
   language?: string | null;
   languageName?: string | null;
+  videoId?: string | null;
+  audible?: boolean;
+  paused?: boolean;
 }
 
 export function isCacheEntryUsable(cached: CachedMetadata | undefined): cached is CachedMetadata {

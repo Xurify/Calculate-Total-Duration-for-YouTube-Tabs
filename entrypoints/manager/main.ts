@@ -2737,7 +2737,15 @@ function setupListeners() {
       event.stopPropagation();
       await browser.tabs.remove(id);
       row?.remove();
-      setTimeout(fetchTabs, 100);
+      allVideos = allVideos.filter((video) => video.id !== id);
+      for (const group of windowGroups) {
+        group.tabs = group.tabs.filter((video) => video.id !== id);
+        group.duration = group.tabs.reduce((acc, video) => acc + video.seconds, 0);
+      }
+      windowGroups = windowGroups.filter((group) => group.tabs.length > 0);
+      lastTabListFingerprint = tabListFingerprint();
+      renderSidebar();
+      updateSelectionUI();
       return;
     }
     if (target.closest(".video-click-target")) {

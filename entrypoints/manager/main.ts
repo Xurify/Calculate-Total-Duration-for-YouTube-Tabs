@@ -663,6 +663,32 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function positionFixedMenu(menu: HTMLElement, clientX: number, clientY: number): void {
+  menu.classList.remove("hidden");
+  const rect = menu.getBoundingClientRect();
+  const pad = 8;
+  const left = Math.max(pad, Math.min(clientX, window.innerWidth - rect.width - pad));
+  const top = Math.max(pad, Math.min(clientY, window.innerHeight - rect.height - pad));
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
+function renderSectionPickerRows(sections: ReturnType<typeof orderedSections>): string {
+  const rows = sections.map((sec) => {
+    const rail = sectionRailVar(sec.colorIndex ?? 0);
+    return `
+      <button type="button" role="menuitem" class="ctx-section-item" data-ctx-section-id="${escapeHtml(sec.id)}">
+        <span class="w-1.5 h-4 rounded-full shrink-0" style="background:${rail}"></span>
+        <span class="truncate">${sec.emoji ? `${escapeHtml(sec.emoji)} ` : ""}${escapeHtml(sec.name)}</span>
+      </button>`;
+  });
+  rows.push(`<div class="ctx-menu-divider" role="separator"></div>`);
+  rows.push(
+    `<button type="button" role="menuitem" class="ctx-section-item ctx-section-item--muted" data-ctx-section-id="">✦ Unsorted</button>`
+  );
+  return rows.join("");
+}
+
 async function getOpenVideoIds(): Promise<Set<string>> {
   const tabs = await browser.tabs.query({});
   const ids = new Set<string>();
@@ -3007,25 +3033,13 @@ function updateMoveToSectionPopover(): void {
 
   const sections = currentSectionsForMove();
   if (sections.length === 0) {
-    pop.innerHTML = `<div class="px-3 py-2 text-[11px] text-text-muted">Create a section first</div>`;
+    pop.innerHTML = `<div class="px-3 py-2.5 text-[11px] text-text-muted leading-relaxed">Create a section with <span class="text-text-secondary font-medium">New section</span> first.</div>`;
     return;
   }
-  const items: string[] = [];
-  for (const sec of sections) {
-    const rail = sectionRailVar(sec.colorIndex ?? 0);
-    items.push(`
-      <button type="button" class="move-to-section-item flex items-center gap-2" data-move-section-id="${escapeHtml(sec.id)}" style="--card-rail: ${rail}">
-        <span class="w-1.5 h-4 rounded-full shrink-0" style="background: ${rail}"></span>
-        <span class="truncate">${sec.emoji ? `${escapeHtml(sec.emoji)} ` : ""}${escapeHtml(sec.name)}</span>
-      </button>
-    `);
-  }
-  items.push(`
-    <button type="button" class="move-to-section-item text-text-muted mt-1 border-t border-border pt-2 rounded-none" data-move-section-id="">
-      ✦ Unsorted
-    </button>
-  `);
-  pop.innerHTML = items.join("");
+  pop.innerHTML = `
+    <div class="ctx-menu-header">Move to section</div>
+    <div class="px-1 pb-1">${renderSectionPickerRows(sections)}</div>
+  `;
 }
 
 function selectionRowSyncSig(): string {
@@ -3207,39 +3221,26 @@ function setupListeners() {
     const menu = document.getElementById("sidebar-context-menu");
     if (!menu) return;
     sidebarContextTarget = null;
-    menu.querySelectorAll(".sidebar-ctx-item").forEach((item) => {
-      (item as HTMLElement).classList.add("hidden");
-    });
+    const groupSave = document.getElementById("ctx-group-save");
+    const groupSession = document.getElementById("ctx-group-session");
+    groupSave?.classList.add("hidden");
+    groupSession?.classList.add("hidden");
     if (type === "all" || type === "window") {
       sidebarContextTarget = type === "all" ? { type: "all" } : { type: "window", windowId: parseInt(item.getAttribute("data-window-id") || "0", 10) };
-      const saveBtn = document.getElementById("ctx-save");
-      if (saveBtn) { saveBtn.classList.remove("hidden"); saveBtn.classList.add("flex"); }
+      groupSave?.classList.remove("hidden");
     } else if (type === "session") {
       sidebarContextTarget = { type: "session", sessionId: item.getAttribute("data-session-id") || undefined };
-      const openBtn = document.getElementById("ctx-open-tabs");
+      groupSession?.classList.remove("hidden");
       const addBtn = document.getElementById("ctx-add-to-session");
-      const dupBtn = document.getElementById("ctx-duplicate-session");
-      const renameBtn = document.getElementById("ctx-rename-session");
-      const pinBtn = document.getElementById("ctx-pin");
+      const hasLiveTabs = allVideos.length > 0;
+      addBtn?.classList.toggle("hidden", !hasLiveTabs);
+      document.getElementById("ctx-divider-edit")?.classList.toggle("hidden", !hasLiveTabs);
       const pinLabel = document.getElementById("ctx-pin-label");
-      const delBtn = document.getElementById("ctx-delete");
-      if (openBtn) { openBtn.classList.remove("hidden"); openBtn.classList.add("flex"); }
-      if (addBtn && allVideos.length > 0) { addBtn.classList.remove("hidden"); addBtn.classList.add("flex"); }
-      if (dupBtn) { dupBtn.classList.remove("hidden"); dupBtn.classList.add("flex"); }
-      if (renameBtn) { renameBtn.classList.remove("hidden"); renameBtn.classList.add("flex"); }
-      if (pinBtn) {
-        pinBtn.classList.remove("hidden");
-        pinBtn.classList.add("flex");
-        const pinned = item.getAttribute("data-pinned") === "1";
-        if (pinLabel) pinLabel.textContent = pinned ? "Unpin" : "Pin";
-      }
-      if (delBtn) { delBtn.classList.remove("hidden"); delBtn.classList.add("flex"); }
+      const pinned = item.getAttribute("data-pinned") === "1";
+      if (pinLabel) pinLabel.textContent = pinned ? "Unpin" : "Pin";
     }
     menu.classList.remove("hidden");
-    const menuLeftPx = Math.min(event.clientX, window.innerWidth - 180);
-    const menuTopPx = Math.min(event.clientY, window.innerHeight - 160);
-    menu.style.left = `${menuLeftPx}px`;
-    menu.style.top = `${menuTopPx}px`;
+    positionFixedMenu(menu, event.clientX, event.clientY);
   });
 
   document.getElementById("tab-list")?.addEventListener("click", async (event) => {
@@ -3765,24 +3766,11 @@ function setupListeners() {
     if (!menu || !items) return;
     const sections = currentSectionsForMove();
     if (sections.length === 0) {
-      items.innerHTML = `<div class="px-3 py-2 text-[11px] text-text-muted leading-relaxed">Add a section with <span class="text-text-secondary font-medium">New section</span> first.</div>`;
+      items.innerHTML = `<div class="px-3 py-2.5 text-[11px] text-text-muted leading-relaxed">Add a section with <span class="text-text-secondary font-medium">New section</span> first.</div>`;
     } else {
-      const rows = sections.map((sec) => {
-        const rail = sectionRailVar(sec.colorIndex ?? 0);
-        return `
-          <button type="button" class="tab-ctx-section-item" data-ctx-section-id="${escapeHtml(sec.id)}">
-            <span class="w-1.5 h-4 rounded-full shrink-0" style="background:${rail}"></span>
-            <span class="truncate">${sec.emoji ? `${escapeHtml(sec.emoji)} ` : ""}${escapeHtml(sec.name)}</span>
-          </button>`;
-      });
-      rows.push(
-        `<button type="button" class="tab-ctx-section-item text-text-muted border-t border-border/60 mt-1 pt-2 rounded-none" data-ctx-section-id="">✦ Unsorted</button>`
-      );
-      items.innerHTML = rows.join("");
+      items.innerHTML = renderSectionPickerRows(sections);
     }
-    menu.classList.remove("hidden");
-    menu.style.left = `${Math.min(clientX, window.innerWidth - 240)}px`;
-    menu.style.top = `${Math.min(clientY, window.innerHeight - 220)}px`;
+    positionFixedMenu(menu, clientX, clientY);
   }
 
   document.getElementById("btn-add-section")?.addEventListener("click", (e) => {
@@ -3855,9 +3843,9 @@ function setupListeners() {
 
   document.getElementById("move-to-section-popover")?.addEventListener("click", (e) => {
     e.stopPropagation();
-    const btn = (e.target as HTMLElement).closest("[data-move-section-id]") as HTMLElement | null;
+    const btn = (e.target as HTMLElement).closest("[data-ctx-section-id], [data-move-section-id]") as HTMLElement | null;
     if (!btn) return;
-    const raw = btn.getAttribute("data-move-section-id");
+    const raw = btn.getAttribute("data-ctx-section-id") ?? btn.getAttribute("data-move-section-id");
     void moveSelectionToSection(raw === "" || raw === null ? null : raw);
     document.getElementById("move-to-section-popover")?.classList.add("hidden");
   });
@@ -3930,11 +3918,7 @@ function setupListeners() {
       event.preventDefault();
       sectionHeaderContextTarget = { sectionId: sid };
       const menu = document.getElementById("section-header-context-menu");
-      if (menu) {
-        menu.classList.remove("hidden");
-        menu.style.left = `${Math.min(event.clientX, window.innerWidth - 200)}px`;
-        menu.style.top = `${Math.min(event.clientY, window.innerHeight - 120)}px`;
-      }
+      if (menu) positionFixedMenu(menu, event.clientX, event.clientY);
     }
   });
 
@@ -3964,6 +3948,13 @@ function setupListeners() {
     document.getElementById("sidebar-context-menu")?.classList.add("hidden");
     document.getElementById("tab-section-context-menu")?.classList.add("hidden");
     document.getElementById("section-header-context-menu")?.classList.add("hidden");
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    document.getElementById("sidebar-context-menu")?.classList.add("hidden");
+    document.getElementById("tab-section-context-menu")?.classList.add("hidden");
+    document.getElementById("section-header-context-menu")?.classList.add("hidden");
+    document.getElementById("move-to-section-popover")?.classList.add("hidden");
   });
 
   document.getElementById("btn-settings")?.addEventListener("click", () => {

@@ -193,25 +193,10 @@ body {
   background: color-mix(in srgb, var(--color-surface) 88%, var(--section-rail, var(--color-accent)) 4%);
 }
 
-.move-to-section-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.5rem;
-  border: 0;
-  background: transparent;
-  color: var(--color-text-primary);
-  font-size: 12px;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.move-to-section-item:hover {
-  background: var(--color-surface-hover);
-}
-
-.tab-ctx-section-item {
+/* Context / dropdown menus */
+.tab-ctx-section-item,
+.move-to-section-item,
+.ctx-section-item {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -223,13 +208,139 @@ body {
   border: 0;
   background: transparent;
   color: var(--color-text-primary);
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   text-align: left;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-.tab-ctx-section-item:hover {
+.tab-ctx-section-item:hover,
+.move-to-section-item:hover,
+.ctx-section-item:hover,
+.ctx-section-item:focus-visible {
   background: var(--color-surface-hover);
+  outline: none;
+}
+
+.ctx-section-item--muted {
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.ctx-menu-header {
+  padding: 0.35rem 0.85rem 0.5rem;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.ctx-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  width: calc(100% - 0.5rem);
+  margin-left: 0.25rem;
+  margin-right: 0.25rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.5rem;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.ctx-menu-item svg {
+  flex-shrink: 0;
+  opacity: 0.72;
+}
+
+.ctx-menu-item:hover,
+.ctx-menu-item:focus-visible {
+  background: var(--color-surface-hover);
+  outline: none;
+}
+
+.ctx-menu-item:hover svg,
+.ctx-menu-item:focus-visible svg {
+  opacity: 1;
+}
+
+.ctx-menu-item--danger {
+  color: #f87171;
+}
+
+.ctx-menu-item--danger svg {
+  opacity: 1;
+}
+
+.ctx-menu-item--danger:hover,
+.ctx-menu-item--danger:focus-visible {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+}
+
+.ctx-menu-divider {
+  height: 1px;
+  margin: 0.35rem 0.65rem;
+  background: var(--color-border);
+  opacity: 0.55;
+}
+
+@keyframes ctx-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.ctx-menu:not(.hidden) {
+  transform-origin: top left;
+  animation: ctx-menu-in 0.14s ease-out;
+}
+
+.ctx-menu--dropdown:not(.hidden) {
+  transform-origin: top right;
+}
+
+.manager-select {
+  appearance: none;
+  background-color: var(--color-surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  background-size: 14px;
+  padding-right: 1.75rem;
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.manager-select:hover {
+  background-color: var(--color-surface-hover);
+}
+
+.manager-select:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+.manager-select--compact {
+  font-size: 12px;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+  padding-left: 0.5rem;
+  background-position: right 0.35rem center;
+  padding-right: 1.5rem;
 }
 
 @keyframes section-in {
@@ -257,7 +368,8 @@ body {
 }
 
 .tab-ctx-section-item,
-.move-to-section-item {
+.move-to-section-item,
+.ctx-section-item {
   transition-property: background-color;
   transition-duration: 0.15s;
   transition-timing-function: ease;

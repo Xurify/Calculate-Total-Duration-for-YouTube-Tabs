@@ -28,10 +28,9 @@ export interface CachedMetadata {
   isLive: boolean;
   timestamp: number;
   /** When set, cache is only used when this matches the tab's video ID (avoids stale SPA metadata). */
-  videoId?: string;
+  videoId?: string | null;
   language?: string | null;
   languageName?: string | null;
-  videoId?: string | null;
   audible?: boolean;
   paused?: boolean;
 }
@@ -93,7 +92,9 @@ export async function saveStorage(
   let excludedUrls = (current.excludedUrls as string[]) || [];
   
   if (videoData.length > 0) {
-    excludedUrls = videoData.filter((video) => video.excluded).map((video) => video.url);
+    excludedUrls = videoData
+      .filter((video) => video.excluded)
+      .map((video) => normalizeYoutubeUrl(video.url));
   }
 
   const data: any = {

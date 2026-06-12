@@ -54,7 +54,7 @@ function getSortedVideos(): VideoData[] {
 const SYNC_COOLDOWN_MS = 30_000;
 let lastSyncTime = 0;
 
-let renderTimeout: any = null;
+let renderTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const app = document.getElementById("app")!;
 
@@ -168,6 +168,34 @@ function setupApp() {
     saveStorage();
     render();
   });
+
+  document.getElementById("video-list")?.addEventListener("click", async (event) => {
+    const target = event.target as HTMLElement;
+    const button = target.closest("button");
+    if (!button) return;
+    const item = button.closest<HTMLElement>("[data-id]");
+    const tabId = item ? parseInt(item.dataset.id || "0", 10) : 0;
+    if (!tabId) return;
+    const video = videoData.find((entry) => entry.id === tabId);
+    if (!video) return;
+
+    if (button.classList.contains("jump-btn")) {
+      await browser.tabs.update(tabId, { active: true });
+      return;
+    }
+    if (button.classList.contains("toggle-btn")) {
+      video.excluded = !video.excluded;
+      await saveStorage();
+      render();
+      return;
+    }
+    if (button.classList.contains("wake-up-btn")) {
+      button.innerText = "Waking...";
+      (button as HTMLButtonElement).disabled = true;
+      await browser.tabs.update(tabId, { active: true });
+      setTimeout(getYouTubeTabs, 1500);
+    }
+  });
 }
 
 function updateHeaderStats(totalSeconds: number, totalRemaining: number, videoCount: number) {
@@ -269,29 +297,12 @@ function updateVideoList(videos: VideoData[]) {
           }</button>
       `;
 
-    // Simplified Listeners (re-attached to new DOM nodes inside controls)
-    controls.querySelector(".jump-btn")?.addEventListener("click", () => {
-      browser.tabs.update(video.id, { active: true });
-    });
-    controls.querySelector(".toggle-btn")?.addEventListener("click", () => {
-      video.excluded = !video.excluded;
-      saveStorage();
-      render();
-    });
-    controls.querySelector(".wake-up-btn")?.addEventListener("click", async (event) => {
-      const wakeUpButton = event.currentTarget as HTMLButtonElement;
-      wakeUpButton.innerText = "Waking...";
-      wakeUpButton.disabled = true;
-      await browser.tabs.update(video.id, { active: true });
-      setTimeout(getYouTubeTabs, 1500);
-    });
-
     container.appendChild(item);
   });
 }
 
 function render(): void {
-  if (renderTimeout) return;
+  if (renderTimeout != null) clearTimeout(renderTimeout);
 
   renderTimeout = setTimeout(() => {
     renderTimeout = null;
@@ -437,7 +448,7 @@ async function getYouTubeTabs(): Promise<void> {
           channelName: cached?.channelName || "",
           seconds: cached?.seconds || 0,
           currentTime: cached?.currentTime || parseTimeParam(url),
-          excluded: excludedUrls.includes(url),
+          excluded: excludedUrls.includes(normalizedUrl),
           index: index,
           url: url,
           suspended: tab.discarded || false,
@@ -689,7 +700,6 @@ async function getYouTubeTabs(): Promise<void> {
         if (!isExpectedError) {
           console.warn(`Failed to probe tab ${video.id}:`, error);
         }
-        video.suspended = true;
         render();
       }
     });

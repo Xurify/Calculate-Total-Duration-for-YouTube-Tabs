@@ -54,26 +54,52 @@ function getVideoIdFromLocation(): string | null {
   return null;
 }
 
+interface CaptionTrack {
+  kind?: string;
+  languageCode?: string;
+  name?: { simpleText?: string };
+}
+
+function languageFromCaptionTracks(
+  captionTracks: CaptionTrack[] | undefined
+): { language?: string | null; languageName?: string | null } {
+  if (!captionTracks || captionTracks.length === 0) {
+    return { language: null, languageName: null };
+  }
+  const asrTrack = captionTracks.find((track) => track.kind === "asr");
+  const track = asrTrack || captionTracks[0];
+  if (!track?.languageCode) return { language: null, languageName: null };
+  return {
+    language: track.languageCode,
+    languageName: (track.name?.simpleText || track.languageCode).split("(")[0].trim(),
+  };
+}
+
 function extractLanguageFromDom(): { language?: string | null; languageName?: string | null } {
   try {
-    const scripts = Array.from(document.querySelectorAll('script'));
-    const playerResponseScript = scripts.find(s => s.textContent.includes('var ytInitialPlayerResponse ='));
-    if (playerResponseScript) {
-      const text = playerResponseScript.textContent;
-      const match = text.match(/var ytInitialPlayerResponse = (\{.*?\});/);
-      if (match) {
-        const data = JSON.parse(match[1]);
-        const captionTracks = data.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-        if (captionTracks && captionTracks.length > 0) {
-          // Prioritize auto-generated (ASR) track as it represents the actual spoken language
-          const asrTrack = captionTracks.find(t => t.kind === 'asr');
-          const track = asrTrack || captionTracks[0];
-          return {
-            language: track.languageCode,
-            languageName: (track.name?.simpleText || track.languageCode).split('(')[0].trim()
-          };
-        }
-      }
+    const playerResponse = (window as unknown as { ytInitialPlayerResponse?: { captions?: { playerCaptionsTracklistRenderer?: { captionTracks?: CaptionTrack[] } } } })
+      .ytInitialPlayerResponse;
+    if (playerResponse) {
+      const fromPlayer = languageFromCaptionTracks(
+        playerResponse.captions?.playerCaptionsTracklistRenderer?.captionTracks
+      );
+      if (fromPlayer.language) return fromPlayer;
+    }
+
+    for (const script of document.querySelectorAll("script:not([src])")) {
+      const text = script.textContent;
+      if (!text?.includes("ytInitialPlayerResponse")) continue;
+      const playerResponseMatch =
+        text.match(/var ytInitialPlayerResponse\s*=\s*({.+?});/s) ||
+        text.match(/window\["ytInitialPlayerResponse"\]\s*=\s*({.+?});/s);
+      if (!playerResponseMatch) continue;
+      const data = JSON.parse(playerResponseMatch[1]) as {
+        captions?: { playerCaptionsTracklistRenderer?: { captionTracks?: CaptionTrack[] } };
+      };
+      const fromScript = languageFromCaptionTracks(
+        data.captions?.playerCaptionsTracklistRenderer?.captionTracks
+      );
+      if (fromScript.language) return fromScript;
     }
   } catch {
     // ignore

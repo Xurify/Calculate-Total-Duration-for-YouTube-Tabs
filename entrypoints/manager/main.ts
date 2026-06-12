@@ -223,7 +223,7 @@ async function fetchTabs(skipInitialRender = false) {
       channelName: cached?.channelName || "",
       seconds: cached?.seconds || 0,
       currentTime: cached?.currentTime || parseTimeParam(url),
-      excluded: excludedUrls.includes(url),
+      excluded: excludedUrls.includes(normalizedUrl),
       index: index,
       url: url,
       suspended: tab.discarded || false,
@@ -467,9 +467,10 @@ async function probeTabsMetadata() {
             try {
               const captionTracks = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
               if (captionTracks && captionTracks.length > 0) {
-                const track = captionTracks[0];
+                const asrTrack = captionTracks.find((track: { kind?: string }) => track.kind === "asr");
+                const track = asrTrack || captionTracks[0];
                 language = track.languageCode;
-                languageName = (track.name?.simpleText || track.languageCode).split('(')[0].trim();
+                languageName = (track.name?.simpleText || track.languageCode).split("(")[0].trim();
               }
             } catch (_) {}
 
@@ -3408,7 +3409,7 @@ function setupListeners() {
 }
 
 function render() {
-  if (renderTimeout != null) return;
+  if (renderTimeout != null) clearTimeout(renderTimeout);
   renderTimeout = setTimeout(() => {
     renderTimeout = null;
     renderSidebar();

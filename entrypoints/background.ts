@@ -76,37 +76,68 @@ const SYNC_CONCURRENCY = 3;
 const SYNC_DELAY_BETWEEN_REQUESTS_MS = 500;
 const SYNC_IN_PROGRESS = new Set<string>();
 
+interface ParsedPlayerResponse {
+  videoDetails?: {
+    videoId?: string;
+    title?: string;
+    author?: string;
+    isLive?: boolean;
+    lengthSeconds?: string;
+  };
+  microformat?: {
+    playerMicroformatRenderer?: {
+      liveBroadcastDetails?: { endTimestamp?: string };
+    };
+  };
+  captions?: {
+    playerCaptionsTracklistRenderer?: {
+      captionTracks?: Array<{ kind?: string; languageCode?: string; name?: { simpleText?: string } }>;
+    };
+  };
+}
+
 function parseMetadataFromHtml(html: string): { duration: number; title: string; channel: string; isLive: boolean; syncedVideoId: string | null; language?: string | null; languageName?: string | null } {
   let duration = 0;
   let title = "";
   let channel = "";
   let isLive = false;
   let syncedVideoId: string | null = null;
+  let language: string | null = null;
+  let languageName: string | null = null;
+
   const playerResponseMatch =
     html.match(/var ytInitialPlayerResponse\s*=\s*({.+?});/s) ||
     html.match(/window\["ytInitialPlayerResponse"\]\s*=\s*({.+?});/s);
   if (playerResponseMatch) {
     try {
-      const playerResponse = JSON.parse(playerResponseMatch[1]);
+      const playerResponse = JSON.parse(playerResponseMatch[1]) as ParsedPlayerResponse;
       const videoDetails = playerResponse.videoDetails;
       if (videoDetails) {
         syncedVideoId = videoDetails.videoId ?? null;
         title = videoDetails.title || "";
         channel = videoDetails.author || "";
         isLive = videoDetails.isLive === true;
-        const liveDetails = playerResponse?.microformat?.playerMicroformatRenderer?.liveBroadcastDetails;
+        const liveDetails = playerResponse.microformat?.playerMicroformatRenderer?.liveBroadcastDetails;
         if (liveDetails && !liveDetails.endTimestamp) isLive = true;
-        const lengthSeconds = parseInt(videoDetails.lengthSeconds) || 0;
+        const lengthSeconds = parseInt(videoDetails.lengthSeconds ?? "", 10) || 0;
         if (lengthSeconds > 0) {
           isLive = false;
           duration = lengthSeconds;
         }
       }
+
+      const captionTracks = playerResponse.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+      if (captionTracks && captionTracks.length > 0) {
+        const asrTrack = captionTracks.find((track) => track.kind === "asr");
+        const track = asrTrack || captionTracks[0];
+        language = track.languageCode ?? null;
+        languageName = (track.name?.simpleText || track.languageCode || "").split("(")[0].trim() || null;
+      }
     } catch (_) {}
   }
   if (duration === 0) {
     const durationMatch = html.match(/"approxDurationMs"\s*:\s*"?(\d+)"?/);
-    duration = durationMatch ? parseInt(durationMatch[1]) / 1000 : 0;
+    duration = durationMatch ? parseInt(durationMatch[1], 10) / 1000 : 0;
   }
   if (!title) {
     const titleMatch = html.match(/<title>([^<]+)<\/title>/);
@@ -115,22 +146,6 @@ function parseMetadataFromHtml(html: string): { duration: number; title: string;
   if (!channel) {
     const authorMatch = html.match(/"author"\s*:\s*"([^"]+)"/) || html.match(/"ownerChannelName"\s*:\s*"([^"]+)"/);
     channel = authorMatch ? authorMatch[1] : "";
-  }
-
-  let language: string | null = null;
-  let languageName: string | null = null;
-  if (playerResponseMatch) {
-    try {
-      const playerResponse = JSON.parse(playerResponseMatch[1]);
-      const captionTracks = playerResponse.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-      if (captionTracks && captionTracks.length > 0) {
-        // Prioritize auto-generated (ASR) track as it represents the actual spoken language
-        const asrTrack = captionTracks.find((t: any) => t.kind === 'asr');
-        const track = asrTrack || captionTracks[0];
-        language = track.languageCode;
-        languageName = (track.name?.simpleText || track.languageCode).split('(')[0].trim();
-      }
-    } catch (_) {}
   }
 
   return {

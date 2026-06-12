@@ -2,7 +2,6 @@ import "./style.css";
 import packageJson from "../../package.json";
 import {
   VideoData,
-  loadPrefsAndMetadataCache,
   lookupCachedMetadata,
   savePrefs,
   normalizeYoutubeUrl,
@@ -22,8 +21,13 @@ import {
   type SavedSession,
   type SessionSection,
   type LiveTabSectionsState,
-  type UserPrefs,
 } from "../../utils/storage";
+import {
+  applyStorePatch,
+  fetchStoreState,
+  isStoreUpdatedMessage,
+  type StoreState,
+} from "../../utils/store";
 import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl } from "../../utils/format";
 
 interface WindowGroup {
@@ -37,7 +41,6 @@ let allVideos: VideoData[] = [];
 let windowGroups: WindowGroup[] = [];
 let currentWindowId: number | 'all' = 'all';
 let selectedTabIds = new Set<number>();
-let metadataCache: Record<string, CachedMetadata> = {};
 
 let searchQuery = "";
 let groupingMode: 'none' | 'channel' | 'language' = 'none';
@@ -127,26 +130,42 @@ function parseTabManagerDrag(raw: string): { kind: "session"; url: string } | { 
   return null;
 }
 
-const BOOTSTRAP_CACHE_MS = 2000;
-let lastBootstrapLoadTime = 0;
-let cachedBootstrap: { prefs: UserPrefs; metadataCache: Record<string, CachedMetadata> } | null = null;
+let storeState: StoreState = {
+  prefs: {
+    sortByDuration: false,
+    excludedUrls: [],
+    thumbnailQuality: "high",
+    layoutMode: "grid",
+    groupingMode: "none",
+    sortOption: "duration-desc",
+  },
+  metadataCache: {},
+};
 
-async function getBootstrap(): Promise<{ prefs: UserPrefs; metadataCache: Record<string, CachedMetadata> }> {
-  const now = Date.now();
-  if (cachedBootstrap && now - lastBootstrapLoadTime < BOOTSTRAP_CACHE_MS) {
-    metadataCache = cachedBootstrap.metadataCache;
-    return cachedBootstrap;
-  }
-  cachedBootstrap = await loadPrefsAndMetadataCache();
-  metadataCache = cachedBootstrap.metadataCache;
-  lastBootstrapLoadTime = now;
-  return cachedBootstrap;
+function applyPrefsFromStore(): void {
+  const { prefs } = storeState;
+  thumbnailQuality = prefs.thumbnailQuality;
+  groupingMode = prefs.groupingMode;
+  layoutMode = prefs.layoutMode;
+  sortOption = prefs.sortOption;
 }
 
-function invalidateBootstrapCache(): void {
-  lastBootstrapLoadTime = 0;
-  cachedBootstrap = null;
-  metadataCache = {};
+function applyStoreMetadataToVideos(): void {
+  const { prefs, metadataCache } = storeState;
+  allVideos.forEach((video) => {
+    video.excluded = prefs.excludedUrls.includes(normalizeYoutubeUrl(video.url));
+    const cached = lookupCachedMetadata(metadataCache, video.url);
+    if (cached) applyCachedMetadataToVideo(video, cached);
+  });
+}
+
+function handleStoreUpdated(message: { prefs?: StoreState["prefs"]; metadataCache?: StoreState["metadataCache"] }): void {
+  applyStorePatch(storeState, message);
+  if (message.prefs) applyPrefsFromStore();
+  if (allVideos.length > 0 && (message.prefs || message.metadataCache)) {
+    applyStoreMetadataToVideos();
+    applyProbeResultsToUi();
+  }
 }
 
 function titleFromTab(tab: Browser.tabs.Tab): string {
@@ -162,27 +181,6 @@ function applyCachedMetadataToVideo(video: VideoData, cached: CachedMetadata): v
   video.language = cached.language;
   video.languageName = cached.languageName;
 }
-
-browser.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local") return;
-  if (
-    changes.sortByDuration ||
-    changes.excludedUrls ||
-    changes.thumbnailQuality ||
-    changes.layoutMode ||
-    changes.groupingMode ||
-    changes.sortOption
-  ) {
-    invalidateBootstrapCache();
-  }
-  if (changes.metadataCache?.newValue) {
-    metadataCache = changes.metadataCache.newValue as Record<string, CachedMetadata>;
-    if (cachedBootstrap) {
-      cachedBootstrap = { ...cachedBootstrap, metadataCache };
-      lastBootstrapLoadTime = Date.now();
-    }
-  }
-});
 
 const THUMBNAIL_CACHE_MAX = 60;
 const thumbnailBlobCache = new Map<string, string>();
@@ -239,16 +237,15 @@ async function fetchTabs(skipInitialRender = false) {
         .join(",")
     : "";
 
-  const [{ prefs, metadataCache: metadataRecord }, allTabs, sectionsState] = await Promise.all([
-    getBootstrap(),
+  const [state, allTabs, sectionsState] = await Promise.all([
+    fetchStoreState(),
     browser.tabs.query({}),
     getLiveTabSections(),
   ]);
+  storeState = state;
+  const { prefs, metadataCache: metadataRecord } = storeState;
 
-  thumbnailQuality = prefs.thumbnailQuality;
-  groupingMode = prefs.groupingMode;
-  layoutMode = prefs.layoutMode;
-  sortOption = prefs.sortOption;
+  applyPrefsFromStore();
   liveTabSectionsState = sectionsState;
 
   const youtubeTabs = allTabs.filter(tab => {
@@ -1412,7 +1409,6 @@ function saveSettings(): void {
   }).catch((err) => {
     console.warn("Failed to save settings:", err);
   });
-  invalidateBootstrapCache();
 }
 
 function renderSidebar() {
@@ -2458,6 +2454,93 @@ function updateSelectAllCheckbox() {
   if (dashEl) dashEl.style.opacity = checkbox.indeterminate ? "1" : "0";
 }
 
+function syncFlatGroupHeaderCheckboxes(): void {
+  document.querySelectorAll(".group-selection-toggle").forEach((toggle) => {
+    const groupName = (toggle as HTMLElement).dataset.group;
+    if (!groupName) return;
+
+    let scopeVideos = allVideos;
+    if (currentWindowId !== "all") {
+      scopeVideos = allVideos.filter((video) => video.windowId === currentWindowId);
+    }
+    const videosInGroup = scopeVideos.filter((video) => {
+      if (groupingMode === "channel") {
+        return (video.channelName || "Unknown Channel") === groupName;
+      }
+      if (groupingMode === "language") {
+        const stripped = video.languageName ? video.languageName.split("(")[0].trim() : "";
+        const langName = stripped ? stripped : (video.language ? video.language.toUpperCase() : "Unspecified");
+        return langName === groupName;
+      }
+      return false;
+    });
+
+    const allSelected = videosInGroup.length > 0 && videosInGroup.every((video) => selectedTabIds.has(video.id));
+    const someSelected = videosInGroup.some((video) => selectedTabIds.has(video.id));
+    const checkbox = toggle.querySelector("input[type='checkbox']") as HTMLInputElement | null;
+    if (!checkbox) return;
+    checkbox.checked = allSelected;
+    checkbox.indeterminate = someSelected && !allSelected;
+  });
+}
+
+function syncNestedGroupHeaderCheckboxes(): void {
+  document.querySelectorAll(".nested-group-selection-toggle").forEach((toggle) => {
+    const el = toggle as HTMLElement;
+    const scopeId = el.dataset.nestedGroupScope;
+    const groupName = el.dataset.nestedGroupName;
+    if (!scopeId || !groupName) return;
+
+    let allSelected = false;
+    let someSelected = false;
+
+    if (selectedSession) {
+      const secs = orderedSections(selectedSession.sections);
+      const inSection = (tab: SavedSessionTab) => {
+        if (scopeId === "__unsorted") return !sessionTabSectionId(tab, secs);
+        return sessionTabSectionId(tab, secs) === scopeId;
+      };
+      const groupTabs = (selectedSession.tabs ?? []).filter((tab) => {
+        if (!inSection(tab)) return false;
+        if (groupingMode === "channel") return (tab.channelName ?? "Unknown Channel") === groupName;
+        if (groupingMode === "language") {
+          const stripped = tab.languageName ? tab.languageName.split("(")[0].trim() : "";
+          const langName = stripped ? stripped : (tab.language ? tab.language.toUpperCase() : "Unspecified");
+          return langName === groupName;
+        }
+        return false;
+      });
+      const urls = groupTabs.map((tab) => tab.url ?? "").filter(Boolean);
+      allSelected = urls.length > 0 && urls.every((url) => selectedSessionTabUrls.has(url));
+      someSelected = urls.some((url) => selectedSessionTabUrls.has(url));
+    } else {
+      let scopeVideos = allVideos;
+      if (currentWindowId !== "all") {
+        scopeVideos = allVideos.filter((video) => video.windowId === currentWindowId);
+      }
+      const groupVideos = scopeVideos.filter((video) => {
+        const sid = liveSectionIdForVideo(video);
+        const inSec = scopeId === "__unsorted" ? sid === undefined : sid === scopeId;
+        if (!inSec) return false;
+        if (groupingMode === "channel") return (video.channelName || "Unknown Channel") === groupName;
+        if (groupingMode === "language") {
+          const stripped = video.languageName ? video.languageName.split("(")[0].trim() : "";
+          const langName = stripped ? stripped : (video.language ? video.language.toUpperCase() : "Unspecified");
+          return langName === groupName;
+        }
+        return false;
+      });
+      allSelected = groupVideos.length > 0 && groupVideos.every((video) => selectedTabIds.has(video.id));
+      someSelected = groupVideos.some((video) => selectedTabIds.has(video.id));
+    }
+
+    const checkbox = toggle.querySelector("input[type='checkbox']") as HTMLInputElement | null;
+    if (!checkbox) return;
+    checkbox.checked = allSelected;
+    checkbox.indeterminate = someSelected && !allSelected;
+  });
+}
+
 function currentSectionsForMove(): SessionSection[] {
   if (selectedSession) return orderedSections(selectedSession.sections);
   return orderedSections(liveTabSectionsState.sections);
@@ -2564,6 +2647,7 @@ function updateSelectionUI() {
           row.querySelector(".session-selection-toggle")?.classList.remove("opacity-100");
         }
       });
+      syncNestedGroupHeaderCheckboxes();
       return;
     }
 
@@ -2587,6 +2671,9 @@ function updateSelectionUI() {
         }
       }
     });
+
+    syncFlatGroupHeaderCheckboxes();
+    syncNestedGroupHeaderCheckboxes();
   }
 }
 
@@ -2760,7 +2847,6 @@ function setupListeners() {
           if (selectedSessionTabUrls.has(url)) selectedSessionTabUrls.delete(url);
           else selectedSessionTabUrls.add(url);
           updateSelectionUI();
-          render();
           return;
         }
         if (target.closest(".session-open-new-tab")) {
@@ -2870,7 +2956,6 @@ function setupListeners() {
         });
       }
       updateSelectionUI();
-      render();
       return;
     }
     const groupToggle = target.closest(".group-toggle");
@@ -2909,7 +2994,6 @@ function setupListeners() {
           else selectedTabIds.add(video.id);
         });
         updateSelectionUI();
-        render();
       }
     }
   });
@@ -3431,7 +3515,7 @@ function setupListeners() {
     });
     if (confirmed) {
       await clearCache();
-      invalidateBootstrapCache();
+      storeState.metadataCache = {};
       await fetchTabs();
       isSettingsOpen = false;
       document.getElementById("settings-modal")?.classList.add("hidden");
@@ -3514,6 +3598,5 @@ document.addEventListener("DOMContentLoaded", () => {
         applyProbeResultsToUi();
       }
     }
-    if (message.action === "sync-complete") render();
   });
 });

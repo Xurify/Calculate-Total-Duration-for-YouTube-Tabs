@@ -1,10 +1,39 @@
-import { normalizeYoutubeUrl, toDurableMetadata } from "../utils/storage";
-import { getVideoIdFromUrl } from "../utils/format";
+import {
+  loadPrefsAndMetadataCache,
+  normalizeYoutubeUrl,
+  type CachedMetadata,
+  type UserPrefs,
+} from "../utils/storage";
+import { applyMetadataBatchToCache, normalizeMetadataBatch } from "../utils/store";
 
 const BATCH_FLUSH_MS = 80;
-let pendingCacheUpdates = new Map<string, { url: string; metadata: any }>();
+let pendingCacheUpdates = new Map<string, { url: string; metadata: Omit<CachedMetadata, "timestamp"> }>();
 let flushTimeout: ReturnType<typeof setTimeout> | null = null;
 let flushPromise: Promise<void> = Promise.resolve();
+
+let storePrefs!: UserPrefs;
+let storeMetadataCache: Record<string, CachedMetadata> = {};
+const storeReady: Promise<void> = loadPrefsAndMetadataCache().then(({ prefs, metadataCache }) => {
+  storePrefs = prefs;
+  storeMetadataCache = metadataCache;
+});
+
+function broadcastStoreUpdate(patch: {
+  prefs?: UserPrefs;
+  metadataCache?: Record<string, CachedMetadata>;
+}): void {
+  void browser.runtime
+    .sendMessage({ action: "store-updated", ...patch })
+    .catch(() => {});
+}
+
+async function persistPrefs(): Promise<void> {
+  await browser.storage.local.set({ ...storePrefs });
+}
+
+async function persistMetadataCache(): Promise<void> {
+  await browser.storage.local.set({ metadataCache: storeMetadataCache });
+}
 
 function scheduleFlush() {
   if (flushTimeout != null) return;
@@ -16,51 +45,71 @@ function scheduleFlush() {
   }, BATCH_FLUSH_MS);
 }
 
-async function applyBatchCacheUpdates(batch: Map<string, { url: string; metadata: any }>) {
+async function applyBatchCacheUpdates(
+  batch: Map<string, { url: string; metadata: Omit<CachedMetadata, "timestamp"> }>
+) {
   if (batch.size === 0) return;
-  const data = await browser.storage.local.get("metadataCache");
-  const cache = (data.metadataCache as Record<string, any>) || {};
-  for (const [normalizedUrl, { url, metadata }] of batch) {
-    const existing = cache[normalizedUrl];
-    const shouldUpdateDuration = metadata.seconds > 0 || !existing || metadata.isLive;
-    const isPlaceholderTitle = !metadata.title || metadata.title === "YouTube Video" || metadata.title === "YouTube";
-    const shouldUpdateTitle = !isPlaceholderTitle || !existing?.title || existing.title === "YouTube Video" || existing.title === "YouTube";
-    const videoId = metadata.videoId ?? getVideoIdFromUrl(url) ?? undefined;
-    const durable = toDurableMetadata(metadata);
-    cache[normalizedUrl] = {
-      ...(existing || {}),
-      ...durable,
-      videoId: videoId ?? existing?.videoId,
-      seconds: shouldUpdateDuration ? durable.seconds : existing?.seconds,
-      title: shouldUpdateTitle ? durable.title : existing?.title,
-      timestamp: Date.now(),
-    };
-  }
-  const keys = Object.keys(cache);
-  if (keys.length > 300) {
-    const sortedKeys = keys.sort((a, b) => cache[a].timestamp - cache[b].timestamp);
-    const toRemove = sortedKeys.slice(0, keys.length - 300);
-    toRemove.forEach((k) => delete cache[k]);
-  }
-  await browser.storage.local.set({ metadataCache: cache });
+  await storeReady;
+  const normalized = normalizeMetadataBatch(batch);
+  applyMetadataBatchToCache(storeMetadataCache, normalized);
+  await persistMetadataCache();
+  broadcastStoreUpdate({ metadataCache: storeMetadataCache });
+}
+
+async function patchPrefs(updates: Partial<UserPrefs>): Promise<void> {
+  await storeReady;
+  storePrefs = { ...storePrefs, ...updates };
+  await persistPrefs();
+  broadcastStoreUpdate({ prefs: storePrefs });
+}
+
+async function clearMetadataCacheInStore(): Promise<void> {
+  await storeReady;
+  storeMetadataCache = {};
+  await persistMetadataCache();
+  broadcastStoreUpdate({ metadataCache: storeMetadataCache });
 }
 
 export default defineBackground(() => {
-  browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.action === "ping") {
       sendResponse({ status: "ok" });
       return;
     }
 
+    if (message.action === "get-store-state") {
+      void storeReady.then(() => {
+        sendResponse({ prefs: storePrefs, metadataCache: storeMetadataCache });
+      });
+      return true;
+    }
+
+    if (message.action === "update-prefs" && message.updates) {
+      void patchPrefs(message.updates as Partial<UserPrefs>).then(() => {
+        sendResponse({ ok: true });
+      });
+      return true;
+    }
+
+    if (message.action === "clear-metadata-cache") {
+      void clearMetadataCacheInStore().then(() => {
+        sendResponse({ ok: true });
+      });
+      return true;
+    }
+
     if (message.action === "update-cache" && message.url && message.metadata) {
       const normalizedUrl = normalizeYoutubeUrl(message.url);
-      pendingCacheUpdates.set(normalizedUrl, { url: message.url, metadata: message.metadata });
+      pendingCacheUpdates.set(normalizedUrl, {
+        url: message.url,
+        metadata: message.metadata as Omit<CachedMetadata, "timestamp">,
+      });
       scheduleFlush();
       return;
     }
 
     if (message.action === "sync-all" && message.tabs) {
-      handleStealthSync(message.tabs);
+      void handleStealthSync(message.tabs as TabToSync[]);
       sendResponse({ started: true });
       return true;
     }
@@ -72,7 +121,7 @@ interface TabToSync {
   url: string;
 }
 
-const CACHE_FRESH_MAX_AGE_MS = 10 * 60 * 1000; // 10 min — skip fetch if cache is this fresh
+const CACHE_FRESH_MAX_AGE_MS = 10 * 60 * 1000;
 const SYNC_CONCURRENCY = 3;
 const SYNC_DELAY_BETWEEN_REQUESTS_MS = 500;
 const SYNC_IN_PROGRESS = new Set<string>();
@@ -97,7 +146,15 @@ interface ParsedPlayerResponse {
   };
 }
 
-function parseMetadataFromHtml(html: string): { duration: number; title: string; channel: string; isLive: boolean; syncedVideoId: string | null; language?: string | null; languageName?: string | null } {
+function parseMetadataFromHtml(html: string): {
+  duration: number;
+  title: string;
+  channel: string;
+  isLive: boolean;
+  syncedVideoId: string | null;
+  language?: string | null;
+  languageName?: string | null;
+} {
   let duration = 0;
   let title = "";
   let channel = "";
@@ -187,10 +244,11 @@ async function fetchOneTab(tab: TabToSync): Promise<boolean> {
       languageName,
     } = parseMetadataFromHtml(html);
     if (duration > 0 || title || isLive) {
-      const metadata = {
+      const metadata: Omit<CachedMetadata, "timestamp"> = {
         seconds: duration,
         title: title || "YouTube Video",
         channelName: channel || "",
+        currentTime: 0,
         isLive,
         videoId: syncedVideoId ?? undefined,
         language,
@@ -209,28 +267,31 @@ async function fetchOneTab(tab: TabToSync): Promise<boolean> {
 }
 
 async function handleStealthSync(tabs: TabToSync[]) {
-  const data = await browser.storage.local.get("metadataCache");
-  const cache = (data.metadataCache as Record<string, { seconds?: number; title?: string; channelName?: string; isLive?: boolean; timestamp?: number; language?: string | null; languageName?: string | null }>) || {};
+  await storeReady;
+  const cache = storeMetadataCache;
   const toFetch: TabToSync[] = [];
 
   for (const tab of tabs) {
     const normalizedUrl = normalizeYoutubeUrl(tab.url);
     const cached = cache[normalizedUrl];
-    const hasValidCache = cached && (cached.seconds! > 0 || cached.isLive) && cached.title && cached.language !== undefined;
+    const hasValidCache =
+      cached && (cached.seconds > 0 || cached.isLive) && cached.title && cached.language !== undefined;
     const cacheFresh = cached?.timestamp != null && Date.now() - cached.timestamp < CACHE_FRESH_MAX_AGE_MS;
     if (hasValidCache && cacheFresh) {
-      browser.runtime.sendMessage({
-        action: "tab-synced",
-        tabId: tab.id,
-        metadata: {
-          seconds: cached.seconds ?? 0,
-          title: cached.title ?? "",
-          channelName: cached.channelName ?? "",
-          isLive: cached.isLive ?? false,
-          language: cached.language,
-          languageName: cached.languageName
-        },
-      }).catch(() => {});
+      browser.runtime
+        .sendMessage({
+          action: "tab-synced",
+          tabId: tab.id,
+          metadata: {
+            seconds: cached.seconds ?? 0,
+            title: cached.title ?? "",
+            channelName: cached.channelName ?? "",
+            isLive: cached.isLive ?? false,
+            language: cached.language,
+            languageName: cached.languageName,
+          },
+        })
+        .catch(() => {});
       continue;
     }
     toFetch.push(tab);

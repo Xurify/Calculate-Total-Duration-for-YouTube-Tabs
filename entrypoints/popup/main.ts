@@ -3,14 +3,18 @@ import packageJson from "../../package.json";
 import {
   VideoData,
   CachedMetadata,
-  UserPrefs,
-  loadPrefsAndMetadataCache,
   lookupCachedMetadata,
   saveStorage as saveStorageUtil,
   requestMetadataUpdate,
   normalizeYoutubeUrl,
   clearCache,
 } from "../../utils/storage";
+import {
+  applyStorePatch,
+  fetchStoreState,
+  isStoreUpdatedMessage,
+  type StoreState,
+} from "../../utils/store";
 import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl } from "../../utils/format";
 
 const VERSION_NUMBER = packageJson.version;
@@ -23,21 +27,34 @@ let lastPlayingTabId: number | null = null;
 
 const LAST_PLAYING_SESSION_KEY = "lastPlayingByWindow";
 
-const BOOTSTRAP_CACHE_MS = 2000;
-let lastBootstrapLoadTime = 0;
-let cachedBootstrap: { prefs: UserPrefs; metadataCache: Record<string, CachedMetadata> } | null = null;
+let storeState: StoreState = {
+  prefs: {
+    sortByDuration: false,
+    excludedUrls: [],
+    thumbnailQuality: "high",
+    layoutMode: "grid",
+    groupingMode: "none",
+    sortOption: "duration-desc",
+  },
+  metadataCache: {},
+};
 
-async function getBootstrap(): Promise<{ prefs: UserPrefs; metadataCache: Record<string, CachedMetadata> }> {
-  const now = Date.now();
-  if (cachedBootstrap && now - lastBootstrapLoadTime < BOOTSTRAP_CACHE_MS) return cachedBootstrap;
-  cachedBootstrap = await loadPrefsAndMetadataCache();
-  lastBootstrapLoadTime = now;
-  return cachedBootstrap;
+function applyStoreToVideos(): void {
+  const { prefs, metadataCache } = storeState;
+  sortByDuration = prefs.sortByDuration;
+  videoData.forEach((video) => {
+    video.excluded = prefs.excludedUrls.includes(normalizeYoutubeUrl(video.url));
+    const cached = lookupCachedMetadata(metadataCache, video.url);
+    if (cached) applyCachedMetadataToVideo(video, cached);
+  });
 }
 
-function invalidateBootstrapCache(): void {
-  lastBootstrapLoadTime = 0;
-  cachedBootstrap = null;
+function handleStoreUpdated(message: { prefs?: StoreState["prefs"]; metadataCache?: StoreState["metadataCache"] }): void {
+  applyStorePatch(storeState, message);
+  if (videoData.length > 0) {
+    applyStoreToVideos();
+    scheduleProbeRender();
+  }
 }
 
 /** Persist prefs in background — UI already updated in memory. */
@@ -45,7 +62,6 @@ function saveStorage(): void {
   void saveStorageUtil(videoData, sortByDuration).catch((err) => {
     console.warn("Failed to save prefs:", err);
   });
-  invalidateBootstrapCache();
 }
 
 function titleFromTab(tab: Browser.tabs.Tab): string {
@@ -85,29 +101,12 @@ function buildVideoFromTab(
   };
 }
 
-browser.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local") return;
-  if (
-    changes.sortByDuration ||
-    changes.excludedUrls ||
-    changes.thumbnailQuality ||
-    changes.layoutMode ||
-    changes.groupingMode ||
-    changes.sortOption
-  ) {
-    invalidateBootstrapCache();
-  }
-  if (changes.metadataCache?.newValue && cachedBootstrap) {
-    cachedBootstrap = {
-      ...cachedBootstrap,
-      metadataCache: changes.metadataCache.newValue as Record<string, CachedMetadata>,
-    };
-    lastBootstrapLoadTime = Date.now();
-  }
-});
-
 // Global listener for background cache updates (content script + auto sync for suspended tabs)
 browser.runtime.onMessage.addListener((message) => {
+  if (isStoreUpdatedMessage(message)) {
+    handleStoreUpdated(message);
+    return;
+  }
   if (message.action === "tab-synced") {
     const video = videoData.find((v) => v.id === message.tabId);
     if (video) {
@@ -473,7 +472,7 @@ function renderNow(): void {
       });
       if (confirmed) {
         await clearCache();
-        invalidateBootstrapCache();
+        storeState.metadataCache = {};
         await getYouTubeTabs();
         currentView = "dashboard";
         render();
@@ -1082,11 +1081,13 @@ function render(): void {
 
 async function getYouTubeTabs(): Promise<void> {
   try {
-    const [{ prefs, metadataCache }, allTabs, currentWindow] = await Promise.all([
-      getBootstrap(),
+    const [state, allTabs, currentWindow] = await Promise.all([
+      fetchStoreState(),
       browser.tabs.query({}),
       browser.windows.getCurrent(),
     ]);
+    storeState = state;
+    const { prefs, metadataCache } = storeState;
 
     popupWindowId = currentWindow.id ?? null;
     sortByDuration = prefs.sortByDuration;

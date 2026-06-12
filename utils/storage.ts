@@ -105,11 +105,9 @@ export async function loadPrefsAndMetadataCache(): Promise<{
   };
 }
 
-/** Merge partial prefs and persist. */
+/** Merge partial prefs via background-owned store. */
 export async function savePrefs(updates: Partial<UserPrefs>): Promise<void> {
-  if (!browser.storage?.local) return;
-  const current = await loadPrefs();
-  await browser.storage.local.set({ ...current, ...updates });
+  await browser.runtime.sendMessage({ action: "update-prefs", updates });
 }
 
 /** Read metadata cache only. */
@@ -218,10 +216,16 @@ export async function saveStorage(
   await savePrefs(updates);
 }
 
-/** Full load — prefer loadPrefs + loadMetadataCache in parallel for faster UI. */
+/** Full load from background-owned store. */
 export async function loadStorage(): Promise<UserPrefs & { metadataCache: Record<string, CachedMetadata> }> {
-  const [prefs, metadataCache] = await Promise.all([loadPrefs(), loadMetadataCache()]);
-  return { ...prefs, metadataCache };
+  const response = await browser.runtime.sendMessage({ action: "get-store-state" });
+  if (!response?.prefs || !response.metadataCache) {
+    throw new Error("Failed to load store state from background");
+  }
+  return {
+    ...(response.prefs as UserPrefs),
+    metadataCache: response.metadataCache as Record<string, CachedMetadata>,
+  };
 }
 
 
@@ -250,8 +254,7 @@ export async function updateMetadataCache(
 }
 
 export async function clearCache(): Promise<void> {
-  if (!browser.storage?.local) return;
-  await browser.storage.local.set({ metadataCache: {} });
+  await browser.runtime.sendMessage({ action: "clear-metadata-cache" });
 }
 
 export interface SessionSection {

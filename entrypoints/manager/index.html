@@ -115,7 +115,7 @@
                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg>
                              Move to…
                            </button>
-                           <div id="move-to-section-popover" role="menu" aria-label="Move to section" class="hidden absolute right-0 top-full mt-1.5 z-50 min-w-[220px] max-h-64 overflow-y-auto rounded-xl border border-border bg-surface-elevated/98 backdrop-blur-xl shadow-2xl py-1.5 custom-scrollbar ctx-menu ctx-menu--dropdown"></div>
+                           <div id="move-to-section-popover" role="menu" aria-label="Move to section" class="menu-panel menu-panel-animate menu-panel-animate--from-right custom-scrollbar hidden absolute right-0 top-full z-50 mt-1.5 max-h-64 min-w-[220px] overflow-y-auto"></div>
                        </div>
                        <button id="btn-close-selected" class="px-3 py-1.5 bg-surface-hover hover:bg-red-500/10 hover:text-red-500 text-text-secondary text-xs font-medium rounded-md transition-[background-color,color] border-0 cursor-pointer whitespace-nowrap active:scale-[0.96]">
                            Close Selected
@@ -178,13 +178,7 @@
 
               <div class="flex items-center gap-2">
                   <span class="text-[10px] uppercase font-bold text-text-muted tracking-wider">Sort By</span>
-                  <select id="sort-select" class="manager-select manager-select--compact bg-surface-elevated border border-border text-text-secondary text-xs rounded-md px-2 py-1 outline-none cursor-pointer">
-                      <option value="index-asc">Original Order</option>
-                      <option value="duration-desc" selected>Duration (High to Low)</option>
-                      <option value="duration-asc">Duration (Low to High)</option>
-                      <option value="title-asc">Title (A-Z)</option>
-                      <option value="channel-asc">Channel (A-Z)</option>
-                  </select>
+                  <div id="sort-select" class="custom-select custom-select--compact"></div>
               </div>
 
               <div class="h-4 w-px bg-border"></div>
@@ -285,7 +279,7 @@
               <label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer"><input type="radio" name="save-session-mode" value="new" class="accent-accent" checked /> Save as new session</label>
               <label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer"><input type="radio" name="save-session-mode" value="replace" class="accent-accent" /> Replace existing session</label>
               <label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer"><input type="radio" name="save-session-mode" value="merge" class="accent-accent" /> Merge into existing session</label>
-              <select id="save-session-target" class="manager-select hidden w-full mt-1 px-3 py-2 text-sm border border-border rounded-md bg-surface text-text-primary"></select>
+              <div id="save-session-target" class="custom-select custom-select--block hidden mt-1"></div>
               <p id="save-session-duplicate-hint" class="hidden text-xs text-accent leading-relaxed"></p>
             </div>
             <div class="flex justify-end gap-2">
@@ -302,11 +296,8 @@
             <p id="restore-session-summary" class="text-xs text-text-muted mb-4"></p>
             <div class="space-y-3 mb-5">
               <div>
-                <label for="restore-target-window" class="text-[10px] uppercase font-bold text-text-muted tracking-wider">Open in</label>
-                <select id="restore-target-window" class="manager-select w-full mt-1 px-3 py-2 text-sm border border-border rounded-md bg-surface text-text-primary">
-                  <option value="new">New window</option>
-                  <option value="current">Current window</option>
-                </select>
+                <label class="text-[10px] uppercase font-bold text-text-muted tracking-wider">Open in</label>
+                <div id="restore-target-window" class="custom-select custom-select--block mt-1"></div>
               </div>
               <label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer"><input type="checkbox" id="restore-missing-only" class="accent-accent rounded" /> Open only tabs not already open</label>
               <label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer"><input type="checkbox" id="restore-by-sections" class="accent-accent rounded" /> One window per section (when sections exist)</label>
@@ -371,13 +362,13 @@
     <div id="toast" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-60 px-4 py-2 rounded-lg bg-surface-elevated border border-border shadow-lg text-sm text-text-primary transition-opacity duration-300" role="status" aria-live="polite"></div>
 
     <!-- Video / tab context: move to section -->
-    <div id="tab-section-context-menu" role="menu" aria-label="Move to section" class="hidden fixed z-[90] min-w-[220px] max-h-72 overflow-y-auto py-1.5 rounded-xl border border-border bg-surface-elevated/98 backdrop-blur-xl shadow-2xl text-sm custom-scrollbar ctx-menu">
-      <div class="ctx-menu-header">Move to section</div>
+    <div id="tab-section-context-menu" role="menu" aria-label="Move to section" class="menu-panel menu-panel-animate custom-scrollbar hidden fixed z-[90] max-h-72 min-w-[220px] overflow-y-auto">
+      <div class="menu-panel-header">Move to section</div>
       <div id="tab-section-context-items" class="px-1 pb-1"></div>
     </div>
 
     <!-- Section header context -->
-    <div id="section-header-context-menu" role="menu" aria-label="Section actions" class="hidden fixed z-[90] min-w-[200px] py-1.5 px-1 rounded-xl border border-border bg-surface-elevated/98 backdrop-blur-xl shadow-2xl text-sm ctx-menu">
+    <div id="section-header-context-menu" role="menu" aria-label="Section actions" class="menu-panel menu-panel-animate hidden fixed z-[90] min-w-[200px]">
       <button type="button" id="section-ctx-rename" role="menuitem" class="ctx-menu-item">
         <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
         Rename…
@@ -390,7 +381,7 @@
     </div>
 
     <!-- Right-click context menu for sidebar items -->
-    <div id="sidebar-context-menu" role="menu" aria-label="Sidebar actions" class="hidden fixed z-[100] min-w-[200px] py-1.5 px-1 rounded-xl border border-border bg-surface-elevated/98 backdrop-blur-xl shadow-2xl text-sm ctx-menu">
+    <div id="sidebar-context-menu" role="menu" aria-label="Sidebar actions" class="menu-panel menu-panel-animate hidden fixed z-[100] min-w-[200px]">
         <div id="ctx-group-save" class="hidden">
             <button type="button" id="ctx-save" role="menuitem" class="ctx-menu-item">
                 <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>

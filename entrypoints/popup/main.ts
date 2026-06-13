@@ -24,6 +24,8 @@ let sortByDuration = false;
 let currentView: "dashboard" | "settings" = "dashboard";
 let popupWindowId: number | null = null;
 let lastPlayingTabId: number | null = null;
+let resolvedNowPlayingTabId: number | null = null;
+let playbackScanOffset = 0;
 
 const LAST_PLAYING_SESSION_KEY = "lastPlayingByWindow";
 
@@ -180,11 +182,17 @@ function isVideoEligibleForNowPlaying(video: VideoData | undefined): video is Vi
 }
 
 function getNowPlayingVideo(): VideoData | null {
+  if (resolvedNowPlayingTabId != null) {
+    const resolved = findVideoByTabId(resolvedNowPlayingTabId);
+    if (isVideoEligibleForNowPlaying(resolved)) return resolved;
+    resolvedNowPlayingTabId = null;
+  }
+
   const inWindow = getVideosInPopupWindow();
 
   const audible = inWindow.filter((video) => video.audible);
   if (audible.length > 0) {
-    const playing = audible.find((video) => video.active) ?? audible[0] ?? null;
+    const playing = audible[0] ?? null;
     if (playing) void persistLastPlayingTabId(playing.id);
     return playing;
   }
@@ -217,6 +225,106 @@ interface PlaybackState {
   volume: number;
   muted: boolean;
   currentTime: number;
+}
+
+const PLAYBACK_SCAN_BATCH = 40;
+
+function isPlaybackActive(state: PlaybackState): boolean {
+  return !state.paused && !state.muted && state.volume > 0;
+}
+
+async function refreshWindowAudibleFlags(): Promise<void> {
+  if (popupWindowId == null) return;
+  const tabs = await browser.tabs.query({ windowId: popupWindowId });
+  const flags = new Map<number, boolean>();
+  for (const tab of tabs) {
+    if (tab.id != null) flags.set(tab.id, tab.audible === true);
+  }
+  for (const video of videoData) {
+    if (video.windowId === popupWindowId) {
+      video.audible = flags.get(video.id) ?? false;
+    }
+  }
+}
+
+async function applyPlaybackStateToVideo(video: VideoData): Promise<PlaybackState | null> {
+  const playback = await getPlaybackState(video.id);
+  if (!playback) return null;
+  video.paused = playback.paused;
+  video.currentTime = playback.currentTime;
+  video.audible = isPlaybackActive(playback);
+  return playback;
+}
+
+function pickBestPlayingVideo(candidates: VideoData[]): VideoData | null {
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0] ?? null;
+  return [...candidates].sort((a, b) => b.currentTime - a.currentTime)[0] ?? null;
+}
+
+async function refreshNowPlayingDetection(): Promise<VideoData | null> {
+  await refreshWindowAudibleFlags();
+  const inWindow = getVideosInPopupWindow();
+  if (inWindow.length === 0) {
+    resolvedNowPlayingTabId = null;
+    return null;
+  }
+
+  const probeIds = new Set<number>();
+  for (const video of inWindow) {
+    if (
+      video.audible ||
+      video.active ||
+      video.id === lastPlayingTabId ||
+      video.id === resolvedNowPlayingTabId
+    ) {
+      probeIds.add(video.id);
+    }
+  }
+
+  let probeList = inWindow.filter((video) => probeIds.has(video.id));
+  const unscanned = inWindow.filter((video) => !probeIds.has(video.id));
+  if (unscanned.length > 0) {
+    const batch = unscanned.slice(playbackScanOffset, playbackScanOffset + PLAYBACK_SCAN_BATCH);
+    probeList = [...probeList, ...batch];
+    playbackScanOffset = (playbackScanOffset + PLAYBACK_SCAN_BATCH) % unscanned.length;
+  }
+
+  const actuallyPlaying: VideoData[] = [];
+  await Promise.all(
+    probeList.map(async (video) => {
+      const playback = await applyPlaybackStateToVideo(video);
+      if (playback && isPlaybackActive(playback)) {
+        actuallyPlaying.push(video);
+      }
+    })
+  );
+
+  const picked = pickBestPlayingVideo(actuallyPlaying);
+  if (picked) {
+    resolvedNowPlayingTabId = picked.id;
+    await persistLastPlayingTabId(picked.id);
+    return picked;
+  }
+
+  resolvedNowPlayingTabId = null;
+
+  if (lastPlayingTabId) {
+    const last = findVideoByTabId(lastPlayingTabId);
+    if (isVideoEligibleForNowPlaying(last)) {
+      resolvedNowPlayingTabId = last.id;
+      await applyPlaybackStateToVideo(last);
+      return last;
+    }
+    await clearLastPlayingTabId();
+  }
+
+  const active = inWindow.find((video) => video.active) ?? null;
+  if (active) {
+    resolvedNowPlayingTabId = active.id;
+    await applyPlaybackStateToVideo(active);
+  }
+  return active;
 }
 
 async function getPlaybackState(tabId: number): Promise<PlaybackState | null> {
@@ -384,9 +492,11 @@ function stopLiveTick(): void {
 async function livePlaybackTick(): Promise<void> {
   if (currentView !== "dashboard" || !document.getElementById("stat-remaining")) return;
 
-  const video = getNowPlayingVideo();
+  const previousTabId = resolvedNowPlayingTabId;
+  const video = await refreshNowPlayingDetection();
   if (!video) {
     refreshQueueStatsFromState();
+    if (previousTabId !== resolvedNowPlayingTabId) syncPopulateNowPlaying();
     return;
   }
 
@@ -394,9 +504,11 @@ async function livePlaybackTick(): Promise<void> {
   if (playback) {
     video.currentTime = playback.currentTime;
     video.paused = playback.paused;
-    video.audible = !playback.paused && !playback.muted && playback.volume > 0;
+    video.audible = isPlaybackActive(playback);
     updateNowPlayingControls(playback);
   }
+
+  if (previousTabId !== video.id) applyNowPlayingVideoToDom(video);
 
   refreshQueueStatsFromState();
   updateNowPlayingTimeFromVideo(video);
@@ -485,9 +597,9 @@ function renderNow(): void {
 
   const { totalSeconds, totalWatched, totalRemaining, videoCount } = getQueueStats();
   updateHeaderStats(totalSeconds, totalRemaining, videoCount, totalWatched);
-  void updateNowPlaying();
+  syncPopulateNowPlaying();
   startLiveTick();
-  void livePlaybackTick();
+  void refineNowPlaying();
 
   const sorted = getSortedVideos();
   const fp = videoListStructureFingerprint(sorted);
@@ -584,11 +696,11 @@ function setupApp() {
           <div class="flex items-end justify-between gap-3">
             <div class="min-w-0">
               <p class="text-[10px] font-medium uppercase tracking-wider text-text-muted leading-none">Time left</p>
-              <p id="stat-remaining" class="text-[15px] font-bold tabular-nums text-text-primary leading-tight mt-1 truncate">--:--</p>
+              <p id="stat-remaining" class="text-[15px] font-bold tabular-nums text-text-primary leading-tight mt-1 truncate min-w-[5.5rem]">--:--</p>
             </div>
             <div class="text-right shrink-0">
               <p class="text-[10px] font-medium uppercase tracking-wider text-text-muted leading-none">Watched</p>
-              <p id="stat-watched" class="text-[15px] font-bold tabular-nums text-accent leading-tight mt-1">--:--</p>
+              <p id="stat-watched" class="text-[15px] font-bold tabular-nums text-accent leading-tight mt-1 min-w-[5.5rem]">--:--</p>
             </div>
           </div>
           <div class="mt-3">
@@ -601,17 +713,17 @@ function setupApp() {
             </div>
             <p class="mt-1.5 text-[10px] text-text-muted tabular-nums">
               <span>Total queue</span>
-              <span id="stat-total" class="ml-1 text-text-secondary font-medium">--:--</span>
+              <span id="stat-total" class="ml-1 text-text-secondary font-medium tabular-nums min-w-[5.5rem] inline-block">--:--</span>
             </p>
           </div>
         </div>
       </header>
 
-      <section id="now-playing" class="hidden shrink-0 border-b border-white/10 bg-surface-elevated/40">
-        <div id="np-card" class="px-3 py-1.5 transition-all duration-300">
+      <section id="now-playing" class="shrink-0 border-b border-white/10 bg-surface-elevated/40 min-h-[5.75rem]">
+        <div id="np-card" class="px-3 py-1.5 transition-[background-color,box-shadow] duration-300">
           <div class="flex gap-2 items-center">
-            <button id="np-thumb-btn" type="button" class="relative shrink-0 w-[9rem] aspect-video rounded-sm overflow-hidden bg-surface-hover border border-white/10 group/thumb p-0 cursor-pointer" title="Open tab">
-              <img id="np-thumb" alt="" class="w-full h-full object-cover transition-transform duration-300 group-hover/thumb:scale-105" />
+            <button id="np-thumb-btn" type="button" class="relative shrink-0 w-36 aspect-video rounded-sm overflow-hidden bg-surface-hover border border-white/10 group/thumb p-0 cursor-pointer" title="Open tab">
+              <img id="np-thumb" alt="" width="144" height="81" class="w-full h-full object-cover transition-transform duration-300 group-hover/thumb:scale-105" />
               <div class="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/20 transition-colors"></div>
               <div class="absolute bottom-0 left-0 right-0 h-px bg-black/50">
                 <div id="np-progress" class="h-full bg-accent transition-[width] duration-500" style="width: 0%"></div>
@@ -623,12 +735,12 @@ function setupApp() {
                   <span class="np-indicator w-1.5 h-1.5 rounded-full bg-text-muted shrink-0"></span>
                   <span id="np-status" class="text-[10px] font-bold uppercase tracking-wider text-text-muted">Paused</span>
                 </div>
-                <h2 id="np-title" class="text-[13px] font-medium text-text-primary line-clamp-1 leading-tight cursor-pointer hover:underline decoration-white/30 underline-offset-2" title="Open tab"></h2>
-                <p id="np-channel" class="hidden text-[11px] text-text-secondary truncate"></p>
+                <h2 id="np-title" class="text-[13px] font-medium text-text-primary line-clamp-1 leading-tight min-h-[1.125rem] cursor-pointer hover:underline decoration-white/30 underline-offset-2" title="Open tab"></h2>
+                <p id="np-channel" class="text-[11px] text-text-secondary truncate min-h-[1rem]"></p>
               </div>
               <div class="flex items-center gap-1.5 min-h-0">
                 <button id="np-play-pause" class="w-7 h-7 shrink-0 flex items-center justify-center rounded-full bg-accent text-white border-0 cursor-pointer hover:bg-[#e60000] active:scale-95 transition-all" title="Play / Pause"></button>
-                <span id="np-time" class="text-[11px] text-text-muted tabular-nums shrink-0"></span>
+                <span id="np-time" class="text-[11px] text-text-muted tabular-nums shrink-0 min-w-[4.5rem]"></span>
                 <svg id="np-volume-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-text-muted"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
                 <div class="flex-1 min-w-0 flex items-center h-3">
                   <input id="np-volume" type="range" min="0" max="100" value="100" class="w-full h-1 m-0 p-0 cursor-pointer appearance-none rounded-full bg-white/15 accent-accent" aria-label="Volume" />
@@ -688,7 +800,8 @@ function setupApp() {
     if (state) {
       video.paused = state.paused;
       video.currentTime = state.currentTime;
-      video.audible = !state.paused && !state.muted && state.volume > 0;
+      video.audible = isPlaybackActive(state);
+      resolvedNowPlayingTabId = tabId;
       await persistLastPlayingTabId(tabId);
       updateNowPlayingControls(state);
       render();
@@ -716,7 +829,8 @@ function setupApp() {
     const value = parseInt((event.target as HTMLInputElement).value, 10);
     const state = await setPlaybackVolume(tabId, value / 100);
     if (state) {
-      video.audible = !state.paused && !state.muted && state.volume > 0;
+      video.audible = isPlaybackActive(state);
+      resolvedNowPlayingTabId = tabId;
       await persistLastPlayingTabId(tabId);
       updateNowPlayingControls(state);
     }
@@ -764,7 +878,7 @@ function updateNowPlayingControls(state: PlaybackState): void {
   const card = document.getElementById("np-card");
   const indicator = document.querySelector(".np-indicator");
 
-  const isPlaying = !state.paused && !state.muted && state.volume > 0;
+  const isPlaying = isPlaybackActive(state);
 
   if (playBtn) {
     playBtn.innerHTML = state.paused ? PLAY_ICON : PAUSE_ICON;
@@ -820,37 +934,38 @@ function updateNowPlayingTimeFromVideo(video: VideoData): void {
   }
 }
 
-async function updateNowPlaying(): Promise<void> {
+function formatNowPlayingChannelName(video: VideoData): string {
+  if (!video.channelName || video.channelName === "YouTube" || video.channelName === "YouTube Video") {
+    return "";
+  }
+  return video.channelName;
+}
+
+function applyNowPlayingVideoToDom(video: VideoData): void {
   const section = document.getElementById("now-playing");
-  const video = getNowPlayingVideo();
-  if (!section || !video) {
-    if (section) {
-      section.classList.add("hidden");
-      delete section.dataset.tabId;
-    }
-    return;
+  if (!section) return;
+
+  section.dataset.tabId = String(video.id);
+  resolvedNowPlayingTabId = video.id;
+
+  const channelEl = document.getElementById("np-channel") as HTMLElement | null;
+  const channelName = formatNowPlayingChannelName(video);
+  if (channelEl) {
+    channelEl.textContent = channelName || "\u00a0";
+    channelEl.classList.toggle("invisible", !channelName);
   }
 
-  section.classList.remove("hidden");
-  section.dataset.tabId = String(video.id);
-
-  const channelEl = document.getElementById("np-channel") as HTMLElement;
-  const channelName =
-    video.channelName && video.channelName !== "YouTube" && video.channelName !== "YouTube Video"
-      ? video.channelName
-      : "";
-  channelEl.innerText = channelName;
-  channelEl.classList.toggle("hidden", !channelName);
-
-  const titleEl = document.getElementById("np-title") as HTMLElement;
-  titleEl.innerText = video.title;
-  titleEl.title = video.title;
+  const titleEl = document.getElementById("np-title") as HTMLElement | null;
+  if (titleEl) {
+    titleEl.textContent = video.title;
+    titleEl.title = video.title;
+  }
 
   const thumbEl = document.getElementById("np-thumb") as HTMLImageElement | null;
   const thumbUrl = getThumbnailUrl(video.url);
   if (thumbEl) {
     if (thumbUrl) {
-      thumbEl.src = thumbUrl;
+      if (thumbEl.src !== thumbUrl) thumbEl.src = thumbUrl;
       thumbEl.classList.remove("hidden");
     } else {
       thumbEl.removeAttribute("src");
@@ -859,20 +974,37 @@ async function updateNowPlaying(): Promise<void> {
   }
 
   updateNowPlayingTimeFromVideo(video);
+}
+
+function syncPopulateNowPlaying(): void {
+  const video = getNowPlayingVideo();
+  if (!video) return;
+
+  applyNowPlayingVideoToDom(video);
+  updateNowPlayingControls({
+    paused: video.paused ?? !video.audible,
+    volume: 1,
+    muted: false,
+    currentTime: video.currentTime,
+  });
+}
+
+async function refineNowPlaying(): Promise<void> {
+  const previousId = resolvedNowPlayingTabId;
+  const video = await refreshNowPlayingDetection();
+  if (!video) return;
+
+  if (video.id !== previousId) applyNowPlayingVideoToDom(video);
 
   const playback = await getPlaybackState(video.id);
   if (playback) {
     video.paused = playback.paused;
     video.currentTime = playback.currentTime;
+    video.audible = isPlaybackActive(playback);
     updateNowPlayingControls(playback);
-  } else {
-    updateNowPlayingControls({
-      paused: video.paused ?? !video.audible,
-      volume: 1,
-      muted: false,
-      currentTime: video.currentTime,
-    });
   }
+
+  updateNowPlayingTimeFromVideo(video);
 }
 
 function getNowPlayingTabIdForList(): number | null {
@@ -1107,6 +1239,8 @@ async function getYouTubeTabs(): Promise<void> {
     });
 
     resetVideoListFingerprint();
+    resolvedNowPlayingTabId = null;
+    playbackScanOffset = 0;
     videoData = tabs.map((tab, index) => {
       const video = buildVideoFromTab(tab, index, prefs.excludedUrls);
       const cached = lookupCachedMetadata(metadataCache, video.url);
@@ -1124,7 +1258,7 @@ async function getYouTubeTabs(): Promise<void> {
           video.audible
       );
       if (audibleInWindow.length > 0) {
-        const playing = audibleInWindow.find((video) => video.active) ?? audibleInWindow[0];
+        const playing = audibleInWindow[0];
         if (playing) await persistLastPlayingTabId(playing.id);
       } else if (lastPlayingTabId) {
         const last = videoData.find((video) => video.id === lastPlayingTabId);
@@ -1133,6 +1267,9 @@ async function getYouTubeTabs(): Promise<void> {
         }
       }
     }
+
+    const initialNowPlaying = getNowPlayingVideo();
+    if (initialNowPlaying) resolvedNowPlayingTabId = initialNowPlaying.id;
 
     render();
 
@@ -1380,6 +1517,7 @@ async function getYouTubeTabs(): Promise<void> {
       }
     });
     await Promise.all(activeTabPromises);
+    await refreshNowPlayingDetection();
     flushProbeRender();
 
     // After probing: auto-fetch durations for any tab still missing it (suspended or probe failed). Background skips when cache is fresh.

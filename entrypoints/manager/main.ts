@@ -1,4 +1,5 @@
 import "./style.css";
+import { closeAllCustomSelects, mountCustomSelect, type CustomSelectHandle } from "./custom-select";
 import packageJson from "../../package.json";
 import {
   VideoData,
@@ -68,6 +69,18 @@ let thumbnailQuality: 'standard' | 'high' = 'high';
 let isSettingsOpen = false;
 
 let sortOption: string = 'duration-desc';
+
+const SORT_SELECT_OPTIONS = [
+  { value: "index-asc", label: "Original Order" },
+  { value: "duration-desc", label: "Duration (High to Low)" },
+  { value: "duration-asc", label: "Duration (Low to High)" },
+  { value: "title-asc", label: "Title (A-Z)" },
+  { value: "channel-asc", label: "Channel (A-Z)" },
+] as const;
+
+let sortSelectHandle: CustomSelectHandle | null = null;
+let restoreTargetSelect: CustomSelectHandle | null = null;
+let saveSessionTargetSelect: CustomSelectHandle | null = null;
 let showDuplicatesOnly = false;
 /** Video-id counts for the current view scope (all windows, one window, or saved session). */
 let scopeVideoIdCounts = new Map<string, number>();
@@ -172,6 +185,7 @@ function applyPrefsFromStore(): void {
   groupingMode = prefs.groupingMode;
   layoutMode = prefs.layoutMode;
   sortOption = prefs.sortOption;
+  sortSelectHandle?.setValue(sortOption);
 }
 
 function applyStoreMetadataToVideos(): void {
@@ -900,11 +914,12 @@ async function restoreSession(session: SavedSession, options: RestoreSessionOpti
 }
 
 async function showRestoreSessionModal(session: SavedSession): Promise<RestoreSessionOptions | null> {
+  closeAllCustomSelects();
   return new Promise((resolve) => {
     const modal = document.getElementById("restore-session-modal");
     const titleEl = document.getElementById("restore-session-title");
     const summaryEl = document.getElementById("restore-session-summary");
-    const targetSelect = document.getElementById("restore-target-window") as HTMLSelectElement;
+    const targetSelect = restoreTargetSelect;
     const missingOnly = document.getElementById("restore-missing-only") as HTMLInputElement;
     const bySections = document.getElementById("restore-by-sections") as HTMLInputElement;
     const cancelBtn = document.getElementById("restore-session-cancel");
@@ -921,7 +936,7 @@ async function showRestoreSessionModal(session: SavedSession): Promise<RestoreSe
     bySections.disabled = !hasSections;
     bySections.checked = false;
     missingOnly.checked = false;
-    targetSelect.value = "new";
+    targetSelect.setValue("new");
 
     const close = (result: RestoreSessionOptions | null) => {
       modal.classList.add("hidden");
@@ -934,7 +949,7 @@ async function showRestoreSessionModal(session: SavedSession): Promise<RestoreSe
     const onCancel = () => close(null);
     const onConfirm = () =>
       close({
-        target: targetSelect.value === "current" ? "current" : "new",
+        target: targetSelect.getValue() === "current" ? "current" : "new",
         missingOnly: missingOnly.checked,
         bySections: bySections.checked && hasSections,
       });
@@ -959,11 +974,12 @@ interface SaveSessionModalOptions {
 }
 
 async function showSaveSessionModal(options: SaveSessionModalOptions): Promise<SaveSessionPayload | null> {
+  closeAllCustomSelects();
   return new Promise((resolve) => {
     const modal = document.getElementById("save-session-modal");
     const input = document.getElementById("save-session-input") as HTMLInputElement;
     const summaryEl = document.getElementById("save-session-summary");
-    const targetSelect = document.getElementById("save-session-target") as HTMLSelectElement;
+    const targetSelect = saveSessionTargetSelect;
     const hintEl = document.getElementById("save-session-duplicate-hint");
     const cancelBtn = document.getElementById("save-session-cancel");
     const confirmBtn = document.getElementById("save-session-confirm");
@@ -982,19 +998,21 @@ async function showSaveSessionModal(options: SaveSessionModalOptions): Promise<S
     }
     if (summaryEl) summaryEl.textContent = summaryParts.join(" · ");
 
-    targetSelect.innerHTML = options.sessions
-      .map(
-        (s) =>
-          `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)} (${s.tabs?.length ?? 0} tabs)</option>`
-      )
-      .join("");
+    targetSelect.setOptions(
+      options.sessions.map((s) => ({
+        value: s.id,
+        label: `${s.name} (${s.tabs?.length ?? 0} tabs)`,
+      }))
+    );
 
     const syncTargetVisibility = () => {
       const mode = [...modeInputs].find((r) => r.checked)?.value ?? "new";
       const showTarget = mode === "replace" || mode === "merge";
-      targetSelect.classList.toggle("hidden", !showTarget || options.sessions.length === 0);
-      if (showTarget && options.similarSession && !targetSelect.value) {
-        targetSelect.value = options.similarSession.id;
+      targetSelect.setHidden(!showTarget || options.sessions.length === 0);
+      if (showTarget && options.similarSession) {
+        targetSelect.setValue(options.similarSession.id);
+      } else if (showTarget && options.sessions[0]) {
+        targetSelect.setValue(options.sessions[0].id);
       }
     };
 
@@ -1009,7 +1027,7 @@ async function showSaveSessionModal(options: SaveSessionModalOptions): Promise<S
     if (options.similarSession) {
       const replaceRadio = [...modeInputs].find((r) => r.value === "replace");
       if (replaceRadio) replaceRadio.checked = true;
-      targetSelect.value = options.similarSession.id;
+      targetSelect.setValue(options.similarSession.id);
     } else {
       const newRadio = [...modeInputs].find((r) => r.value === "new");
       if (newRadio) newRadio.checked = true;
@@ -1030,14 +1048,14 @@ async function showSaveSessionModal(options: SaveSessionModalOptions): Promise<S
     const onConfirm = () => {
       const mode = ([...modeInputs].find((r) => r.checked)?.value ?? "new") as SaveSessionPayload["mode"];
       const name = input.value.trim() || options.defaultName;
-      if ((mode === "replace" || mode === "merge") && !targetSelect.value) {
+      if ((mode === "replace" || mode === "merge") && !targetSelect.getValue()) {
         showToast("Choose a session to update.");
         return;
       }
       close({
         name,
         mode,
-        targetSessionId: mode === "new" ? undefined : targetSelect.value,
+        targetSessionId: mode === "new" ? undefined : targetSelect.getValue(),
       });
     };
     const onBackdrop = (event: MouseEvent) => {
@@ -3037,7 +3055,7 @@ function updateMoveToSectionPopover(): void {
     return;
   }
   pop.innerHTML = `
-    <div class="ctx-menu-header">Move to section</div>
+    <div class="menu-panel-header">Move to section</div>
     <div class="px-1 pb-1">${renderSectionPickerRows(sections)}</div>
   `;
 }
@@ -3137,6 +3155,45 @@ function updateSelectionUI() {
 }
 
 function setupListeners() {
+  const sortSelectRoot = document.getElementById("sort-select");
+  if (sortSelectRoot) {
+    sortSelectHandle = mountCustomSelect(sortSelectRoot, {
+      options: [...SORT_SELECT_OPTIONS],
+      value: sortOption,
+      compact: true,
+      ariaLabel: "Sort by",
+      onChange: (value) => {
+        sortOption = value;
+        saveSettings();
+        render();
+      },
+    });
+  }
+
+  const restoreTargetRoot = document.getElementById("restore-target-window");
+  if (restoreTargetRoot) {
+    restoreTargetSelect = mountCustomSelect(restoreTargetRoot, {
+      block: true,
+      ariaLabel: "Open in",
+      value: "new",
+      options: [
+        { value: "new", label: "New window" },
+        { value: "current", label: "Current window" },
+      ],
+    });
+  }
+
+  const saveSessionTargetRoot = document.getElementById("save-session-target");
+  if (saveSessionTargetRoot) {
+    saveSessionTargetSelect = mountCustomSelect(saveSessionTargetRoot, {
+      block: true,
+      ariaLabel: "Existing session",
+      options: [],
+      value: "",
+    });
+    saveSessionTargetSelect.setHidden(true);
+  }
+
   document.getElementById("btn-refresh")?.addEventListener("click", () => {
     fetchTabs();
   });
@@ -3936,6 +3993,7 @@ function setupListeners() {
   });
 
   document.addEventListener("click", () => {
+    closeAllCustomSelects();
     document.getElementById("sidebar-context-menu")?.classList.add("hidden");
     document.getElementById("tab-section-context-menu")?.classList.add("hidden");
     document.getElementById("section-header-context-menu")?.classList.add("hidden");
@@ -3951,6 +4009,7 @@ function setupListeners() {
   });
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
+    closeAllCustomSelects();
     document.getElementById("sidebar-context-menu")?.classList.add("hidden");
     document.getElementById("tab-section-context-menu")?.classList.add("hidden");
     document.getElementById("section-header-context-menu")?.classList.add("hidden");
@@ -3974,12 +4033,6 @@ function setupListeners() {
 
   document.getElementById("quality-high")?.addEventListener("click", () => {
     thumbnailQuality = "high";
-    saveSettings();
-    render();
-  });
-
-  document.getElementById("sort-select")?.addEventListener("change", (event) => {
-    sortOption = (event.target as HTMLSelectElement).value;
     saveSettings();
     render();
   });

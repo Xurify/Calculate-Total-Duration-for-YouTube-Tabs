@@ -521,6 +521,7 @@ let liveTickInFlight = false;
 let lastNowPlayingDetectAt = 0;
 let nowPlayingDetectPromise: Promise<VideoData[]> | null = null;
 let nowPlayingRefineTimeout: ReturnType<typeof setTimeout> | null = null;
+let lastVolumeInputTime = 0;
 
 const app = document.getElementById("app")!;
 
@@ -974,7 +975,15 @@ function bindNowPlayingCardEvents(): void {
     const tabId = parseInt(card.dataset.npTabId || "0", 10);
     const video = tabId ? findVideoByTabId(tabId) : undefined;
     if (!tabId || !video) return;
+    lastVolumeInputTime = Date.now();
     const value = parseInt((target as HTMLInputElement).value, 10);
+    const volumeIcon = card.querySelector(".np-volume-icon") as SVGElement | null;
+    if (volumeIcon) {
+      const vol = value / 100;
+      const paths =
+        vol === 0 ? VOLUME_ICON_MUTE : vol < 0.35 ? VOLUME_ICON_LOW : vol < 0.7 ? VOLUME_ICON_MED : VOLUME_ICON_HIGH;
+      volumeIcon.innerHTML = paths;
+    }
     const state = await setPlaybackVolume(tabId, value / 100);
     if (!state) return;
     const activelyPlaying = applyLocalPlaybackControl(tabId, video, state);
@@ -1050,8 +1059,11 @@ function updateNowPlayingCard(
     playBtn.title = state.paused ? "Play" : "Pause";
   }
   if (volumeInput) {
-    const displayVolume = state.muted ? 0 : Math.round(state.volume * 100);
-    volumeInput.value = String(displayVolume);
+    const isInteracting = document.activeElement === volumeInput && (Date.now() - lastVolumeInputTime < 1500);
+    if (!isInteracting) {
+      const displayVolume = state.muted ? 0 : Math.round(state.volume * 100);
+      volumeInput.value = String(displayVolume);
+    }
   }
   if (volumeIcon) {
     const vol = state.muted ? 0 : state.volume;

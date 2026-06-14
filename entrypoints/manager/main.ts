@@ -2882,7 +2882,7 @@ function renderVideoGrid(videos: VideoData[], sectionColorIndex?: number | "unso
                         ${video.isLive ? 'LIVE' : formatCompact(video.seconds)}
                     </div>
 
-                    <div class="manager-card-progress-wrap absolute bottom-0 left-0 right-0 h-0.5 bg-surface/30 transition-opacity" style="opacity: ${!video.isLive && video.seconds > 0 && watchedPercent > 0 ? 1 : 0}">
+                    <div class="manager-card-progress-wrap absolute bottom-0 left-0 right-0 h-[3px] bg-surface/30 transition-opacity" style="opacity: ${!video.isLive && video.seconds > 0 && watchedPercent > 0 ? 1 : 0}">
                         <div class="manager-card-progress h-full bg-accent" style="width: ${watchedPercent}%"></div>
                     </div>
 

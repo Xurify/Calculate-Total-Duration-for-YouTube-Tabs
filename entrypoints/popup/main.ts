@@ -838,8 +838,7 @@ function setupApp() {
           <div class="flex gap-2.5 items-center">
             <button type="button" class="np-thumb-btn relative shrink-0 w-[5.5rem] aspect-video rounded-sm overflow-hidden bg-surface-hover border border-white/10 group/thumb p-0 cursor-pointer" title="Open tab">
               <img class="np-thumb w-full h-full object-cover hidden" alt="" width="88" height="50" />
-              <span class="np-indicator absolute top-1 left-1 w-1.5 h-1.5 rounded-full bg-accent shrink-0 hidden"></span>
-              <div class="absolute bottom-0 left-0 right-0 h-px bg-black/50">
+              <div class="absolute bottom-0 left-0 right-0 h-[3px] bg-black/50">
                 <div class="np-progress h-full bg-accent transition-[width] duration-500" style="width: 0%"></div>
               </div>
             </button>
@@ -1052,7 +1051,6 @@ function updateNowPlayingCard(
   const playBtn = card.querySelector(".np-play-pause") as HTMLButtonElement | null;
   const volumeInput = card.querySelector(".np-volume") as HTMLInputElement | null;
   const volumeIcon = card.querySelector(".np-volume-icon") as SVGElement | null;
-  const indicator = card.querySelector(".np-indicator") as HTMLElement | null;
 
   if (playBtn) {
     playBtn.innerHTML = state.paused ? PLAY_ICON : PAUSE_ICON;
@@ -1074,11 +1072,6 @@ function updateNowPlayingCard(
   card.className = `px-3 py-2 transition-[background-color,box-shadow] duration-300 ${
     isActivelyPlaying ? "bg-accent/5 shadow-[inset_2px_0_0_0_#ff0000]" : "shadow-[inset_2px_0_0_0_rgba(255,255,255,0.08)]"
   }`;
-  if (indicator) {
-    indicator.classList.toggle("hidden", !isActivelyPlaying);
-    indicator.classList.toggle("animate-pulse", isActivelyPlaying);
-    indicator.classList.toggle("shadow-[0_0_8px_rgba(255,0,0,0.8)]", isActivelyPlaying);
-  }
 }
 
 function renderNowPlayingCard(primary: VideoData | null, confirmedPlaying: VideoData[]): void {
@@ -1318,7 +1311,7 @@ function updateVideoList(videos: VideoData[]) {
             <div class="relative shrink-0 w-[5.5rem] aspect-video rounded-sm overflow-hidden bg-surface-hover border border-white/10">
               <img class="meta-thumb w-full h-full object-cover hidden" alt="" />
               <div class="meta-duration-badge absolute bottom-1 right-1 px-1 py-px rounded-sm text-[10px] font-medium bg-black/80 text-white tabular-nums leading-none"></div>
-              <div class="meta-progress-track absolute bottom-0 left-0 right-0 h-px bg-black/40">
+              <div class="meta-progress-track absolute bottom-0 left-0 right-0 h-[3px] bg-black/40">
                 <div class="meta-progress h-full bg-accent transition-[width] duration-700" style="width: 0%"></div>
               </div>
             </div>

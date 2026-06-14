@@ -35,6 +35,8 @@ let lastMetadata: CachedMetadataPayload = {
 };
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let lastReadTime = 0;
+const MAX_WAIT_MS = 1000;
 let cachedLanguageVideoId: string | null = null;
 let cachedLanguage: { language?: string | null; languageName?: string | null } = {
   language: null,
@@ -187,11 +189,20 @@ function readMetadataFromDom(): CachedMetadataPayload {
 }
 
 function scheduleRead(ctx: { setTimeout: (fn: () => void, ms: number) => unknown }) {
-  if (debounceTimer != null) clearTimeout(debounceTimer as unknown as number);
+  const now = Date.now();
+  const timeSinceLastRead = now - lastReadTime;
+
+  if (debounceTimer != null) {
+    if (timeSinceLastRead > MAX_WAIT_MS) {
+      return;
+    }
+    clearTimeout(debounceTimer as unknown as number);
+  }
   debounceTimer = ctx.setTimeout(() => {
     debounceTimer = null;
     if (!isWatchOrShorts()) return;
     lastMetadata = readMetadataFromDom();
+    lastReadTime = Date.now();
     perf.totalReads++;
     perf.mutationsSinceLastRead = 0;
   }, DEBOUNCE_MS) as unknown as ReturnType<typeof setTimeout>;
@@ -256,8 +267,21 @@ export default defineContentScript({
 
     observer.observe(target, {
       childList: true,
-      subtree: true,
+      subtree: false,
     });
+
+    const titleEl = document.querySelector("title");
+    if (titleEl) {
+      const titleObserver = new MutationObserver(() => {
+        perf.totalMutations++;
+        perf.mutationsSinceLastRead++;
+        scheduleRead(ctx);
+      });
+      titleObserver.observe(titleEl, { childList: true });
+    }
+
+    ctx.addEventListener(document, "durationchange", () => scheduleRead(ctx), true);
+    ctx.addEventListener(document, "loadedmetadata", () => scheduleRead(ctx), true);
 
     lastMetadata = readMetadataFromDom();
     perf.totalReads++;

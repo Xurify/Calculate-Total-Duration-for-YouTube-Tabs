@@ -318,6 +318,7 @@ async function fetchTabs(skipInitialRender = false) {
       url,
       suspended: tab.discarded || false,
       active: tab.active,
+      audible: tab.audible || false,
       isLive: false,
       windowId: tab.windowId,
     };
@@ -432,6 +433,17 @@ async function probeTabsMetadata() {
   const activeTabPromises = allVideos.map(async (video) => {
     if (video.suspended) return;
 
+    const hasValidMetadata = video.seconds > 0 &&
+      video.title !== "YouTube Video" &&
+      video.title !== "YouTube" &&
+      !/^\(\d+\)\s*/.test(video.title) &&
+      video.language !== undefined;
+
+    // Skip probing if the tab is inactive and inaudible, and we already have valid cached metadata
+    if (hasValidMetadata && !video.active && !video.audible) {
+      return;
+    }
+
     const expectedVideoId = getVideoIdFromUrl(video.url);
 
     try {
@@ -451,35 +463,24 @@ async function probeTabsMetadata() {
         video.isLive = contentMeta.isLive;
         video.language = contentMeta.language;
         video.languageName = contentMeta.languageName;
-        const verifyResults = await browser.scripting.executeScript({
-          target: { tabId: video.id },
-          world: "MAIN",
-          func: () => (window as unknown as { ytInitialPlayerResponse?: { videoDetails?: { videoId?: string } } }).ytInitialPlayerResponse?.videoDetails?.videoId ?? null,
-        }).catch(() => null);
-        const pageVideoId = verifyResults?.[0]?.result ?? null;
-        if (pageVideoId === expectedVideoId) {
-          requestMetadataUpdate(video.url, {
-            seconds: video.seconds,
-            title: video.title,
-            channelName: video.channelName,
-            currentTime: video.currentTime,
-            isLive: video.isLive,
-            videoId: expectedVideoId ?? undefined,
-            language: video.language,
-            languageName: video.languageName,
-          });
-        }
+        
+        requestMetadataUpdate(video.url, {
+          seconds: video.seconds,
+          title: video.title,
+          channelName: video.channelName,
+          currentTime: video.currentTime,
+          isLive: video.isLive,
+          videoId: expectedVideoId ?? undefined,
+          language: video.language,
+          languageName: video.languageName,
+        });
         return;
       }
     } catch {
       // No content script — fall through to inject
     }
 
-    const hasValidMetadata = video.seconds > 0 &&
-      video.title !== "YouTube Video" &&
-      video.title !== "YouTube" &&
-      !/^\(\d+\)\s*/.test(video.title) &&
-      video.language !== undefined;
+
 
     try {
       const results = await browser.scripting.executeScript({

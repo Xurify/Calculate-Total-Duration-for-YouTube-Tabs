@@ -1414,6 +1414,16 @@ async function getYouTubeTabs(): Promise<void> {
     const activeTabPromises = videoData.map(async (video) => {
       if (video.suspended) return;
 
+      const hasValidMetadata = video.seconds > 0 &&
+                               video.title !== "YouTube Video" &&
+                               video.title !== "YouTube" &&
+                               !/^\(\d+\)\s*/.test(video.title);
+
+      // Skip probing if the tab is inactive and inaudible, and we already have valid cached metadata
+      if (hasValidMetadata && !video.active && !video.audible) {
+        return;
+      }
+
       const expectedVideoId = getVideoIdFromUrl(video.url);
 
       try {
@@ -1430,22 +1440,15 @@ async function getYouTubeTabs(): Promise<void> {
           video.seconds = contentMeta.seconds;
           video.currentTime = contentMeta.currentTime;
           video.isLive = contentMeta.isLive;
-          const verifyResults = await browser.scripting.executeScript({
-            target: { tabId: video.id },
-            world: "MAIN",
-            func: () => (window as unknown as { ytInitialPlayerResponse?: { videoDetails?: { videoId?: string } } }).ytInitialPlayerResponse?.videoDetails?.videoId ?? null,
-          }).catch(() => null);
-          const pageVideoId = verifyResults?.[0]?.result ?? null;
-          if (pageVideoId === expectedVideoId) {
-            requestMetadataUpdate(video.url, {
-              seconds: video.seconds,
-              title: video.title,
-              channelName: video.channelName,
-              currentTime: video.currentTime,
-              isLive: video.isLive,
-              videoId: expectedVideoId ?? undefined,
-            });
-          }
+          
+          requestMetadataUpdate(video.url, {
+            seconds: video.seconds,
+            title: video.title,
+            channelName: video.channelName,
+            currentTime: video.currentTime,
+            isLive: video.isLive,
+            videoId: expectedVideoId ?? undefined,
+          });
           scheduleProbeRender();
           return;
         }
@@ -1453,12 +1456,7 @@ async function getYouTubeTabs(): Promise<void> {
         // No content script (e.g. tab loaded before extension) — fall through to inject
       }
 
-      // STALE-WHILE-REVALIDATE LOGIC
-      // If we have a valid duration and title, we only NEED to probe for currentTime
-      const hasValidMetadata = video.seconds > 0 &&
-                               video.title !== "YouTube Video" &&
-                               video.title !== "YouTube" &&
-                               !/^\(\d+\)\s*/.test(video.title);
+
 
       try {
           const results = await browser.scripting.executeScript({

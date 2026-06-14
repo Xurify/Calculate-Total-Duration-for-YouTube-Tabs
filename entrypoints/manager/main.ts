@@ -299,6 +299,11 @@ async function fetchTabs(skipInitialRender = false) {
     }
   });
 
+  const oldVideosMap = new Map<number, VideoData>();
+  allVideos.forEach((video) => {
+    if (video.id) oldVideosMap.set(video.id, video);
+  });
+
   allVideos = youtubeTabs.map((tab, index) => {
     const url = tab.url!;
     const normalizedUrl = normalizeYoutubeUrl(url);
@@ -316,8 +321,23 @@ async function fetchTabs(skipInitialRender = false) {
       isLive: false,
       windowId: tab.windowId,
     };
-    const cached = lookupCachedMetadata(metadataRecord, url);
-    if (cached) applyCachedMetadataToVideo(video, cached);
+
+    const oldVideo = oldVideosMap.get(video.id);
+    if (oldVideo && normalizeYoutubeUrl(oldVideo.url) === normalizedUrl) {
+      video.title = oldVideo.title;
+      video.channelName = oldVideo.channelName;
+      video.seconds = oldVideo.seconds;
+      video.currentTime = oldVideo.currentTime;
+      video.isLive = oldVideo.isLive;
+      video.language = oldVideo.language;
+      video.languageName = oldVideo.languageName;
+      video.videoId = oldVideo.videoId;
+      video.audible = oldVideo.audible;
+      video.paused = oldVideo.paused;
+    } else {
+      const cached = lookupCachedMetadata(metadataRecord, url);
+      if (cached) applyCachedMetadataToVideo(video, cached);
+    }
     return video;
   });
 
@@ -757,11 +777,6 @@ function windowBadgeHtml(video: VideoData): string {
   return `<span class="text-[10px] bg-surface-elevated border border-border text-text-secondary px-1.5 py-0.5 rounded-full font-medium shrink-0 tabular-nums" title="Open in ${escapeHtml(label)}">${escapeHtml(label)}</span>`;
 }
 
-function windowThumbnailBadgeHtml(video: VideoData): string {
-  const label = windowLabelForVideo(video);
-  if (!label) return "";
-  return `<span class="absolute bottom-6 left-1 z-[5] px-1.5 py-0.5 bg-black/75 rounded text-[10px] font-medium text-white backdrop-blur-sm tabular-nums pointer-events-none">${escapeHtml(label)}</span>`;
-}
 
 function liveVideoFingerprintPart(video: VideoData): string {
   return `${video.id}|${video.windowId ?? ""}|${video.url}|${video.title}|${video.channelName}|${video.seconds}|${video.isLive ? 1 : 0}`;
@@ -2039,7 +2054,7 @@ function scheduleFetchTabsFromEvents() {
   if (fetchTabsFromEventsTimeout != null) clearTimeout(fetchTabsFromEventsTimeout);
   fetchTabsFromEventsTimeout = setTimeout(() => {
     fetchTabsFromEventsTimeout = null;
-    fetchTabs();
+    fetchTabs(true);
   }, FETCH_TABS_DEBOUNCE_MS);
 }
 
@@ -2862,7 +2877,6 @@ function renderVideoGrid(videos: VideoData[], sectionColorIndex?: number | "unso
         ? `<img ${imgAttr} class="manager-card-thumb w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="eager" decoding="async" alt=""${imgDragOff} />`
         : `<div class="w-full h-full flex items-center justify-center text-text-muted/20"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="12" cy="12" r="3"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>`
       }
-                    ${windowThumbnailBadgeHtml(video)}
                     <div class="manager-card-duration absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-mono font-medium text-white backdrop-blur-sm tabular-nums">
                         ${video.isLive ? 'LIVE' : formatCompact(video.seconds)}
                     </div>
@@ -4169,6 +4183,10 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   browser.runtime.onMessage.addListener((message) => {
+    if (isStoreUpdatedMessage(message)) {
+      handleStoreUpdated(message);
+      return;
+    }
     if (message.action === "tab-synced") {
       const video = allVideos.find((candidate) => candidate.id === message.tabId);
       if (video) {

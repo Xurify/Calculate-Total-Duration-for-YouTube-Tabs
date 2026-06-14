@@ -24,8 +24,8 @@ let sortByDuration = false;
 let currentView: "dashboard" | "settings" = "dashboard";
 let popupWindowId: number | null = null;
 let lastPlayingTabId: number | null = null;
-let resolvedNowPlayingTabId: number | null = null;
-let playbackScanOffset = 0;
+let resolvedNowPlayingTabIds: number[] = [];
+let pinnedNowPlayingTabId: number | null = null;
 
 const LAST_PLAYING_SESSION_KEY = "lastPlayingByWindow";
 
@@ -181,29 +181,49 @@ function isVideoEligibleForNowPlaying(video: VideoData | undefined): video is Vi
   return true;
 }
 
-function getNowPlayingVideo(): VideoData | null {
-  if (resolvedNowPlayingTabId != null) {
-    const resolved = findVideoByTabId(resolvedNowPlayingTabId);
-    if (isVideoEligibleForNowPlaying(resolved)) return resolved;
-    resolvedNowPlayingTabId = null;
+function getNowPlayingTabIds(): Set<number> {
+  return new Set(resolvedNowPlayingTabIds);
+}
+
+function isTabActivelyPlaying(video: VideoData): boolean {
+  return resolvedNowPlayingTabIds.includes(video.id);
+}
+
+function nowPlayingIdsFingerprint(): string {
+  return resolvedNowPlayingTabIds.join(",");
+}
+
+function sortNowPlayingCandidates(videos: VideoData[]): VideoData[] {
+  return [...videos].sort((a, b) => b.currentTime - a.currentTime);
+}
+
+function getPrimaryNowPlayingSync(): VideoData | null {
+  if (resolvedNowPlayingTabIds.length > 0) {
+    for (const id of resolvedNowPlayingTabIds) {
+      const video = findVideoByTabId(id);
+      if (isVideoEligibleForNowPlaying(video)) return video;
+    }
   }
 
-  const inWindow = getVideosInPopupWindow();
+  const audible = sortNowPlayingCandidates(getVideosInPopupWindow().filter((video) => video.audible));
+  if (audible.length > 0) return audible[0] ?? null;
 
-  const audible = inWindow.filter((video) => video.audible);
-  if (audible.length > 0) {
-    const playing = audible[0] ?? null;
-    if (playing) void persistLastPlayingTabId(playing.id);
-    return playing;
+  if (pinnedNowPlayingTabId) {
+    const pinned = findVideoByTabId(pinnedNowPlayingTabId);
+    if (isVideoEligibleForNowPlaying(pinned)) return pinned;
   }
 
   if (lastPlayingTabId) {
     const last = findVideoByTabId(lastPlayingTabId);
     if (isVideoEligibleForNowPlaying(last)) return last;
-    void clearLastPlayingTabId();
   }
 
-  return inWindow.find((video) => video.active) ?? null;
+  return getVideosInPopupWindow().find((video) => video.active) ?? null;
+}
+
+function getVideosForUpNext(): VideoData[] {
+  const playingIds = getNowPlayingTabIds();
+  return getSortedVideos().filter((video) => !playingIds.has(video.id));
 }
 
 function getNowPlayingTabId(): number | null {
@@ -213,7 +233,7 @@ function getNowPlayingTabId(): number | null {
     const pinned = videoData.find((video) => video.id === tabId);
     if (pinned && !pinned.excluded && !pinned.suspended) return tabId;
   }
-  return getNowPlayingVideo()?.id ?? null;
+  return getPrimaryNowPlayingSync()?.id ?? null;
 }
 
 function findVideoByTabId(tabId: number): VideoData | undefined {
@@ -227,10 +247,12 @@ interface PlaybackState {
   currentTime: number;
 }
 
-const PLAYBACK_SCAN_BATCH = 40;
-
 function isPlaybackActive(state: PlaybackState): boolean {
   return !state.paused && !state.muted && state.volume > 0;
+}
+
+function isConfirmedPlaying(video: VideoData, playback: PlaybackState): boolean {
+  return !!video.audible && isPlaybackActive(playback);
 }
 
 async function refreshWindowAudibleFlags(): Promise<void> {
@@ -252,79 +274,129 @@ async function applyPlaybackStateToVideo(video: VideoData): Promise<PlaybackStat
   if (!playback) return null;
   video.paused = playback.paused;
   video.currentTime = playback.currentTime;
-  video.audible = isPlaybackActive(playback);
   return playback;
 }
 
-function pickBestPlayingVideo(candidates: VideoData[]): VideoData | null {
-  if (candidates.length === 0) return null;
-  if (candidates.length === 1) return candidates[0] ?? null;
-  return [...candidates].sort((a, b) => b.currentTime - a.currentTime)[0] ?? null;
-}
-
-async function refreshNowPlayingDetection(): Promise<VideoData | null> {
+async function refreshNowPlayingDetectionInner(): Promise<VideoData[]> {
   await refreshWindowAudibleFlags();
   const inWindow = getVideosInPopupWindow();
   if (inWindow.length === 0) {
-    resolvedNowPlayingTabId = null;
-    return null;
+    resolvedNowPlayingTabIds = [];
+    pinnedNowPlayingTabId = null;
+    return [];
   }
 
   const probeIds = new Set<number>();
   for (const video of inWindow) {
-    if (
-      video.audible ||
-      video.active ||
-      video.id === lastPlayingTabId ||
-      video.id === resolvedNowPlayingTabId
-    ) {
-      probeIds.add(video.id);
-    }
+    if (video.audible) probeIds.add(video.id);
   }
-
-  let probeList = inWindow.filter((video) => probeIds.has(video.id));
-  const unscanned = inWindow.filter((video) => !probeIds.has(video.id));
-  if (unscanned.length > 0) {
-    const batch = unscanned.slice(playbackScanOffset, playbackScanOffset + PLAYBACK_SCAN_BATCH);
-    probeList = [...probeList, ...batch];
-    playbackScanOffset = (playbackScanOffset + PLAYBACK_SCAN_BATCH) % unscanned.length;
-  }
+  if (lastPlayingTabId) probeIds.add(lastPlayingTabId);
+  if (pinnedNowPlayingTabId) probeIds.add(pinnedNowPlayingTabId);
+  const active = inWindow.find((video) => video.active);
+  if (active) probeIds.add(active.id);
 
   const actuallyPlaying: VideoData[] = [];
   await Promise.all(
-    probeList.map(async (video) => {
-      const playback = await applyPlaybackStateToVideo(video);
-      if (playback && isPlaybackActive(playback)) {
-        actuallyPlaying.push(video);
-      }
-    })
+    inWindow
+      .filter((video) => probeIds.has(video.id))
+      .map(async (video) => {
+        const playback = await applyPlaybackStateToVideo(video);
+        if (playback && isConfirmedPlaying(video, playback)) {
+          actuallyPlaying.push(video);
+        }
+      })
   );
 
-  const picked = pickBestPlayingVideo(actuallyPlaying);
-  if (picked) {
-    resolvedNowPlayingTabId = picked.id;
-    await persistLastPlayingTabId(picked.id);
-    return picked;
+  if (actuallyPlaying.length > 0) {
+    const sorted = sortNowPlayingCandidates(actuallyPlaying);
+    resolvedNowPlayingTabIds = sorted.map((video) => video.id);
+    pinnedNowPlayingTabId = null;
+    const primary = sorted[0];
+    if (primary) await persistLastPlayingTabId(primary.id);
+    return sorted;
   }
 
-  resolvedNowPlayingTabId = null;
+  resolvedNowPlayingTabIds = [];
 
   if (lastPlayingTabId) {
     const last = findVideoByTabId(lastPlayingTabId);
     if (isVideoEligibleForNowPlaying(last)) {
-      resolvedNowPlayingTabId = last.id;
       await applyPlaybackStateToVideo(last);
-      return last;
+      pinnedNowPlayingTabId = last.id;
+      return [last];
     }
     await clearLastPlayingTabId();
   }
 
-  const active = inWindow.find((video) => video.active) ?? null;
   if (active) {
-    resolvedNowPlayingTabId = active.id;
     await applyPlaybackStateToVideo(active);
+    pinnedNowPlayingTabId = active.id;
+    return [active];
   }
-  return active;
+
+  pinnedNowPlayingTabId = null;
+  return [];
+}
+
+async function refreshNowPlayingDetection(): Promise<VideoData[]> {
+  if (nowPlayingDetectPromise) return nowPlayingDetectPromise;
+  nowPlayingDetectPromise = refreshNowPlayingDetectionInner().finally(() => {
+    nowPlayingDetectPromise = null;
+  });
+  return nowPlayingDetectPromise;
+}
+
+function scheduleNowPlayingRefine(): void {
+  if (nowPlayingRefineTimeout != null) clearTimeout(nowPlayingRefineTimeout);
+  nowPlayingRefineTimeout = setTimeout(() => {
+    nowPlayingRefineTimeout = null;
+    void refineNowPlaying();
+  }, NOW_PLAYING_REFINE_DEBOUNCE_MS);
+}
+
+function applyLocalPlaybackControl(tabId: number, video: VideoData, state: PlaybackState): boolean {
+  video.paused = state.paused;
+  video.currentTime = state.currentTime;
+  const activelyPlaying = isPlaybackActive(state);
+  if (activelyPlaying) {
+    if (!resolvedNowPlayingTabIds.includes(tabId)) {
+      resolvedNowPlayingTabIds = sortNowPlayingCandidates([
+        video,
+        ...resolvedNowPlayingTabIds
+          .map((id) => findVideoByTabId(id))
+          .filter(isVideoEligibleForNowPlaying),
+      ]).map((entry) => entry.id);
+    }
+    pinnedNowPlayingTabId = null;
+  } else {
+    resolvedNowPlayingTabIds = resolvedNowPlayingTabIds.filter((id) => id !== tabId);
+    pinnedNowPlayingTabId = tabId;
+  }
+  return activelyPlaying;
+}
+
+function syncUpNextIfNowPlayingChanged(previousIds: string): void {
+  if (nowPlayingIdsFingerprint() === previousIds) return;
+  resetVideoListFingerprint();
+  updateVideoList(getVideosForUpNext());
+}
+
+function updateAlsoPlayingLine(confirmedPlaying: VideoData[], primary: VideoData): void {
+  const alsoEl = document.getElementById("np-also-playing");
+  if (!alsoEl) return;
+  const others = confirmedPlaying.filter((video) => video.id !== primary.id);
+  if (others.length === 0) {
+    alsoEl.classList.add("hidden");
+    alsoEl.textContent = "";
+    return;
+  }
+  const preview = others
+    .slice(0, 2)
+    .map((video) => video.title)
+    .join(", ");
+  const extra = others.length > 2 ? ` (+${others.length - 2} more)` : "";
+  alsoEl.textContent = `Also playing: ${preview}${extra}`;
+  alsoEl.classList.remove("hidden");
 }
 
 async function getPlaybackState(tabId: number): Promise<PlaybackState | null> {
@@ -423,6 +495,12 @@ async function setPlaybackVolume(tabId: number, volume: number): Promise<Playbac
 const PLAY_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
 const PAUSE_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>`;
 
+function getConfirmedNowPlayingVideos(): VideoData[] {
+  return resolvedNowPlayingTabIds
+    .map((id) => findVideoByTabId(id))
+    .filter(isVideoEligibleForNowPlaying);
+}
+
 function getThumbnailUrl(url: string): string | null {
   const id = getVideoIdFromUrl(url);
   return id ? `https://i.ytimg.com/vi/${id}/mqdefault.jpg` : null;
@@ -436,7 +514,13 @@ let probeRenderTimeout: ReturnType<typeof setTimeout> | null = null;
 const PROBE_RENDER_DEBOUNCE_MS = 100;
 let lastVideoListFingerprint = "";
 const LIVE_TICK_MS = 1000;
+const NOW_PLAYING_DETECT_MS = 5000;
+const NOW_PLAYING_REFINE_DEBOUNCE_MS = 300;
 let liveTickInterval: ReturnType<typeof setInterval> | null = null;
+let liveTickInFlight = false;
+let lastNowPlayingDetectAt = 0;
+let nowPlayingDetectPromise: Promise<VideoData[]> | null = null;
+let nowPlayingRefineTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const app = document.getElementById("app")!;
 
@@ -445,14 +529,13 @@ function resetVideoListFingerprint(): void {
 }
 
 function videoListStructureFingerprint(videos: VideoData[]): string {
-  const nowPlayingId = getNowPlayingTabIdForList();
   const sig = videos
     .map(
       (video) =>
         `${video.id}|${video.url}|${video.title}|${video.channelName}|${video.seconds}|${video.isLive ? 1 : 0}|${video.excluded ? 1 : 0}|${video.suspended ? 1 : 0}|${video.active ? 1 : 0}|${video.audible ? 1 : 0}`
     )
     .join(";");
-  return `${sortByDuration ? 1 : 0}|np:${nowPlayingId ?? 0}|${sig}`;
+  return `${sortByDuration ? 1 : 0}|np:${nowPlayingIdsFingerprint()}|${sig}`;
 }
 
 function getQueueStats(): {
@@ -487,34 +570,64 @@ function stopLiveTick(): void {
     clearInterval(liveTickInterval);
     liveTickInterval = null;
   }
+  if (nowPlayingRefineTimeout != null) {
+    clearTimeout(nowPlayingRefineTimeout);
+    nowPlayingRefineTimeout = null;
+  }
+  liveTickInFlight = false;
 }
 
 async function livePlaybackTick(): Promise<void> {
+  if (liveTickInFlight) return;
   if (currentView !== "dashboard" || !document.getElementById("stat-remaining")) return;
 
-  const previousTabId = resolvedNowPlayingTabId;
-  const video = await refreshNowPlayingDetection();
-  if (!video) {
+  liveTickInFlight = true;
+  try {
+    const primaryId = getNowPlayingTabId();
+    const primary = primaryId ? findVideoByTabId(primaryId) : undefined;
+
+    if (primary) {
+      const card = document.getElementById("np-card");
+      const playback = await getPlaybackState(primary.id);
+      if (card && playback) {
+        primary.paused = playback.paused;
+        primary.currentTime = playback.currentTime;
+        updateNowPlayingCard(card, primary, playback, isTabActivelyPlaying(primary));
+      }
+    }
+
     refreshQueueStatsFromState();
-    if (previousTabId !== resolvedNowPlayingTabId) syncPopulateNowPlaying();
-    return;
+
+    const now = Date.now();
+    if (now - lastNowPlayingDetectAt < NOW_PLAYING_DETECT_MS) return;
+    lastNowPlayingDetectAt = now;
+
+    const previousIds = nowPlayingIdsFingerprint();
+    const previousPrimaryId = primaryId;
+    const videos = await refreshNowPlayingDetection();
+    const nextPrimary = videos[0] ?? null;
+
+    if (nowPlayingIdsFingerprint() !== previousIds) {
+      renderNowPlayingCard(nextPrimary, getConfirmedNowPlayingVideos());
+      if (nextPrimary) {
+        const card = document.getElementById("np-card");
+        const playback = await getPlaybackState(nextPrimary.id);
+        if (card && playback) {
+          nextPrimary.paused = playback.paused;
+          nextPrimary.currentTime = playback.currentTime;
+          updateNowPlayingCard(card, nextPrimary, playback, isTabActivelyPlaying(nextPrimary));
+        }
+      }
+      syncUpNextIfNowPlayingChanged(previousIds);
+      return;
+    }
+
+    if (nextPrimary && nextPrimary.id === previousPrimaryId) {
+      updateAlsoPlayingLine(getConfirmedNowPlayingVideos(), nextPrimary);
+    }
+  } finally {
+    liveTickInFlight = false;
   }
-
-  const playback = await getPlaybackState(video.id);
-  if (playback) {
-    video.currentTime = playback.currentTime;
-    video.paused = playback.paused;
-    video.audible = isPlaybackActive(playback);
-    updateNowPlayingControls(playback);
-  }
-
-  if (previousTabId !== video.id) applyNowPlayingVideoToDom(video);
-
-  refreshQueueStatsFromState();
-  updateNowPlayingTimeFromVideo(video);
-
-  const listItem = document.getElementById(`video-item-${video.id}`);
-  if (listItem) updateVideoListItem(listItem, video);
 }
 
 function renderNow(): void {
@@ -601,8 +714,8 @@ function renderNow(): void {
   startLiveTick();
   void refineNowPlaying();
 
-  const sorted = getSortedVideos();
-  const fp = videoListStructureFingerprint(sorted);
+  const queueVideos = getVideosForUpNext();
+  const fp = videoListStructureFingerprint(queueVideos);
   const listEl = document.getElementById("video-list");
 
   if (fp === lastVideoListFingerprint && listEl) {
@@ -611,7 +724,7 @@ function renderNow(): void {
   }
 
   lastVideoListFingerprint = fp;
-  updateVideoList(sorted);
+  updateVideoList(queueVideos);
 }
 
 function scheduleProbeRender(): void {
@@ -719,37 +832,32 @@ function setupApp() {
         </div>
       </header>
 
-      <section id="now-playing" class="shrink-0 border-b border-white/10 bg-surface-elevated/40 min-h-[5.75rem]">
-        <div id="np-card" class="px-3 py-1.5 transition-[background-color,box-shadow] duration-300">
-          <div class="flex gap-2 items-center">
-            <button id="np-thumb-btn" type="button" class="relative shrink-0 w-36 aspect-video rounded-sm overflow-hidden bg-surface-hover border border-white/10 group/thumb p-0 cursor-pointer" title="Open tab">
-              <img id="np-thumb" alt="" width="144" height="81" class="w-full h-full object-cover transition-transform duration-300 group-hover/thumb:scale-105" />
-              <div class="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/20 transition-colors"></div>
+      <section id="now-playing" class="hidden shrink-0 border-b border-white/10">
+        <div id="np-card" class="px-3 py-2 transition-[background-color,box-shadow] duration-300 bg-accent/5 shadow-[inset_2px_0_0_0_#ff0000]" data-np-tab-id="">
+          <div class="flex gap-2.5 items-center">
+            <button type="button" class="np-thumb-btn relative shrink-0 w-[5.5rem] aspect-video rounded-sm overflow-hidden bg-surface-hover border border-white/10 group/thumb p-0 cursor-pointer" title="Open tab">
+              <img class="np-thumb w-full h-full object-cover hidden" alt="" width="88" height="50" />
+              <span class="np-indicator absolute top-1 left-1 w-1.5 h-1.5 rounded-full bg-accent shrink-0 hidden"></span>
               <div class="absolute bottom-0 left-0 right-0 h-px bg-black/50">
-                <div id="np-progress" class="h-full bg-accent transition-[width] duration-500" style="width: 0%"></div>
+                <div class="np-progress h-full bg-accent transition-[width] duration-500" style="width: 0%"></div>
               </div>
             </button>
             <div class="flex-1 min-w-0 flex flex-col gap-1">
-              <div class="min-w-0">
-                <div class="flex items-center gap-1">
-                  <span class="np-indicator w-1.5 h-1.5 rounded-full bg-text-muted shrink-0"></span>
-                  <span id="np-status" class="text-[10px] font-bold uppercase tracking-wider text-text-muted">Paused</span>
-                </div>
-                <h2 id="np-title" class="text-[13px] font-medium text-text-primary line-clamp-1 leading-tight min-h-[1.125rem] cursor-pointer hover:underline decoration-white/30 underline-offset-2" title="Open tab"></h2>
-                <p id="np-channel" class="text-[11px] text-text-secondary truncate min-h-[1rem]"></p>
-              </div>
-              <div class="flex items-center gap-1.5 min-h-0">
-                <button id="np-play-pause" class="w-7 h-7 shrink-0 flex items-center justify-center rounded-full bg-accent text-white border-0 cursor-pointer hover:bg-[#e60000] active:scale-95 transition-all" title="Play / Pause"></button>
-                <span id="np-time" class="text-[11px] text-text-muted tabular-nums shrink-0 min-w-[4.5rem]"></span>
-                <svg id="np-volume-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-text-muted"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+              <button type="button" class="np-title text-left text-[13px] font-medium text-text-primary line-clamp-1 leading-tight cursor-pointer hover:underline decoration-white/30 underline-offset-2 border-0 bg-transparent p-0 w-full truncate" title="Open tab"></button>
+              <p class="np-channel text-[11px] text-text-secondary truncate"></p>
+              <div class="flex items-center gap-1.5">
+                <button type="button" class="np-play-pause w-7 h-7 shrink-0 flex items-center justify-center rounded-full bg-accent text-white border-0 cursor-pointer hover:bg-[#e60000] active:scale-95 transition-all" title="Play / Pause"></button>
+                <span class="np-time text-[11px] text-text-muted tabular-nums shrink-0 min-w-[4.5rem]"></span>
+                <svg class="np-volume-icon shrink-0 text-text-muted" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
                 <div class="flex-1 min-w-0 flex items-center h-3">
-                  <input id="np-volume" type="range" min="0" max="100" value="100" class="w-full h-1 m-0 p-0 cursor-pointer appearance-none rounded-full bg-white/15 accent-accent" aria-label="Volume" />
+                  <input type="range" class="np-volume w-full h-1 m-0 p-0 cursor-pointer appearance-none rounded-full bg-white/15 accent-accent" min="0" max="100" value="0" aria-label="Volume" />
                 </div>
-                <button id="np-go-to-tab" class="shrink-0 px-1.5 py-0.5 rounded text-[11px] text-text-muted hover:text-text-primary hover:bg-surface-hover border-0 bg-transparent cursor-pointer transition-colors" title="Go to tab">Open tab</button>
+                <button type="button" class="np-go-to-tab shrink-0 px-1.5 py-0.5 rounded text-[11px] text-text-muted hover:text-text-primary hover:bg-surface-hover border-0 bg-transparent cursor-pointer transition-colors" title="Go to tab">Open tab</button>
               </div>
             </div>
           </div>
         </div>
+        <p id="np-also-playing" class="hidden px-3 pb-2 -mt-0.5 text-[10px] text-text-muted truncate"></p>
       </section>
 
       <div class="flex items-center justify-between px-3 py-1.5 shrink-0 border-b border-white/5">
@@ -792,49 +900,7 @@ function setupApp() {
     render();
   });
 
-  document.getElementById("np-play-pause")?.addEventListener("click", async () => {
-    const tabId = getNowPlayingTabId();
-    const video = tabId ? findVideoByTabId(tabId) : undefined;
-    if (!tabId || !video) return;
-    const state = await togglePlayback(tabId);
-    if (state) {
-      video.paused = state.paused;
-      video.currentTime = state.currentTime;
-      video.audible = isPlaybackActive(state);
-      resolvedNowPlayingTabId = tabId;
-      await persistLastPlayingTabId(tabId);
-      updateNowPlayingControls(state);
-      render();
-    }
-  });
-
-  const goToNowPlayingTab = async () => {
-    const tabId = getNowPlayingTabId();
-    const video = tabId ? findVideoByTabId(tabId) : undefined;
-    if (!tabId || !video) return;
-    await browser.tabs.update(tabId, { active: true });
-    if (video.windowId != null) {
-      await browser.windows.update(video.windowId, { focused: true });
-    }
-  };
-
-  document.getElementById("np-go-to-tab")?.addEventListener("click", goToNowPlayingTab);
-  document.getElementById("np-title")?.addEventListener("click", goToNowPlayingTab);
-  document.getElementById("np-thumb-btn")?.addEventListener("click", goToNowPlayingTab);
-
-  document.getElementById("np-volume")?.addEventListener("input", async (event) => {
-    const tabId = getNowPlayingTabId();
-    const video = tabId ? findVideoByTabId(tabId) : undefined;
-    if (!tabId || !video) return;
-    const value = parseInt((event.target as HTMLInputElement).value, 10);
-    const state = await setPlaybackVolume(tabId, value / 100);
-    if (state) {
-      video.audible = isPlaybackActive(state);
-      resolvedNowPlayingTabId = tabId;
-      await persistLastPlayingTabId(tabId);
-      updateNowPlayingControls(state);
-    }
-  });
+  bindNowPlayingCardEvents();
 
   document.getElementById("video-list")?.addEventListener("click", async (event) => {
     const target = event.target as HTMLElement;
@@ -870,55 +936,60 @@ const VOLUME_ICON_MED = `${VOLUME_ICON_LOW}<path d="M15.54 8.46a5 5 0 0 1 0 7.07
 const VOLUME_ICON_HIGH = `${VOLUME_ICON_MED}<path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>`;
 const VOLUME_ICON_MUTE = `<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" x2="17" y1="9" y2="15"/><line x1="17" x2="23" y1="9" y2="15"/>`;
 
-function updateNowPlayingControls(state: PlaybackState): void {
-  const playBtn = document.getElementById("np-play-pause");
-  const volumeInput = document.getElementById("np-volume") as HTMLInputElement | null;
-  const volumeIcon = document.getElementById("np-volume-icon");
-  const statusEl = document.getElementById("np-status");
+function bindNowPlayingCardEvents(): void {
   const card = document.getElementById("np-card");
-  const indicator = document.querySelector(".np-indicator");
+  if (!card || card.dataset.bound === "1") return;
+  card.dataset.bound = "1";
 
-  const isPlaying = isPlaybackActive(state);
+  card.addEventListener("click", async (event) => {
+    const target = event.target as HTMLElement;
+    const tabId = parseInt(card.dataset.npTabId || "0", 10);
+    const video = tabId ? findVideoByTabId(tabId) : undefined;
+    if (!tabId || !video) return;
 
-  if (playBtn) {
-    playBtn.innerHTML = state.paused ? PLAY_ICON : PAUSE_ICON;
-    playBtn.title = state.paused ? "Play" : "Pause";
-  }
-  if (volumeInput) {
-    const displayVolume = state.muted ? 0 : Math.round(state.volume * 100);
-    volumeInput.value = String(displayVolume);
-  }
-  if (volumeIcon) {
-    const vol = state.muted ? 0 : state.volume;
-    const paths =
-      vol === 0 ? VOLUME_ICON_MUTE : vol < 0.35 ? VOLUME_ICON_LOW : vol < 0.7 ? VOLUME_ICON_MED : VOLUME_ICON_HIGH;
-    volumeIcon.innerHTML = paths;
-  }
-  if (statusEl) {
-    statusEl.textContent = isPlaying ? "Now playing" : "Paused";
-    statusEl.className = `text-[10px] font-bold uppercase tracking-wider ${
-      isPlaying ? "text-accent" : "text-text-muted"
-    }`;
-  }
-  if (card) {
-    card.className = `px-3 py-1.5 transition-all duration-300 ${
-      isPlaying ? "bg-accent/5 shadow-[inset_2px_0_0_0_#ff0000]" : ""
-    }`;
-  }
-  if (indicator) {
-    indicator.classList.toggle("animate-pulse", isPlaying);
-    indicator.classList.toggle("shadow-[0_0_8px_rgba(255,0,0,0.8)]", isPlaying);
-    (indicator as HTMLElement).classList.toggle("bg-accent", isPlaying);
-    (indicator as HTMLElement).classList.toggle("bg-text-muted", !isPlaying);
-  }
+    if (target.closest(".np-play-pause")) {
+      const previousIds = nowPlayingIdsFingerprint();
+      const state = await togglePlayback(tabId);
+      if (!state) return;
+      const activelyPlaying = applyLocalPlaybackControl(tabId, video, state);
+      updateNowPlayingCard(card, video, state, activelyPlaying);
+      refreshQueueStatsFromState();
+      syncUpNextIfNowPlayingChanged(previousIds);
+      if (activelyPlaying) void persistLastPlayingTabId(tabId);
+      scheduleNowPlayingRefine();
+      return;
+    }
+
+    if (target.closest(".np-go-to-tab") || target.closest(".np-title") || target.closest(".np-thumb-btn")) {
+      await browser.tabs.update(tabId, { active: true });
+      if (video.windowId != null) {
+        await browser.windows.update(video.windowId, { focused: true });
+      }
+    }
+  });
+
+  card.addEventListener("input", async (event) => {
+    const target = event.target as HTMLElement;
+    if (!target.classList.contains("np-volume")) return;
+    const tabId = parseInt(card.dataset.npTabId || "0", 10);
+    const video = tabId ? findVideoByTabId(tabId) : undefined;
+    if (!tabId || !video) return;
+    const value = parseInt((target as HTMLInputElement).value, 10);
+    const state = await setPlaybackVolume(tabId, value / 100);
+    if (!state) return;
+    const activelyPlaying = applyLocalPlaybackControl(tabId, video, state);
+    updateNowPlayingCard(card, video, state, activelyPlaying);
+    void persistLastPlayingTabId(tabId);
+    scheduleNowPlayingRefine();
+  });
 }
 
-function updateNowPlayingTimeFromVideo(video: VideoData): void {
+function updateNowPlayingCardTime(card: HTMLElement, video: VideoData): void {
   const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
-  const progressEl = document.getElementById("np-progress");
+  const progressEl = card.querySelector(".np-progress") as HTMLElement | null;
   if (progressEl) progressEl.style.width = `${watchedPercent}%`;
 
-  const timeEl = document.getElementById("np-time");
+  const timeEl = card.querySelector(".np-time") as HTMLElement | null;
   if (!timeEl) return;
 
   if (video.isLive) {
@@ -934,34 +1005,28 @@ function updateNowPlayingTimeFromVideo(video: VideoData): void {
   }
 }
 
-function formatNowPlayingChannelName(video: VideoData): string {
-  if (!video.channelName || video.channelName === "YouTube" || video.channelName === "YouTube Video") {
-    return "";
-  }
-  return video.channelName;
-}
+function updateNowPlayingCard(
+  card: HTMLElement,
+  video: VideoData,
+  state: PlaybackState,
+  isActivelyPlaying: boolean
+): void {
+  card.dataset.npTabId = String(video.id);
 
-function applyNowPlayingVideoToDom(video: VideoData): void {
-  const section = document.getElementById("now-playing");
-  if (!section) return;
-
-  section.dataset.tabId = String(video.id);
-  resolvedNowPlayingTabId = video.id;
-
-  const channelEl = document.getElementById("np-channel") as HTMLElement | null;
+  const channelEl = card.querySelector(".np-channel") as HTMLElement | null;
   const channelName = formatNowPlayingChannelName(video);
   if (channelEl) {
     channelEl.textContent = channelName || "\u00a0";
     channelEl.classList.toggle("invisible", !channelName);
   }
 
-  const titleEl = document.getElementById("np-title") as HTMLElement | null;
+  const titleEl = card.querySelector(".np-title") as HTMLElement | null;
   if (titleEl) {
     titleEl.textContent = video.title;
     titleEl.title = video.title;
   }
 
-  const thumbEl = document.getElementById("np-thumb") as HTMLImageElement | null;
+  const thumbEl = card.querySelector(".np-thumb") as HTMLImageElement | null;
   const thumbUrl = getThumbnailUrl(video.url);
   if (thumbEl) {
     if (thumbUrl) {
@@ -973,42 +1038,107 @@ function applyNowPlayingVideoToDom(video: VideoData): void {
     }
   }
 
-  updateNowPlayingTimeFromVideo(video);
+  updateNowPlayingCardTime(card, video);
+
+  const playBtn = card.querySelector(".np-play-pause") as HTMLButtonElement | null;
+  const volumeInput = card.querySelector(".np-volume") as HTMLInputElement | null;
+  const volumeIcon = card.querySelector(".np-volume-icon") as SVGElement | null;
+  const indicator = card.querySelector(".np-indicator") as HTMLElement | null;
+
+  if (playBtn) {
+    playBtn.innerHTML = state.paused ? PLAY_ICON : PAUSE_ICON;
+    playBtn.title = state.paused ? "Play" : "Pause";
+  }
+  if (volumeInput) {
+    const displayVolume = state.muted ? 0 : Math.round(state.volume * 100);
+    volumeInput.value = String(displayVolume);
+  }
+  if (volumeIcon) {
+    const vol = state.muted ? 0 : state.volume;
+    const paths =
+      vol === 0 ? VOLUME_ICON_MUTE : vol < 0.35 ? VOLUME_ICON_LOW : vol < 0.7 ? VOLUME_ICON_MED : VOLUME_ICON_HIGH;
+    volumeIcon.innerHTML = paths;
+  }
+  card.className = `px-3 py-2 transition-[background-color,box-shadow] duration-300 ${
+    isActivelyPlaying ? "bg-accent/5 shadow-[inset_2px_0_0_0_#ff0000]" : "shadow-[inset_2px_0_0_0_rgba(255,255,255,0.08)]"
+  }`;
+  if (indicator) {
+    indicator.classList.toggle("hidden", !isActivelyPlaying);
+    indicator.classList.toggle("animate-pulse", isActivelyPlaying);
+    indicator.classList.toggle("shadow-[0_0_8px_rgba(255,0,0,0.8)]", isActivelyPlaying);
+  }
+}
+
+function renderNowPlayingCard(primary: VideoData | null, confirmedPlaying: VideoData[]): void {
+  const section = document.getElementById("now-playing");
+  const alsoEl = document.getElementById("np-also-playing");
+  const card = document.getElementById("np-card");
+  if (!section || !card) return;
+
+  if (!primary) {
+    section.classList.add("hidden");
+    section.removeAttribute("data-tab-id");
+    card.dataset.npTabId = "";
+    if (alsoEl) {
+      alsoEl.classList.add("hidden");
+      alsoEl.textContent = "";
+    }
+    return;
+  }
+
+  section.classList.remove("hidden");
+  section.dataset.tabId = String(primary.id);
+
+  updateNowPlayingCard(
+    card,
+    primary,
+    {
+      paused: primary.paused ?? !isTabActivelyPlaying(primary),
+      volume: 0,
+      muted: false,
+      currentTime: primary.currentTime,
+    },
+    isTabActivelyPlaying(primary)
+  );
+
+  updateAlsoPlayingLine(confirmedPlaying, primary);
+}
+
+function formatNowPlayingChannelName(video: VideoData): string {
+  if (!video.channelName || video.channelName === "YouTube" || video.channelName === "YouTube Video") {
+    return "";
+  }
+  return video.channelName;
 }
 
 function syncPopulateNowPlaying(): void {
-  const video = getNowPlayingVideo();
-  if (!video) return;
-
-  applyNowPlayingVideoToDom(video);
-  updateNowPlayingControls({
-    paused: video.paused ?? !video.audible,
-    volume: 1,
-    muted: false,
-    currentTime: video.currentTime,
-  });
+  renderNowPlayingCard(getPrimaryNowPlayingSync(), getConfirmedNowPlayingVideos());
 }
 
 async function refineNowPlaying(): Promise<void> {
-  const previousId = resolvedNowPlayingTabId;
-  const video = await refreshNowPlayingDetection();
-  if (!video) return;
+  const previousIds = nowPlayingIdsFingerprint();
+  const previousPrimaryId = getNowPlayingTabId();
+  const videos = await refreshNowPlayingDetection();
+  lastNowPlayingDetectAt = Date.now();
+  const confirmed = getConfirmedNowPlayingVideos();
+  const primary = videos[0] ?? null;
 
-  if (video.id !== previousId) applyNowPlayingVideoToDom(video);
-
-  const playback = await getPlaybackState(video.id);
-  if (playback) {
-    video.paused = playback.paused;
-    video.currentTime = playback.currentTime;
-    video.audible = isPlaybackActive(playback);
-    updateNowPlayingControls(playback);
+  if (!primary || primary.id !== previousPrimaryId) {
+    renderNowPlayingCard(primary, confirmed);
+  } else {
+    updateAlsoPlayingLine(confirmed, primary);
+    const card = document.getElementById("np-card");
+    if (card) {
+      const playback = await getPlaybackState(primary.id);
+      if (playback) {
+        primary.paused = playback.paused;
+        primary.currentTime = playback.currentTime;
+        updateNowPlayingCard(card, primary, playback, isTabActivelyPlaying(primary));
+      }
+    }
   }
 
-  updateNowPlayingTimeFromVideo(video);
-}
-
-function getNowPlayingTabIdForList(): number | null {
-  return getNowPlayingVideo()?.id ?? null;
+  syncUpNextIfNowPlayingChanged(previousIds);
 }
 
 function updateHeaderStats(
@@ -1051,8 +1181,7 @@ function updateHeaderStats(
 
 function updateVideoListItem(item: HTMLElement, video: VideoData): void {
   const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
-  const nowPlayingId = getNowPlayingTabIdForList();
-  const isNowPlaying = nowPlayingId === video.id;
+  const isNowPlaying = isTabActivelyPlaying(video);
   const isActiveTab = video.active && !isNowPlaying;
   const stateClasses = isNowPlaying
     ? "bg-accent/5 shadow-[inset_2px_0_0_0_#ff0000]"
@@ -1239,8 +1368,8 @@ async function getYouTubeTabs(): Promise<void> {
     });
 
     resetVideoListFingerprint();
-    resolvedNowPlayingTabId = null;
-    playbackScanOffset = 0;
+    resolvedNowPlayingTabIds = [];
+    pinnedNowPlayingTabId = null;
     videoData = tabs.map((tab, index) => {
       const video = buildVideoFromTab(tab, index, prefs.excludedUrls);
       const cached = lookupCachedMetadata(metadataCache, video.url);
@@ -1267,9 +1396,6 @@ async function getYouTubeTabs(): Promise<void> {
         }
       }
     }
-
-    const initialNowPlaying = getNowPlayingVideo();
-    if (initialNowPlaying) resolvedNowPlayingTabId = initialNowPlaying.id;
 
     render();
 

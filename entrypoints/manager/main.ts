@@ -35,6 +35,7 @@ import {
   type StoreState,
 } from "../../utils/store";
 import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl } from "../../utils/format";
+import { normalizeLanguageCode } from "../../utils/captionLanguage";
 import {
   buildTabsFromVideos,
   countItemsByVideoId,
@@ -429,69 +430,109 @@ function applyProbeResultsToUi(): void {
   updateSelectionUI();
 }
 
+function hasValidCoreMetadata(video: VideoData): boolean {
+  return (
+    video.seconds > 0 &&
+    video.title !== "YouTube Video" &&
+    video.title !== "YouTube" &&
+    !/^\(\d+\)\s*/.test(video.title)
+  );
+}
+
+function languageMetadataChanged(
+  video: VideoData,
+  language: string | null | undefined,
+  languageName: string | null | undefined
+): boolean {
+  if (language === undefined) return false;
+  if (video.language == null && language == null) {
+    return video.languageName !== languageName;
+  }
+  if (video.language == null || language == null) return true;
+  if (normalizeLanguageCode(video.language) !== normalizeLanguageCode(language)) return true;
+  return (video.languageName ?? "") !== (languageName ?? "");
+}
+
+function persistVideoMetadata(video: VideoData, expectedVideoId: string | null | undefined): void {
+  requestMetadataUpdate(video.url, {
+    seconds: video.seconds,
+    title: video.title,
+    channelName: video.channelName,
+    currentTime: video.currentTime,
+    isLive: video.isLive,
+    videoId: expectedVideoId ?? undefined,
+    language: video.language,
+    languageName: video.languageName,
+  });
+}
+
+function applyLanguageMetadata(
+  video: VideoData,
+  language: string | null | undefined,
+  languageName: string | null | undefined,
+  expectedVideoId: string | null | undefined
+): boolean {
+  if (language === undefined) return false;
+  const changed = languageMetadataChanged(video, language, languageName);
+  video.language = language;
+  video.languageName = languageName;
+  if (changed) persistVideoMetadata(video, expectedVideoId);
+  return changed;
+}
+
 async function probeTabsMetadata() {
   const activeTabPromises = allVideos.map(async (video) => {
     if (video.suspended) return;
 
-    const hasValidMetadata = video.seconds > 0 &&
-      video.title !== "YouTube Video" &&
-      video.title !== "YouTube" &&
-      !/^\(\d+\)\s*/.test(video.title) &&
-      video.language !== undefined;
-
-    // Skip probing if the tab is inactive and inaudible, and we already have valid cached metadata
-    if (hasValidMetadata && !video.active && !video.audible) {
-      return;
-    }
-
     const expectedVideoId = getVideoIdFromUrl(video.url);
+    const hasCore = hasValidCoreMetadata(video);
+    const skipHeavyProbe =
+      hasCore && video.language !== undefined && !video.active && !video.audible;
 
     try {
-      const contentMeta = await browser.tabs.sendMessage(video.id, { action: "get-metadata" }).catch(() => null);
-      if (
-        contentMeta &&
-        contentMeta.videoId != null &&
-        contentMeta.videoId === expectedVideoId &&
-        contentMeta.title &&
-        (contentMeta.seconds > 0 || contentMeta.isLive)
-      ) {
-        const isPlaceholder = (title: string) => !title || title === "YouTube Video" || title === "YouTube";
-        video.title = isPlaceholder(contentMeta.title) ? (video.title || contentMeta.title) : contentMeta.title;
-        video.channelName = contentMeta.channelName || "";
-        video.seconds = contentMeta.seconds;
-        video.currentTime = contentMeta.currentTime;
-        video.isLive = contentMeta.isLive;
-        video.language = contentMeta.language;
-        video.languageName = contentMeta.languageName;
-        
-        requestMetadataUpdate(video.url, {
-          seconds: video.seconds,
-          title: video.title,
-          channelName: video.channelName,
-          currentTime: video.currentTime,
-          isLive: video.isLive,
-          videoId: expectedVideoId ?? undefined,
-          language: video.language,
-          languageName: video.languageName,
-        });
-        return;
+      const contentMeta = await browser.tabs
+        .sendMessage(video.id, { action: "get-metadata", refreshLanguage: true })
+        .catch(() => null);
+
+      if (contentMeta?.videoId != null && contentMeta.videoId === expectedVideoId) {
+        applyLanguageMetadata(
+          video,
+          contentMeta.language,
+          contentMeta.languageName,
+          expectedVideoId
+        );
+
+        if (contentMeta.title && (contentMeta.seconds > 0 || contentMeta.isLive)) {
+          const isPlaceholder = (title: string) =>
+            !title || title === "YouTube Video" || title === "YouTube";
+          video.title = isPlaceholder(contentMeta.title)
+            ? video.title || contentMeta.title
+            : contentMeta.title;
+          video.channelName = contentMeta.channelName || "";
+          video.seconds = contentMeta.seconds;
+          video.currentTime = contentMeta.currentTime;
+          video.isLive = contentMeta.isLive;
+          persistVideoMetadata(video, expectedVideoId);
+          return;
+        }
+
+        if (skipHeavyProbe) return;
       }
     } catch {
       // No content script — fall through to inject
     }
 
-
+    if (skipHeavyProbe) return;
 
     try {
       const results = await browser.scripting.executeScript({
         target: { tabId: video.id },
         world: "MAIN",
-        args: [hasValidMetadata],
+        args: [hasCore],
         func: (hasMetadata: boolean) => {
           const videoElement = document.querySelector("video");
           const currentTime = videoElement ? videoElement.currentTime : 0;
 
-          // Current video ID: watch ?v= or Shorts /shorts/VIDEO_ID
           const shortsMatch = window.location.pathname.match(/^\/shorts\/([^/?]+)/);
           const currentVideoId =
             new URLSearchParams(window.location.search).get("v") ||
@@ -501,21 +542,92 @@ async function probeTabsMetadata() {
           // @ts-ignore - Get ytInitialPlayerResponse for SPA detection
           const playerResponse = window.ytInitialPlayerResponse;
           const playerVideoId = playerResponse?.videoDetails?.videoId;
-          
-          // CRITICAL: Detect SPA navigation mismatch - ytInitialPlayerResponse has stale video ID
-          const isSpaTransition = playerVideoId && currentVideoId && playerVideoId !== currentVideoId;
+
+          const isSpaTransition =
+            playerVideoId && currentVideoId && playerVideoId !== currentVideoId;
+
+          const detectLanguage = () => {
+            const captionTracks =
+              playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+            if (!captionTracks?.length) {
+              return { language: undefined as string | undefined, languageName: undefined as string | undefined };
+            }
+
+            const normalizeCode = (code: string) => code.trim().toLowerCase().split("-")[0];
+            const displayName = (track: {
+              languageCode?: string;
+              name?: { simpleText?: string };
+            }) => (track.name?.simpleText || track.languageCode || "").split("(")[0].trim();
+
+            const micro = playerResponse?.microformat?.playerMicroformatRenderer;
+            const preferredCode =
+              playerResponse?.videoDetails?.defaultAudioLanguageCode ||
+              micro?.defaultAudioLanguage ||
+              playerResponse?.videoDetails?.defaultLanguage ||
+              micro?.defaultLanguage ||
+              null;
+
+            const asrTracks = captionTracks.filter(
+              (track: { kind?: string; languageCode?: string }) =>
+                track.kind === "asr" && track.languageCode
+            );
+
+            const matchesPreferred = (track: { languageCode?: string }) =>
+              preferredCode &&
+              track.languageCode &&
+              normalizeCode(track.languageCode) === normalizeCode(preferredCode);
+
+            if (preferredCode) {
+              const preferredAsr = asrTracks.find(matchesPreferred);
+              if (preferredAsr?.languageCode) {
+                return {
+                  language: preferredAsr.languageCode,
+                  languageName: displayName(preferredAsr) || preferredAsr.languageCode,
+                };
+              }
+              const preferredAny = captionTracks.find(matchesPreferred);
+              if (preferredAny?.languageCode) {
+                return {
+                  language: preferredAny.languageCode,
+                  languageName: displayName(preferredAny) || preferredAny.languageCode,
+                };
+              }
+            }
+
+            const chosenAsr = asrTracks.length === 1 ? asrTracks[0] : asrTracks[0];
+            if (chosenAsr?.languageCode) {
+              return {
+                language: chosenAsr.languageCode,
+                languageName: displayName(chosenAsr) || chosenAsr.languageCode,
+              };
+            }
+
+            const first = captionTracks.find((track: { languageCode?: string }) => track.languageCode);
+            if (!first?.languageCode) {
+              return { language: undefined as string | undefined, languageName: undefined as string | undefined };
+            }
+            return {
+              language: first.languageCode,
+              languageName: displayName(first) || first.languageCode,
+            };
+          };
 
           if (hasMetadata && !isSpaTransition) {
-            return { currentTime, skipMetadata: true };
+            const detected = detectLanguage();
+            return {
+              currentTime,
+              skipMetadata: true,
+              language: detected.language,
+              languageName: detected.languageName,
+            };
           }
 
-          // If SPA transition detected, return a special flag to invalidate any cached data
           if (isSpaTransition) {
             return {
               currentTime,
               spaTransition: true,
               currentVideoId,
-              skipMetadata: false
+              skipMetadata: false,
             };
           }
 
@@ -531,7 +643,8 @@ async function probeTabsMetadata() {
           try {
             if (videoDetails) {
               isLive = videoDetails.isLive === true;
-              const liveDetails = playerResponse?.microformat?.playerMicroformatRenderer?.liveBroadcastDetails;
+              const liveDetails =
+                playerResponse?.microformat?.playerMicroformatRenderer?.liveBroadcastDetails;
               if (liveDetails && !liveDetails.endTimestamp) isLive = true;
 
               const lengthSeconds = parseInt(videoDetails.lengthSeconds) || 0;
@@ -541,7 +654,6 @@ async function probeTabsMetadata() {
               }
             }
 
-            // Shorts fallback 1: duration from ytInitialPlayerResponse.streamingData (formats/adaptiveFormats)
             if (duration === 0 && window.location.pathname.startsWith("/shorts/")) {
               try {
                 const sd = playerResponse && playerResponse.streamingData;
@@ -550,48 +662,46 @@ async function probeTabsMetadata() {
                 const firstFormat = (formats && formats[0]) || (adaptive && adaptive[0]);
                 const ms = firstFormat && firstFormat.approxDurationMs;
                 if (ms != null && !isNaN(ms)) duration = Number(ms) / 1000;
-              } catch (_) { }
+              } catch (_) {}
             }
-            // Shorts fallback 2: duration from ytInitialData (reelWatchEndpoint or other path)
             if (duration === 0 && window.location.pathname.startsWith("/shorts/")) {
               try {
                 // @ts-ignore
                 const initialData = window.ytInitialData;
-                const ms = initialData && initialData.contents && initialData.contents.reelWatchEndpoint && initialData.contents.reelWatchEndpoint.approxDurationMs;
+                const ms =
+                  initialData &&
+                  initialData.contents &&
+                  initialData.contents.reelWatchEndpoint &&
+                  initialData.contents.reelWatchEndpoint.approxDurationMs;
                 if (ms != null && !isNaN(ms)) duration = Number(ms) / 1000;
-              } catch (_) { }
+              } catch (_) {}
             }
 
             if (!isLive) {
               const liveBadge = document.querySelector(".ytp-live-badge") as HTMLElement;
-              if (liveBadge && !liveBadge.hasAttribute("disabled") && getComputedStyle(liveBadge).display !== "none") {
+              if (
+                liveBadge &&
+                !liveBadge.hasAttribute("disabled") &&
+                getComputedStyle(liveBadge).display !== "none"
+              ) {
                 isLive = true;
               }
             }
 
-            let title = videoDetails?.title ||
+            let title =
+              videoDetails?.title ||
               (document.querySelector("h1.ytd-video-primary-info-renderer") as HTMLElement)?.innerText ||
-              (document.querySelector("h1.title.ytd-video-primary-info-renderer") as HTMLElement)?.innerText ||
+              (document.querySelector("h1.title.ytd-video-primary-info-renderer") as HTMLElement)
+                ?.innerText ||
               (document.querySelector(".ytd-video-primary-info-renderer h1") as HTMLElement)?.innerText ||
-              (document.querySelector("ytd-video-primary-info-renderer #container h1") as HTMLElement)?.innerText ||
+              (document.querySelector("ytd-video-primary-info-renderer #container h1") as HTMLElement)
+                ?.innerText ||
               document.title;
 
-            // Clean title: remove any notification prefixes like "(1) " or "(1030) "
             title = title.replace(/^\(\d+\)\s*/g, "");
             title = title.replace(" - YouTube", "").trim();
 
-            // Extract language
-            let language = undefined;
-            let languageName = undefined;
-            try {
-              const captionTracks = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-              if (captionTracks && captionTracks.length > 0) {
-                const asrTrack = captionTracks.find((track: { kind?: string }) => track.kind === "asr");
-                const track = asrTrack || captionTracks[0];
-                language = track.languageCode;
-                languageName = (track.name?.simpleText || track.languageCode).split("(")[0].trim();
-              }
-            } catch (_) {}
+            const detected = detectLanguage();
 
             return {
               duration: isLive ? 0 : duration || videoElement?.duration || 0,
@@ -600,20 +710,21 @@ async function probeTabsMetadata() {
               title: title || "YouTube Video",
               isLive,
               skipMetadata: false,
-              language,
-              languageName
+              language: detected.language,
+              languageName: detected.languageName,
             };
           } catch (error) {
-            // Fallback if playerResponse access fails or other error
             return {
               duration: videoElement?.duration || 0,
               currentTime,
               channelName: channel,
-              title: document.title.replace(/^\(\d+\)\s*/g, "").replace(" - YouTube", "").trim() || "YouTube Video",
+              title:
+                document.title.replace(/^\(\d+\)\s*/g, "").replace(" - YouTube", "").trim() ||
+                "YouTube Video",
               isLive: false,
               skipMetadata: false,
               language: undefined,
-              languageName: undefined
+              languageName: undefined,
             };
           }
         },
@@ -622,21 +733,26 @@ async function probeTabsMetadata() {
       if (results[0]?.result) {
         const result = results[0].result;
 
-        // SPA transition: content script observer will have updated; ask it for metadata (retry once after 500ms)
         if (result.spaTransition) {
           video.currentTime = result.currentTime || 0;
           const tryContentScript = async (): Promise<boolean> => {
-            const meta = await browser.tabs.sendMessage(video.id, { action: "get-metadata" }).catch(() => null);
+            const meta = await browser.tabs
+              .sendMessage(video.id, { action: "get-metadata", refreshLanguage: true })
+              .catch(() => null);
             if (meta?.videoId === expectedVideoId && meta?.title && (meta.seconds > 0 || meta.isLive)) {
               video.title = meta.title;
               video.channelName = meta.channelName ?? "";
               video.seconds = meta.seconds;
               video.currentTime = meta.currentTime ?? 0;
               video.isLive = meta.isLive ?? false;
-              video.language = meta.language;
-              video.languageName = meta.languageName;
+              applyLanguageMetadata(
+                video,
+                meta.language,
+                meta.languageName,
+                expectedVideoId
+              );
               if (video.seconds > 0 || video.isLive) {
-                requestMetadataUpdate(video.url, { seconds: video.seconds, title: video.title, channelName: video.channelName, currentTime: video.currentTime, isLive: video.isLive, videoId: expectedVideoId ?? undefined, language: video.language, languageName: video.languageName });
+                persistVideoMetadata(video, expectedVideoId);
               }
               return true;
             }
@@ -650,36 +766,37 @@ async function probeTabsMetadata() {
 
         if (result.skipMetadata) {
           video.currentTime = result.currentTime || 0;
+          applyLanguageMetadata(
+            video,
+            result.language,
+            result.languageName,
+            expectedVideoId
+          );
         } else {
           const duration = result.duration || 0;
-          
-          // Always update title/channel if we got valid data
-          const hasValidTitle = result.title && result.title !== "Loading..." && result.title !== "YouTube Video" && result.title !== "YouTube";
+
+          const hasValidTitle =
+            result.title &&
+            result.title !== "Loading..." &&
+            result.title !== "YouTube Video" &&
+            result.title !== "YouTube";
           if (hasValidTitle || duration > 0 || result.isLive) {
-            // Preserve any existing good title rather than overwriting with a placeholder
-            video.title = hasValidTitle ? result.title : (video.title || result.title);
+            video.title = hasValidTitle ? result.title : video.title || result.title;
             video.channelName = result.channelName || video.channelName;
             video.seconds = duration;
             video.currentTime = result.currentTime || 0;
             video.isLive = result.isLive || false;
-            video.language = result.language;
-            video.languageName = result.languageName;
+            applyLanguageMetadata(
+              video,
+              result.language,
+              result.languageName,
+              expectedVideoId
+            );
 
-            // Only cache if we have meaningful data (duration or live status)
             if (duration > 0 || result.isLive) {
-              requestMetadataUpdate(video.url, {
-                seconds: video.seconds,
-                title: video.title,
-                channelName: video.channelName,
-                currentTime: video.currentTime,
-                isLive: video.isLive,
-                videoId: expectedVideoId ?? undefined,
-                language: video.language,
-                languageName: video.languageName,
-              });
+              persistVideoMetadata(video, expectedVideoId);
             }
           }
-          
         }
       }
     } catch (error) {

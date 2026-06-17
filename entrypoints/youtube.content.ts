@@ -4,6 +4,11 @@
  * when the DOM updates (e.g. SPA navigation). Popup/manager can request
  * cached metadata via messaging; send "get-perf-stats" for dev performance stats.
  */
+import {
+  detectLanguageFromPlayerResponse,
+  type DetectedLanguage,
+} from "../utils/captionLanguage";
+
 const DEBOUNCE_MS = 150;
 
 const perf = {
@@ -37,11 +42,6 @@ let lastMetadata: CachedMetadataPayload = {
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let lastReadTime = 0;
 const MAX_WAIT_MS = 1000;
-let cachedLanguageVideoId: string | null = null;
-let cachedLanguage: { language?: string | null; languageName?: string | null } = {
-  language: null,
-  languageName: null,
-};
 
 function getVideoIdFromLocation(): string | null {
   try {
@@ -61,38 +61,18 @@ function getVideoIdFromLocation(): string | null {
   return null;
 }
 
-interface CaptionTrack {
-  kind?: string;
-  languageCode?: string;
-  name?: { simpleText?: string };
-}
+type PlayerResponseShape = Parameters<typeof detectLanguageFromPlayerResponse>[0];
 
-function languageFromCaptionTracks(
-  captionTracks: CaptionTrack[] | undefined
-): { language?: string | null; languageName?: string | null } {
-  if (!captionTracks || captionTracks.length === 0) {
-    return { language: null, languageName: null };
-  }
-  const asrTrack = captionTracks.find((track) => track.kind === "asr");
-  const track = asrTrack || captionTracks[0];
-  if (!track?.languageCode) return { language: null, languageName: null };
-  return {
-    language: track.languageCode,
-    languageName: (track.name?.simpleText || track.languageCode).split("(")[0].trim(),
-  };
-}
-
-function extractLanguageFromDom(): { language?: string | null; languageName?: string | null } {
+function readPlayerResponseFromPage(): PlayerResponseShape | null {
   try {
-    const playerResponse = (window as unknown as { ytInitialPlayerResponse?: { captions?: { playerCaptionsTracklistRenderer?: { captionTracks?: CaptionTrack[] } } } })
+    const fromWindow = (window as unknown as { ytInitialPlayerResponse?: PlayerResponseShape })
       .ytInitialPlayerResponse;
-    if (playerResponse) {
-      const fromPlayer = languageFromCaptionTracks(
-        playerResponse.captions?.playerCaptionsTracklistRenderer?.captionTracks
-      );
-      if (fromPlayer.language) return fromPlayer;
-    }
+    if (fromWindow) return fromWindow;
+  } catch {
+    // ignore
+  }
 
+  try {
     for (const script of document.querySelectorAll("script:not([src])")) {
       const text = script.textContent;
       if (!text?.includes("ytInitialPlayerResponse")) continue;
@@ -100,18 +80,18 @@ function extractLanguageFromDom(): { language?: string | null; languageName?: st
         text.match(/var ytInitialPlayerResponse\s*=\s*({.+?});/s) ||
         text.match(/window\["ytInitialPlayerResponse"\]\s*=\s*({.+?});/s);
       if (!playerResponseMatch) continue;
-      const data = JSON.parse(playerResponseMatch[1]) as {
-        captions?: { playerCaptionsTracklistRenderer?: { captionTracks?: CaptionTrack[] } };
-      };
-      const fromScript = languageFromCaptionTracks(
-        data.captions?.playerCaptionsTracklistRenderer?.captionTracks
-      );
-      if (fromScript.language) return fromScript;
+      return JSON.parse(playerResponseMatch[1]) as PlayerResponseShape;
     }
   } catch {
     // ignore
   }
-  return { language: null, languageName: null };
+
+  return null;
+}
+
+function extractLanguageFromDom(): DetectedLanguage {
+  const playerResponse = readPlayerResponseFromPage();
+  return detectLanguageFromPlayerResponse(playerResponse);
 }
 
 function parseDurationFromTimeText(text: string): number {
@@ -163,18 +143,7 @@ function readMetadataFromDom(): CachedMetadataPayload {
     isLive = true;
   }
 
-  let language: string | null | undefined;
-  let languageName: string | null | undefined;
-  if (videoId && videoId === cachedLanguageVideoId) {
-    language = cachedLanguage.language;
-    languageName = cachedLanguage.languageName;
-  } else {
-    const extracted = extractLanguageFromDom();
-    cachedLanguageVideoId = videoId;
-    cachedLanguage = extracted;
-    language = extracted.language;
-    languageName = extracted.languageName;
-  }
+  const { language, languageName } = extractLanguageFromDom();
 
   return {
     videoId,
@@ -293,14 +262,15 @@ export default defineContentScript({
 
     browser.runtime.onMessage.addListener(
       (
-        message: { action: string; reset?: boolean; volume?: number },
+        message: { action: string; reset?: boolean; volume?: number; refreshLanguage?: boolean },
         _sender: unknown,
         sendResponse: (r: unknown) => void
       ) => {
         if (message?.action === "get-metadata") {
           if (isWatchOrShorts()) {
             const currentId = getVideoIdFromLocation();
-            if (currentId !== lastMetadata.videoId) {
+            const refreshLanguage = message.refreshLanguage === true;
+            if (currentId !== lastMetadata.videoId || refreshLanguage) {
               lastMetadata = readMetadataFromDom();
             }
           }

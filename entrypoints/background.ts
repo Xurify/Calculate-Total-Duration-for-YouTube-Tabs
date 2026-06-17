@@ -5,6 +5,7 @@ import {
   type UserPrefs,
 } from "../utils/storage";
 import { applyMetadataBatchToCache, normalizeMetadataBatch } from "../utils/store";
+import { detectLanguageFromPlayerResponse } from "../utils/captionLanguage";
 
 const BATCH_FLUSH_MS = 80;
 let pendingCacheUpdates = new Map<string, { url: string; metadata: Omit<CachedMetadata, "timestamp"> }>();
@@ -122,6 +123,7 @@ interface TabToSync {
 }
 
 const CACHE_FRESH_MAX_AGE_MS = 10 * 60 * 1000;
+const LANGUAGE_CACHE_MAX_AGE_MS = 60 * 60 * 1000;
 const SYNC_CONCURRENCY = 3;
 const SYNC_DELAY_BETWEEN_REQUESTS_MS = 500;
 const SYNC_IN_PROGRESS = new Set<string>();
@@ -133,10 +135,14 @@ interface ParsedPlayerResponse {
     author?: string;
     isLive?: boolean;
     lengthSeconds?: string;
+    defaultAudioLanguageCode?: string;
+    defaultLanguage?: string;
   };
   microformat?: {
     playerMicroformatRenderer?: {
       liveBroadcastDetails?: { endTimestamp?: string };
+      defaultLanguage?: string;
+      defaultAudioLanguage?: string;
     };
   };
   captions?: {
@@ -184,13 +190,9 @@ function parseMetadataFromHtml(html: string): {
         }
       }
 
-      const captionTracks = playerResponse.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-      if (captionTracks && captionTracks.length > 0) {
-        const asrTrack = captionTracks.find((track) => track.kind === "asr");
-        const track = asrTrack || captionTracks[0];
-        language = track.languageCode ?? null;
-        languageName = (track.name?.simpleText || track.languageCode || "").split("(")[0].trim() || null;
-      }
+      const detected = detectLanguageFromPlayerResponse(playerResponse);
+      language = detected.language;
+      languageName = detected.languageName;
     } catch (_) {}
   }
   if (duration === 0) {
@@ -274,10 +276,15 @@ async function handleStealthSync(tabs: TabToSync[]) {
   for (const tab of tabs) {
     const normalizedUrl = normalizeYoutubeUrl(tab.url);
     const cached = cache[normalizedUrl];
-    const hasValidCache =
-      cached && (cached.seconds > 0 || cached.isLive) && cached.title && cached.language !== undefined;
-    const cacheFresh = cached?.timestamp != null && Date.now() - cached.timestamp < CACHE_FRESH_MAX_AGE_MS;
-    if (hasValidCache && cacheFresh) {
+    const hasValidCoreCache =
+      cached && (cached.seconds > 0 || cached.isLive) && cached.title;
+    const cacheFresh =
+      cached?.timestamp != null && Date.now() - cached.timestamp < CACHE_FRESH_MAX_AGE_MS;
+    const languageFresh =
+      cached?.language !== undefined &&
+      cached.timestamp != null &&
+      Date.now() - cached.timestamp < LANGUAGE_CACHE_MAX_AGE_MS;
+    if (hasValidCoreCache && cacheFresh && languageFresh) {
       browser.runtime
         .sendMessage({
           action: "tab-synced",

@@ -3729,14 +3729,34 @@ function setupListeners() {
     }
   });
 
-  document.getElementById("search-input")?.addEventListener("input", (event) => {
+  const searchInput = document.getElementById("search-input") as HTMLInputElement | null;
+  const searchClearBtn = document.getElementById("search-clear-btn") as HTMLButtonElement | null;
+
+  function updateSearchClearBtnVisibility() {
+    if (searchInput && searchClearBtn) {
+      searchClearBtn.classList.toggle("hidden", searchInput.value === "");
+    }
+  }
+
+  searchInput?.addEventListener("input", (event) => {
     const value = (event.target as HTMLInputElement).value;
+    updateSearchClearBtnVisibility();
     if (searchDebounceTimeout != null) clearTimeout(searchDebounceTimeout);
     searchDebounceTimeout = setTimeout(() => {
       searchDebounceTimeout = null;
       searchQuery = value;
       render();
     }, SEARCH_DEBOUNCE_MS);
+  });
+
+  searchClearBtn?.addEventListener("click", () => {
+    if (searchInput) {
+      searchInput.value = "";
+      updateSearchClearBtnVisibility();
+    }
+    if (searchDebounceTimeout != null) clearTimeout(searchDebounceTimeout);
+    searchQuery = "";
+    render();
   });
 
   document.getElementById("view-list")?.addEventListener("click", () => {

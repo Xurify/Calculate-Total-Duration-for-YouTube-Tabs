@@ -87,6 +87,7 @@ let showDuplicatesOnly = false;
 let scopeVideoIdCounts = new Map<string, number>();
 let collapsedGroups = new Set<string>();
 let renderTimeout: ReturnType<typeof setTimeout> | null = null;
+let probeUiRaf: number | null = null;
 let searchDebounceTimeout: ReturnType<typeof setTimeout> | null = null;
 const SEARCH_DEBOUNCE_MS = 200;
 
@@ -203,7 +204,7 @@ function handleStoreUpdated(message: { prefs?: StoreState["prefs"]; metadataCach
   if (message.prefs) applyPrefsFromStore();
   if (allVideos.length > 0 && (message.prefs || message.metadataCache)) {
     applyStoreMetadataToVideos();
-    applyProbeResultsToUi();
+    scheduleProbeResultsToUi();
   }
 }
 
@@ -393,39 +394,27 @@ function recomputeWindowGroupDurations(): void {
   }
 }
 
-/** After probing tab metadata, patch DOM instead of replacing `#tab-list` to avoid layout shift. */
+function scheduleProbeResultsToUi(): void {
+  if (probeUiRaf != null) return;
+  probeUiRaf = requestAnimationFrame(() => {
+    probeUiRaf = null;
+    applyProbeResultsToUi();
+  });
+}
+
+/** Coalesced metadata updates: patch cards in place; full rebuild only when layout structure changes. */
 function applyProbeResultsToUi(): void {
   recomputeWindowGroupDurations();
 
-  const nextFingerprint = tabListFingerprint();
-  if (!selectedSession && nextFingerprint !== lastTabListFingerprint) {
+  const nextStructureFp = tabListStructureFingerprint();
+  if (!selectedSession && nextStructureFp !== lastTabListFingerprint) {
     render();
     return;
   }
 
   updateLiveTabListCardsFromState();
-  if (!selectedSession) {
-    const headerStats = document.getElementById("current-view-stats");
-    if (headerStats) {
-      let videosToShow: VideoData[] = [];
-      if (currentWindowId === "all") {
-        videosToShow = allVideos;
-      } else {
-        const group = windowGroups.find((wg) => wg.id === currentWindowId);
-        if (group) videosToShow = group.tabs;
-      }
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        videosToShow = videosToShow.filter(
-          (v) =>
-            v.title.toLowerCase().includes(q) ||
-            v.channelName.toLowerCase().includes(q)
-        );
-      }
-      const duration = videosToShow.reduce((acc, v) => acc + v.seconds, 0);
-      headerStats.innerText = `${videosToShow.length} videos · ${formatTime(duration)} total duration`;
-    }
-  }
+  updateTabListAggregateHeadersFromState();
+  updateCurrentViewStatsFromState();
   renderSidebar();
   updateSelectionUI();
 }
@@ -805,7 +794,7 @@ async function probeTabsMetadata() {
   });
 
   await Promise.all(activeTabPromises);
-  applyProbeResultsToUi();
+  scheduleProbeResultsToUi();
 }
 
 const TAB_CREATE_BATCH = 8;
@@ -896,8 +885,10 @@ function windowBadgeHtml(video: VideoData): string {
 }
 
 
-function liveVideoFingerprintPart(video: VideoData): string {
-  return `${video.id}|${video.windowId ?? ""}|${video.url}|${video.title}|${video.channelName}|${video.seconds}|${video.isLive ? 1 : 0}`;
+function liveVideoStructurePart(video: VideoData): string {
+  const groupKey =
+    groupingMode === "channel" || groupingMode === "language" ? `|${videoGroupKey(video)}` : "";
+  return `${video.id}|${video.windowId ?? ""}|${video.url}${groupKey}`;
 }
 
 function formatDuplicateStatsSuffix(summary: DuplicateSummary): string {
@@ -1627,42 +1618,21 @@ function renderSessionTabsInnerHtml(
 ): string {
   if (tabs.length === 0) return "";
   if (groupingMode === "none") {
-    const sorted = sortSessionTabs(tabs);
+    const sorted = sortSessionTabsForDisplay(tabs);
     return layoutMode === "grid" ? renderSessionGrid(sorted, sectionColor) : renderSessionList(sorted, sectionColor);
   }
   const groups = new Map<string, SavedSessionTab[]>();
   tabs.forEach((tab) => {
-    let name = "Unknown";
-    if (groupingMode === "channel") {
-      name = tab.channelName ?? "Unknown Channel";
-    } else if (groupingMode === "language") {
-      name = tab.languageName ? tab.languageName.split('(')[0].trim() : (tab.language ? tab.language.toUpperCase() : "Unspecified");
-    }
+    const name = sessionTabGroupKey(tab);
     if (!groups.has(name)) groups.set(name, []);
     groups.get(name)!.push(tab);
   });
-  let sortedGroups = Array.from(groups.entries());
-  if (sortOption === "channel-asc" || sortOption === "title-asc") {
-    sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
-  } else if (sortOption === "duration-desc") {
-    sortedGroups.sort((a, b) => {
-      const durationA = a[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
-      const durationB = b[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
-      return durationB - durationA;
-    });
-  } else if (sortOption === "duration-asc") {
-    sortedGroups.sort((a, b) => {
-      const durationA = a[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
-      const durationB = b[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
-      return durationA - durationB;
-    });
-  }
-  return sortedGroups
+  return orderSessionGroupEntries(Array.from(groups.entries()))
     .map(([groupName, tabList]) => {
       const ck = nestedChannelCollapseKey(collapseScopeId, groupName);
       const isCollapsed = collapsedGroups.has(ck);
       const groupDuration = tabList.reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
-      const sortedTabs = sortSessionTabs(tabList);
+      const sortedTabs = sortSessionTabsForDisplay(tabList);
       const gridOrList =
         layoutMode === "grid" ? renderSessionGrid(sortedTabs, sectionColor) : renderSessionList(sortedTabs, sectionColor);
       return `
@@ -1672,7 +1642,7 @@ function renderSessionTabsInnerHtml(
                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
                 </button>
                 <div class="flex-1 font-medium text-xs text-text-secondary truncate nested-group-toggle cursor-pointer" data-nested-group="${escapeHtml(ck)}">${escapeHtml(groupName)}</div>
-                <div class="text-[10px] text-text-muted font-mono flex items-center gap-2">
+                <div class="aggregate-group-stats text-[10px] text-text-muted font-mono flex items-center gap-2" data-group-name="${escapeHtml(groupName)}">
                   <span>${tabList.length} videos</span>
                   <span class="w-px h-3 bg-border"></span>
                   <span>${formatTime(groupDuration)}</span>
@@ -1694,43 +1664,21 @@ function renderLiveVideosInnerHtml(
 ): string {
   if (videos.length === 0) return "";
   if (groupingMode === "none") {
-    const sortedVideos = sortVideos(videos);
+    const sortedVideos = sortVideosForDisplay(videos);
     return layoutMode === "grid" ? renderVideoGrid(sortedVideos, sectionColor) : renderVideoList(sortedVideos, sectionColor);
   }
   const groups = new Map<string, VideoData[]>();
   videos.forEach((video) => {
-    let name = "Unknown";
-    if (groupingMode === "channel") {
-      name = video.channelName || "Unknown Channel";
-    } else if (groupingMode === "language") {
-      const stripped = video.languageName ? video.languageName.split('(')[0].trim() : "";
-      name = stripped ? stripped : (video.language ? video.language.toUpperCase() : "Unspecified");
-    }
+    const name = videoGroupKey(video);
     if (!groups.has(name)) groups.set(name, []);
     groups.get(name)!.push(video);
   });
-  let sortedGroups = Array.from(groups.entries());
-  if (sortOption === "channel-asc" || sortOption === "title-asc") {
-    sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
-  } else if (sortOption === "duration-desc") {
-    sortedGroups.sort((a, b) => {
-      const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
-      const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
-      return durationB - durationA;
-    });
-  } else if (sortOption === "duration-asc") {
-    sortedGroups.sort((a, b) => {
-      const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
-      const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
-      return durationA - durationB;
-    });
-  }
-  return sortedGroups
+  return orderLiveGroupEntries(Array.from(groups.entries()))
     .map(([groupName, groupVideos]) => {
       const ck = nestedChannelCollapseKey(collapseScopeId, groupName);
       const isCollapsed = collapsedGroups.has(ck);
       const groupDuration = groupVideos.reduce((acc, video) => acc + video.seconds, 0);
-      const sortedGroupVideos = sortVideos(groupVideos);
+      const sortedGroupVideos = sortVideosForDisplay(groupVideos);
       const allSelected = groupVideos.every((video) => selectedTabIds.has(video.id));
       const someSelected = !allSelected && groupVideos.some((video) => selectedTabIds.has(video.id));
       const inner =
@@ -1749,7 +1697,7 @@ function renderLiveVideosInnerHtml(
                        </div>
                     </div>
                     <div class="flex-1 font-medium text-xs text-text-secondary truncate nested-group-toggle cursor-pointer" data-nested-group="${escapeHtml(ck)}">${escapeHtml(groupName)}</div>
-                    <div class="text-[10px] text-text-muted font-mono flex items-center gap-2">
+                    <div class="aggregate-group-stats text-[10px] text-text-muted font-mono flex items-center gap-2" data-group-name="${escapeHtml(groupName)}">
                         <span>${groupVideos.length} videos</span>
                         <span class="w-px h-3 bg-border"></span>
                         <span>${formatTime(groupDuration)}</span>
@@ -1868,13 +1816,15 @@ function applyFlatChannelGroupCollapseDom(channel: string, collapsed: boolean): 
   const tabList = document.getElementById("tab-list");
   if (!tabList) return;
   const body = Array.from(tabList.querySelectorAll("[data-flat-group-body]")).find(
-    (el) => el.getAttribute("data-flat-group-body") === channel
+    (element) => element.getAttribute("data-flat-group-body") === channel
   ) as HTMLElement | null;
-  if (body) body.classList.toggle("hidden", collapsed);
-  tabList.querySelectorAll(".group-toggle").forEach((el) => {
-    const h = el as HTMLElement;
-    if (h.dataset.group === channel) {
-      h.classList.toggle("-rotate-90", collapsed);
+  if (body) {
+    body.classList.toggle("hidden", collapsed);
+  }
+  tabList.querySelectorAll("button.group-toggle").forEach((element) => {
+    const buttonElement = element as HTMLElement;
+    if (buttonElement.dataset.group === channel) {
+      buttonElement.classList.toggle("-rotate-90", collapsed);
     }
   });
 }
@@ -2162,6 +2112,163 @@ function sortVideos(videos: VideoData[]): VideoData[] {
   });
 }
 
+function videoGroupKey(video: VideoData): string {
+  if (groupingMode === "channel") return video.channelName || "Unknown Channel";
+  if (groupingMode === "language") {
+    const stripped = video.languageName ? video.languageName.split("(")[0].trim() : "";
+    return stripped ? stripped : video.language ? video.language.toUpperCase() : "Unspecified";
+  }
+  return "";
+}
+
+function sessionTabGroupKey(tab: SavedSessionTab): string {
+  if (groupingMode === "channel") return tab.channelName ?? "Unknown Channel";
+  if (groupingMode === "language") {
+    const stripped = tab.languageName ? tab.languageName.split("(")[0].trim() : "";
+    return stripped ? stripped : tab.language ? tab.language.toUpperCase() : "Unspecified";
+  }
+  return "";
+}
+
+function isMetadataSettling(videos: VideoData[] = allVideos): boolean {
+  return videos.some(
+    (video) =>
+      !video.suspended &&
+      (!hasValidCoreMetadata(video) || video.language === undefined)
+  );
+}
+
+/** Keep DOM order stable while durations/titles stream in; resort once metadata settles. */
+function sortVideosForDisplay(videos: VideoData[]): VideoData[] {
+  if (isMetadataSettling(videos) && sortOption !== "index-asc") {
+    return [...videos].sort((a, b) => a.index - b.index);
+  }
+  return sortVideos(videos);
+}
+
+function sortSessionTabsForDisplay(tabs: SavedSessionTab[]): SavedSessionTab[] {
+  if (sortOption === "index-asc") return tabs;
+  return sortSessionTabs(tabs);
+}
+
+function orderLiveGroupEntries(groups: [string, VideoData[]][]): [string, VideoData[]][] {
+  const entries = [...groups];
+  if (isMetadataSettling()) {
+    return entries.sort((a, b) => {
+      const minA = Math.min(...a[1].map((video) => video.index));
+      const minB = Math.min(...b[1].map((video) => video.index));
+      return minA - minB;
+    });
+  }
+  if (sortOption === "channel-asc" || sortOption === "title-asc") {
+    return entries.sort((a, b) => a[0].localeCompare(b[0]));
+  }
+  if (sortOption === "duration-desc") {
+    return entries.sort((a, b) => {
+      const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
+      const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
+      return durationB - durationA;
+    });
+  }
+  if (sortOption === "duration-asc") {
+    return entries.sort((a, b) => {
+      const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
+      const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
+      return durationA - durationB;
+    });
+  }
+  return entries;
+}
+
+function orderSessionGroupEntries(groups: [string, SavedSessionTab[]][]): [string, SavedSessionTab[]][] {
+  const entries = [...groups];
+  if (sortOption === "channel-asc" || sortOption === "title-asc") {
+    return entries.sort((a, b) => a[0].localeCompare(b[0]));
+  }
+  if (sortOption === "duration-desc") {
+    return entries.sort((a, b) => {
+      const durationA = a[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+      const durationB = b[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+      return durationB - durationA;
+    });
+  }
+  if (sortOption === "duration-asc") {
+    return entries.sort((a, b) => {
+      const durationA = a[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+      const durationB = b[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
+      return durationA - durationB;
+    });
+  }
+  return entries;
+}
+
+function getLiveVideosForCurrentView(): VideoData[] {
+  let baseVideos: VideoData[] = [];
+  if (currentWindowId === "all") {
+    baseVideos = allVideos;
+  } else {
+    const group = windowGroups.find((windowGroup) => windowGroup.id === currentWindowId);
+    baseVideos = group ? group.tabs : [];
+  }
+  return filterVideosForDisplay(baseVideos);
+}
+
+function updateCurrentViewStatsFromState(): void {
+  if (selectedSession) return;
+  const headerStats = document.getElementById("current-view-stats");
+  if (!headerStats) return;
+  const videosToShow = getLiveVideosForCurrentView();
+  const duplicateSummary = summarizeDuplicates(scopeVideoIdCounts);
+  const duration = videosToShow.reduce((acc, video) => acc + video.seconds, 0);
+  headerStats.innerText = formatViewStats(videosToShow.length, duration, duplicateSummary);
+}
+
+function updateTabListAggregateHeadersFromState(): void {
+  if (selectedSession) return;
+  const videosToShow = getLiveVideosForCurrentView();
+
+  document.querySelectorAll("[data-section-wrapper]").forEach((wrapper) => {
+    const sectionKey = wrapper.getAttribute("data-section-wrapper");
+    if (!sectionKey) return;
+    let sectionVideos: VideoData[] = [];
+    if (sectionKey === "__unsorted") {
+      const secs = orderedSections(liveTabSectionsState.sections);
+      const { unsorted } = partitionLiveVideosBySection(
+        videosToShow,
+        secs,
+        liveTabSectionsState.assignments
+      );
+      sectionVideos = unsorted;
+    } else {
+      const secs = orderedSections(liveTabSectionsState.sections);
+      const section = secs.find((sec) => sec.id === sectionKey);
+      if (!section) return;
+      const { blocks } = partitionLiveVideosBySection(
+        videosToShow,
+        secs,
+        liveTabSectionsState.assignments
+      );
+      sectionVideos = blocks.find((block) => block.section.id === sectionKey)?.videos ?? [];
+    }
+    const pills = wrapper.querySelectorAll(".session-stat-pill");
+    if (pills.length >= 2) {
+      pills[0]!.textContent = `${sectionVideos.length} videos`;
+      pills[1]!.textContent = formatTime(sectionVideos.reduce((sum, video) => sum + video.seconds, 0));
+    }
+  });
+
+  document.querySelectorAll(".aggregate-group-stats").forEach((statsEl) => {
+    const groupName = (statsEl as HTMLElement).dataset.groupName;
+    if (!groupName) return;
+    const groupVideos = videosToShow.filter((video) => videoGroupKey(video) === groupName);
+    const spans = statsEl.querySelectorAll("span");
+    if (spans.length >= 3) {
+      spans[0]!.textContent = `${groupVideos.length} videos`;
+      spans[2]!.textContent = formatTime(groupVideos.reduce((acc, video) => acc + video.seconds, 0));
+    }
+  });
+}
+
 const SYNC_COOLDOWN_MS = 30_000;
 let lastSyncTime = 0;
 
@@ -2178,90 +2285,54 @@ function scheduleFetchTabsFromEvents() {
 
 function fingerprintSessionTabsInner(tabs: SavedSessionTab[], collapseScopeId: string): string {
   if (tabs.length === 0) return "";
-  if (groupingMode !== "channel") {
-    return sortSessionTabs(tabs)
-      .map((tab) => `${tab.url}|${tab.title}|${tab.channelName}|${tab.seconds}|${tab.sectionId ?? ""}`)
-      .join(";");
-  }
-  const channels = new Map<string, SavedSessionTab[]>();
-  tabs.forEach((tab) => {
-    const name = tab.channelName ?? "Unknown Channel";
-    if (!channels.has(name)) channels.set(name, []);
-    channels.get(name)!.push(tab);
-  });
-  let sortedGroups = Array.from(channels.entries());
-  if (sortOption === "channel-asc") {
-    sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
-  } else if (sortOption === "duration-desc") {
-    sortedGroups.sort((a, b) => {
-      const durationA = a[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
-      const durationB = b[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
-      return durationB - durationA;
+  if (groupingMode === "channel" || groupingMode === "language") {
+    const groups = new Map<string, SavedSessionTab[]>();
+    tabs.forEach((tab) => {
+      const name = sessionTabGroupKey(tab);
+      if (!groups.has(name)) groups.set(name, []);
+      groups.get(name)!.push(tab);
     });
-  } else if (sortOption === "duration-asc") {
-    sortedGroups.sort((a, b) => {
-      const durationA = a[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
-      const durationB = b[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
-      return durationA - durationB;
-    });
+    return orderSessionGroupEntries(Array.from(groups.entries()))
+      .map(([groupName, tabList]) => {
+        const ck = nestedChannelCollapseKey(collapseScopeId, groupName);
+        const collapsed = collapsedGroups.has(ck);
+        const sortedTabs = sortSessionTabsForDisplay(tabList);
+        const sig = sortedTabs
+          .map((tab) => `${tab.url}|${tab.sectionId ?? ""}|${sessionTabGroupKey(tab)}`)
+          .join(";");
+        return `${ck}:${collapsed}:${sig}`;
+      })
+      .join("||");
   }
-  return sortedGroups
-    .map(([channel, tabList]) => {
-      const ck = nestedChannelCollapseKey(collapseScopeId, channel);
-      const collapsed = collapsedGroups.has(ck);
-      const sortedTabs = sortSessionTabs(tabList);
-      const sig = sortedTabs
-        .map((tab) => `${tab.url}|${tab.title}|${tab.channelName}|${tab.seconds}|${tab.sectionId ?? ""}`)
-        .join(";");
-      return `${ck}:${collapsed}:${sig}`;
-    })
-    .join("||");
+  return sortSessionTabsForDisplay(tabs)
+    .map((tab) => `${tab.url}|${tab.sectionId ?? ""}`)
+    .join(";");
 }
 
 function fingerprintLiveVideosInner(videos: VideoData[], collapseScopeId: string): string {
   if (videos.length === 0) return "";
-  if (groupingMode !== "channel") {
-    return sortVideos(videos)
-      .map(
-        (video) => liveVideoFingerprintPart(video)
-      )
-      .join(";");
-  }
-  const channels = new Map<string, VideoData[]>();
-  videos.forEach((video) => {
-    const name = video.channelName || "Unknown Channel";
-    if (!channels.has(name)) channels.set(name, []);
-    channels.get(name)!.push(video);
-  });
-  let sortedGroups = Array.from(channels.entries());
-  if (sortOption === "channel-asc") {
-    sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
-  } else if (sortOption === "duration-desc") {
-    sortedGroups.sort((a, b) => {
-      const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
-      const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
-      return durationB - durationA;
+  if (groupingMode === "channel" || groupingMode === "language") {
+    const groups = new Map<string, VideoData[]>();
+    videos.forEach((video) => {
+      const name = videoGroupKey(video);
+      if (!groups.has(name)) groups.set(name, []);
+      groups.get(name)!.push(video);
     });
-  } else if (sortOption === "duration-asc") {
-    sortedGroups.sort((a, b) => {
-      const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
-      const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
-      return durationA - durationB;
-    });
+    return orderLiveGroupEntries(Array.from(groups.entries()))
+      .map(([groupName, groupVideos]) => {
+        const ck = nestedChannelCollapseKey(collapseScopeId, groupName);
+        const collapsed = collapsedGroups.has(ck);
+        const sortedGroupVideos = sortVideosForDisplay(groupVideos);
+        const allSelected = groupVideos.every((video) => selectedTabIds.has(video.id));
+        const someSelected = !allSelected && groupVideos.some((video) => selectedTabIds.has(video.id));
+        const vidSig = sortedGroupVideos.map((video) => liveVideoStructurePart(video)).join(";");
+        return `${ck}:${collapsed}:${allSelected}:${someSelected}:${vidSig}`;
+      })
+      .join("||");
   }
-  return sortedGroups
-    .map(([channel, groupVideos]) => {
-      const ck = nestedChannelCollapseKey(collapseScopeId, channel);
-      const collapsed = collapsedGroups.has(ck);
-      const sortedGroupVideos = sortVideos(groupVideos);
-      const allSelected = groupVideos.every((video) => selectedTabIds.has(video.id));
-      const someSelected = !allSelected && groupVideos.some((video) => selectedTabIds.has(video.id));
-      const vidSig = sortedGroupVideos
-        .map((video) => liveVideoFingerprintPart(video))
-        .join(";");
-      return `${ck}:${collapsed}:${allSelected}:${someSelected}:${vidSig}`;
-    })
-    .join("||");
+  return sortVideosForDisplay(videos)
+    .map((video) => liveVideoStructurePart(video))
+    .join(";");
 }
 
 function sessionSectionsFingerprintSig(session: SavedSession): string {
@@ -2275,7 +2346,7 @@ function liveAssignmentsFingerprintSig(): string {
   return entries.map(([url, sid]) => `${url}→${sid}`).join(";");
 }
 
-function tabListFingerprint(): string {
+function tabListStructureFingerprint(): string {
   if (selectedSession) {
     const session = selectedSession;
     const tabsToShow = filterSessionTabsForDisplay(session.tabs ?? []);
@@ -2308,43 +2379,27 @@ function tabListFingerprint(): string {
       parts.push(`__unsorted:${uCollapsed}:${fingerprintSessionTabsInner(unsorted, "__unsorted")}`);
       return `${state}\x1fseclay:${layoutMode}:${parts.join("§")}`;
     }
-    if (groupingMode === "channel") {
-      const channels = new Map<string, SavedSessionTab[]>();
+    if (groupingMode === "channel" || groupingMode === "language") {
+      const groups = new Map<string, SavedSessionTab[]>();
       tabsToShow.forEach((tab) => {
-        const name = tab.channelName ?? "Unknown Channel";
-        if (!channels.has(name)) channels.set(name, []);
-        channels.get(name)!.push(tab);
+        const name = sessionTabGroupKey(tab);
+        if (!groups.has(name)) groups.set(name, []);
+        groups.get(name)!.push(tab);
       });
-      let sortedGroups = Array.from(channels.entries());
-      if (sortOption === "channel-asc") {
-        sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
-      } else if (sortOption === "duration-desc") {
-        sortedGroups.sort((a, b) => {
-          const durationA = a[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
-          const durationB = b[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
-          return durationB - durationA;
-        });
-      } else if (sortOption === "duration-asc") {
-        sortedGroups.sort((a, b) => {
-          const durationA = a[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
-          const durationB = b[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
-          return durationA - durationB;
-        });
-      }
-      const groupSig = sortedGroups
-        .map(([channel, tabList]) => {
-          const collapsed = collapsedGroups.has(channel);
-          const sortedTabs = sortSessionTabs(tabList);
+      const groupSig = orderSessionGroupEntries(Array.from(groups.entries()))
+        .map(([groupName, tabList]) => {
+          const collapsed = collapsedGroups.has(groupName);
+          const sortedTabs = sortSessionTabsForDisplay(tabList);
           const sig = sortedTabs
-            .map((tab) => `${tab.url}|${tab.title}|${tab.channelName}|${tab.seconds}`)
+            .map((tab) => `${tab.url}|${tab.sectionId ?? ""}|${sessionTabGroupKey(tab)}`)
             .join(";");
-          return `${channel}:${collapsed}:${sig}`;
+          return `${groupName}:${collapsed}:${sig}`;
         })
         .join("||");
       return `${state}\x1fcg:${groupSig}`;
     }
-    const sorted = sortSessionTabs(tabsToShow);
-    const vidSig = sorted.map((tab) => `${tab.url}|${tab.title}|${tab.channelName}|${tab.seconds}`).join(";");
+    const sorted = sortSessionTabsForDisplay(tabsToShow);
+    const vidSig = sorted.map((tab) => `${tab.url}|${tab.sectionId ?? ""}`).join(";");
     return `${state}\x1fflat:${vidSig}`;
   }
 
@@ -2367,6 +2422,7 @@ function tabListFingerprint(): string {
     thumbnailQuality,
     [...collapsedGroups].sort().join(","),
     [...selectedTabIds].sort((a, b) => a - b).join(","),
+    String(isMetadataSettling(videosToShow)),
     orderedSections(liveTabSectionsState.sections)
       .map((s) => `${s.id}:${s.name}:${s.order}:${s.emoji ?? ""}:${s.colorIndex ?? 0}`)
       .join("|"),
@@ -2391,45 +2447,23 @@ function tabListFingerprint(): string {
     return `${state}\x1flivesec:${layoutMode}:${parts.join("§")}`;
   }
   if (groupingMode === "none") {
-    const sortedVideos = sortVideos(videosToShow);
-    const vidSig = sortedVideos.map((video) => liveVideoFingerprintPart(video)).join(";");
+    const sortedVideos = sortVideosForDisplay(videosToShow);
+    const vidSig = sortedVideos.map((video) => liveVideoStructurePart(video)).join(";");
     return `${state}\x1fnone:${layoutMode}:${vidSig}`;
   }
   const groups = new Map<string, VideoData[]>();
   videosToShow.forEach((video) => {
-    let name = "Unknown";
-    if (groupingMode === "channel") {
-      name = video.channelName || "Unknown Channel";
-    } else if (groupingMode === "language") {
-      const stripped = video.languageName ? video.languageName.split('(')[0].trim() : "";
-      name = stripped ? stripped : (video.language ? video.language.toUpperCase() : "Unspecified");
-    }
+    const name = videoGroupKey(video);
     if (!groups.has(name)) groups.set(name, []);
     groups.get(name)!.push(video);
   });
-  let sortedGroups = Array.from(groups.entries());
-  if (sortOption === "channel-asc" || sortOption === "title-asc") {
-    sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
-  } else if (sortOption === "duration-desc") {
-    sortedGroups.sort((a, b) => {
-      const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
-      const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
-      return durationB - durationA;
-    });
-  } else if (sortOption === "duration-asc") {
-    sortedGroups.sort((a, b) => {
-      const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
-      const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
-      return durationA - durationB;
-    });
-  }
-  const groupSig = sortedGroups
+  const groupSig = orderLiveGroupEntries(Array.from(groups.entries()))
     .map(([groupName, videos]) => {
       const collapsed = collapsedGroups.has(groupName);
-      const sortedGroupVideos = sortVideos(videos);
+      const sortedGroupVideos = sortVideosForDisplay(videos);
       const allSelected = videos.every((video) => selectedTabIds.has(video.id));
       const someSelected = !allSelected && videos.some((video) => selectedTabIds.has(video.id));
-      const vidSig = sortedGroupVideos.map((video) => liveVideoFingerprintPart(video)).join(";");
+      const vidSig = sortedGroupVideos.map((video) => liveVideoStructurePart(video)).join(";");
       return `${groupName}:${collapsed}:${allSelected}:${someSelected}:${vidSig}`;
     })
     .join("||");
@@ -2477,6 +2511,18 @@ function updateLiveTabListCardsFromState() {
       curEl.classList.toggle("text-text-muted", watchedPercent <= 0);
     }
     if (listBar) listBar.style.width = `${watchedPercent}%`;
+
+    const languageLabel = video.languageName ? video.languageName.split("(")[0].trim() : "";
+    const langEl = card.querySelector(".manager-card-language") as HTMLElement | null;
+    if (langEl) {
+      if (languageLabel) {
+        langEl.textContent = languageLabel;
+        langEl.classList.remove("hidden");
+      } else {
+        langEl.textContent = "";
+        langEl.classList.add("hidden");
+      }
+    }
   });
 }
 
@@ -2589,7 +2635,7 @@ function renderMain() {
     headerTitle.innerText = session.name;
     headerStats.innerText = formatViewStats(tabsToShow.length, totalSec, duplicateSummary);
 
-    const fpSession = tabListFingerprint();
+    const fpSession = tabListStructureFingerprint();
     if (fpSession === lastTabListFingerprint) return;
 
     if (tabsToShow.length === 0 && !usesSectionLayoutForSession(session)) {
@@ -2698,7 +2744,7 @@ function renderMain() {
   const duration = videosToShow.reduce((acc, video) => acc + video.seconds, 0);
   headerStats.innerText = formatViewStats(videosToShow.length, duration, duplicateSummary);
 
-  const fpLive = tabListFingerprint();
+  const fpLive = tabListStructureFingerprint();
   if (fpLive === lastTabListFingerprint) {
     skippedTabListDom = true;
     return;
@@ -2723,7 +2769,7 @@ function renderMain() {
   }
 
   if (groupingMode === 'none') {
-    const sortedVideos = sortVideos(videosToShow);
+    const sortedVideos = sortVideosForDisplay(videosToShow);
     if (layoutMode === 'grid') {
       tabListContainerInnerHtmlUpdated = true;
       setTabListInnerHTML(container, renderVideoGrid(sortedVideos));
@@ -2735,42 +2781,19 @@ function renderMain() {
     lastTabListFingerprint = fpLive;
   } else {
     const groups = new Map<string, VideoData[]>();
-    videosToShow.forEach(video => {
-      let name = "Unknown";
-      if (groupingMode === "channel") {
-        name = video.channelName || "Unknown Channel";
-      } else if (groupingMode === "language") {
-        name = video.languageName ? video.languageName.split('(')[0].trim() : (video.language ? video.language.toUpperCase() : "Unspecified");
-      }
+    videosToShow.forEach((video) => {
+      const name = videoGroupKey(video);
       if (!groups.has(name)) groups.set(name, []);
       groups.get(name)!.push(video);
     });
 
-    let sortedGroups = Array.from(groups.entries());
-
-    if (sortOption === 'channel-asc') {
-      sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
-    } else if (sortOption === 'duration-desc') {
-      sortedGroups.sort((a, b) => {
-        const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
-        const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
-        return durationB - durationA;
-      });
-    } else if (sortOption === 'duration-asc') {
-      sortedGroups.sort((a, b) => {
-        const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
-        const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
-        return durationA - durationB;
-      });
-    }
-
     tabListContainerInnerHtmlUpdated = true;
     setTabListInnerHTML(
       container,
-      sortedGroups.map(([groupName, videos]) => {
+      orderLiveGroupEntries(Array.from(groups.entries())).map(([groupName, videos]) => {
       const isCollapsed = collapsedGroups.has(groupName);
       const groupDuration = videos.reduce((acc, video) => acc + video.seconds, 0);
-      const sortedGroupVideos = sortVideos(videos);
+      const sortedGroupVideos = sortVideosForDisplay(videos);
 
       const allSelected = videos.every(video => selectedTabIds.has(video.id));
       const someSelected = !allSelected && videos.some(video => selectedTabIds.has(video.id));
@@ -2791,7 +2814,7 @@ function renderMain() {
                     </div>
 
                     <div class="flex-1 font-medium text-sm text-text-primary truncate cursor-pointer group-toggle" data-group="${escapeHtml(groupName)}">${escapeHtml(groupName)}</div>
-                    <div class="text-[10px] text-text-muted font-mono flex items-center gap-2">
+                    <div class="aggregate-group-stats text-[10px] text-text-muted font-mono flex items-center gap-2" data-group-name="${escapeHtml(groupName)}">
                         <span>${videos.length} videos</span>
                         <span class="w-px h-3 bg-border"></span>
                         <span>${formatTime(groupDuration)}</span>
@@ -2828,7 +2851,7 @@ function renderVideoList(videos: VideoData[], sectionColorIndex?: number | "unso
            <div class="flex items-baseline gap-2 mb-1">
              <h3 class="manager-card-title text-sm font-medium text-text-primary truncate" title="${video.title}">${video.title}</h3>
              <span class="manager-card-channel text-[10px] text-text-muted truncate uppercase tracking-tight">${video.channelName}</span>
-             ${video.languageName ? `<span class="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold ml-1 uppercase shrink-0">${video.languageName.split('(')[0].trim()}</span>` : ''}
+             ${video.languageName ? `<span class="manager-card-language text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold ml-1 uppercase shrink-0">${video.languageName.split('(')[0].trim()}</span>` : `<span class="manager-card-language hidden"></span>`}
              ${windowBadgeHtml(video)}
              ${duplicateBadgeHtml(video.url)}
            </div>
@@ -3031,7 +3054,7 @@ function renderVideoGrid(videos: VideoData[], sectionColorIndex?: number | "unso
                         <div class="flex items-center gap-1 shrink-0">
                           ${windowBadgeHtml(video)}
                           ${duplicateBadgeHtml(video.url)}
-                          ${video.languageName ? `<span class="bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0">${video.languageName.split('(')[0].trim()}</span>` : ''}
+                          ${video.languageName ? `<span class="manager-card-language bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0">${video.languageName.split('(')[0].trim()}</span>` : `<span class="manager-card-language hidden"></span>`}
                         </div>
                     </div>
                 </div>
@@ -3442,7 +3465,7 @@ function setupListeners() {
         if (collapsedGroups.has(key)) collapsedGroups.delete(key);
         else collapsedGroups.add(key);
         applySectionCollapseDom(key, collapsedGroups.has(key));
-        lastTabListFingerprint = tabListFingerprint();
+        lastTabListFingerprint = tabListStructureFingerprint();
       }
       return;
     }
@@ -3454,7 +3477,7 @@ function setupListeners() {
         if (collapsedGroups.has(key)) collapsedGroups.delete(key);
         else collapsedGroups.add(key);
         applyNestedGroupCollapseDom(key, collapsedGroups.has(key));
-        lastTabListFingerprint = tabListFingerprint();
+        lastTabListFingerprint = tabListStructureFingerprint();
       }
       return;
     }
@@ -3538,7 +3561,7 @@ function setupListeners() {
         group.duration = group.tabs.reduce((acc, video) => acc + video.seconds, 0);
       }
       windowGroups = windowGroups.filter((group) => group.tabs.length > 0);
-      lastTabListFingerprint = tabListFingerprint();
+      lastTabListFingerprint = tabListStructureFingerprint();
       renderSidebar();
       updateSelectionUI();
       return;
@@ -3619,7 +3642,7 @@ function setupListeners() {
         if (collapsedGroups.has(groupName)) collapsedGroups.delete(groupName);
         else collapsedGroups.add(groupName);
         applyFlatChannelGroupCollapseDom(groupName, collapsedGroups.has(groupName));
-        lastTabListFingerprint = tabListFingerprint();
+        lastTabListFingerprint = tabListStructureFingerprint();
       }
       return;
     }
@@ -3989,9 +4012,24 @@ function setupListeners() {
 
   document.getElementById("btn-collapse-all")?.addEventListener("click", () => {
     const keys = new Set<string>();
-    document.querySelectorAll('[data-section-collapse]').forEach(el => keys.add((el as HTMLElement).dataset.sectionCollapse!));
-    document.querySelectorAll('[data-nested-group-collapse]').forEach(el => keys.add((el as HTMLElement).dataset.nestedGroupCollapse!));
-    document.querySelectorAll('[data-flat-channel-collapse]').forEach(el => keys.add((el as HTMLElement).dataset.flatChannelCollapse!));
+    document.querySelectorAll("button[data-section-collapse]").forEach((element) => {
+      const value = (element as HTMLElement).dataset.sectionCollapse;
+      if (value) {
+        keys.add(value);
+      }
+    });
+    document.querySelectorAll("button[data-nested-group]").forEach((element) => {
+      const value = (element as HTMLElement).dataset.nestedGroup;
+      if (value) {
+        keys.add(value);
+      }
+    });
+    document.querySelectorAll("button.group-toggle").forEach((element) => {
+      const value = (element as HTMLElement).dataset.group;
+      if (value) {
+        keys.add(value);
+      }
+    });
 
     let allCollapsed = true;
     for (const key of keys) {
@@ -4335,7 +4373,7 @@ document.addEventListener("DOMContentLoaded", () => {
         video.suspended = false;
         if (message.metadata.language !== undefined) video.language = message.metadata.language;
         if (message.metadata.languageName !== undefined) video.languageName = message.metadata.languageName;
-        applyProbeResultsToUi();
+        scheduleProbeResultsToUi();
       }
     }
   });

@@ -631,22 +631,25 @@ async function livePlaybackTick(): Promise<void> {
   }
 }
 
-function renderNow(): void {
-  if (videoData.length === 0) {
-    stopLiveTick();
-    resetVideoListFingerprint();
-    app.innerHTML = `
-          <div class="flex flex-col items-center justify-center min-h-popup px-8 text-center">
-            <div class="w-14 h-10 rounded-lg bg-accent flex items-center justify-center mb-5 shadow-[0_4px_20px_rgba(255,0,0,0.35)]">
-              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
-            </div>
-            <p class="text-sm font-medium text-text-primary mb-1">No tabs open</p>
-            <p class="text-xs text-text-muted leading-relaxed">Open YouTube videos in this window to build your watch queue.</p>
-          </div>
-        `;
-    return;
-  }
+function goToSettings(): void {
+  currentView = "settings";
+  render();
+}
 
+async function openManager(): Promise<void> {
+  const managerUrl = browser.runtime.getURL("/manager.html");
+  const tabs = await browser.tabs.query({ url: managerUrl });
+  if (tabs.length > 0 && tabs[0].id != null) {
+    await browser.tabs.update(tabs[0].id, { active: true });
+    if (tabs[0].windowId != null) {
+      await browser.windows.update(tabs[0].windowId, { focused: true });
+    }
+  } else {
+    await browser.tabs.create({ url: managerUrl });
+  }
+}
+
+function renderNow(): void {
   if (currentView === "settings") {
     stopLiveTick();
     resetVideoListFingerprint();
@@ -707,7 +710,33 @@ function renderNow(): void {
     return;
   }
 
+  if (videoData.length === 0) {
+    stopLiveTick();
+    resetVideoListFingerprint();
+    setupApp();
+
+    document.getElementById("now-playing")?.classList.add("hidden");
+    document.getElementById("up-next-divider")?.classList.add("hidden");
+
+    updateHeaderStats(0, 0, 0, 0);
+
+    const listEl = document.getElementById("video-list");
+    if (listEl) {
+      listEl.innerHTML = `
+        <div class="flex flex-col items-center justify-center h-full min-h-[320px] px-8 text-center">
+          <div class="w-14 h-10 rounded-lg bg-accent flex items-center justify-center mb-5 shadow-[0_4px_20px_rgba(255,0,0,0.35)]">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
+          </div>
+          <p class="text-sm font-medium text-text-primary mb-1">No tabs open</p>
+          <p class="text-xs text-text-muted leading-relaxed max-w-[240px]">Open YouTube videos in this window to build your watch queue.</p>
+        </div>
+      `;
+    }
+    return;
+  }
+
   setupApp();
+  document.getElementById("up-next-divider")?.classList.remove("hidden");
 
   const { totalSeconds, totalWatched, totalRemaining, videoCount } = getQueueStats();
   updateHeaderStats(totalSeconds, totalRemaining, videoCount, totalWatched);
@@ -802,7 +831,7 @@ function setupApp() {
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
             </button>
             <button id="go-to-settings" class="w-7 h-7 flex items-center justify-center rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 cursor-pointer group/settings active:scale-95" title="Settings">
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="group-hover/settings:rotate-90 transition-transform duration-500"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="group-hover/settings:rotate-45 transition-transform duration-500"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
           </div>
         </div>
@@ -860,7 +889,7 @@ function setupApp() {
         <p id="np-also-playing" class="hidden px-3 pb-2 -mt-0.5 text-[10px] text-text-muted truncate"></p>
       </section>
 
-      <div class="flex items-center justify-between px-3 py-1.5 shrink-0 border-b border-white/5">
+      <div id="up-next-divider" class="flex items-center justify-between px-3 py-1.5 shrink-0 border-b border-white/5">
         <span class="text-[13px] font-medium text-text-primary">Up next</span>
         <div class="flex gap-0.5 p-0.5 rounded-full bg-surface-elevated ring-1 ring-inset ring-white/10">
           <button id="sort-order" class="px-2.5 py-1 text-[11px] font-medium rounded-full cursor-pointer transition-all border-0 active:scale-95">Tab order</button>
@@ -872,21 +901,9 @@ function setupApp() {
     </div>
   `;
 
-  document.getElementById("go-to-settings")?.addEventListener("click", () => {
-    currentView = "settings";
-    render();
-  });
-  document.getElementById("open-manager")?.addEventListener("click", async () => {
-    const managerUrl = browser.runtime.getURL("/manager.html");
-    const tabs = await browser.tabs.query({ url: managerUrl });
-    if (tabs.length > 0 && tabs[0].id != null) {
-      await browser.tabs.update(tabs[0].id, { active: true });
-      if (tabs[0].windowId != null) {
-        await browser.windows.update(tabs[0].windowId, { focused: true });
-      }
-    } else {
-      await browser.tabs.create({ url: managerUrl });
-    }
+  document.getElementById("go-to-settings")?.addEventListener("click", goToSettings);
+  document.getElementById("open-manager")?.addEventListener("click", () => {
+    void openManager();
   });
   document.getElementById("refresh-tabs")?.addEventListener("click", getYouTubeTabs);
   document.getElementById("sort-order")?.addEventListener("click", () => {

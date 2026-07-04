@@ -26,6 +26,9 @@ interface CachedMetadataPayload {
   isLive: boolean;
   language?: string | null;
   languageName?: string | null;
+  paused?: boolean;
+  volume?: number;
+  muted?: boolean;
 }
 
 let lastMetadata: CachedMetadataPayload = {
@@ -37,6 +40,9 @@ let lastMetadata: CachedMetadataPayload = {
   isLive: false,
   language: null,
   languageName: null,
+  paused: true,
+  volume: 1,
+  muted: false,
 };
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -144,6 +150,9 @@ function readMetadataFromDom(): CachedMetadataPayload {
   }
 
   const { language, languageName } = extractLanguageFromDom();
+  const volume = videoEl ? videoEl.volume : 1;
+  const muted = videoEl ? videoEl.muted : false;
+  const paused = videoEl ? videoEl.paused : true;
 
   return {
     videoId,
@@ -154,6 +163,9 @@ function readMetadataFromDom(): CachedMetadataPayload {
     isLive,
     language,
     languageName,
+    paused,
+    volume,
+    muted,
   };
 }
 

@@ -47,7 +47,7 @@ function applyStoreToVideos(): void {
   videoData.forEach((video) => {
     video.excluded = prefs.excludedUrls.includes(normalizeYoutubeUrl(video.url));
     const cached = lookupCachedMetadata(metadataCache, video.url);
-    if (cached) applyCachedMetadataToVideo(video, cached);
+    if (cached) applyCachedDurableMetadataToVideo(video, cached);
   });
 }
 
@@ -71,12 +71,140 @@ function titleFromTab(tab: Browser.tabs.Tab): string {
   return raw && raw !== "YouTube" ? raw : "YouTube Video";
 }
 
-function applyCachedMetadataToVideo(video: VideoData, cached: CachedMetadata): void {
+function persistVideoPlaybackToCache(video: VideoData): void {
+  void requestMetadataUpdate(video.url, buildMetadataForCache(video));
+}
+
+function buildMetadataForCache(
+  video: VideoData,
+  videoId?: string
+): Omit<CachedMetadata, "timestamp"> {
+  return {
+    seconds: video.isLive ? 0 : video.seconds,
+    title: video.title,
+    channelName: video.channelName,
+    currentTime: video.isLive ? 0 : video.currentTime,
+    isLive: video.isLive,
+    videoId: videoId ?? getVideoIdFromUrl(video.url) ?? undefined,
+    paused: video.paused,
+    volume: video.volume,
+    muted: video.muted,
+  };
+}
+
+function applyProbedMetadataToVideo(
+  video: VideoData,
+  metadata: {
+    title?: string;
+    channelName?: string;
+    seconds?: number;
+    currentTime?: number;
+    isLive?: boolean;
+    paused?: boolean;
+    volume?: number;
+    muted?: boolean;
+  }
+): void {
+  if (metadata.title) video.title = metadata.title;
+  if (metadata.channelName !== undefined) video.channelName = metadata.channelName;
+  if (metadata.isLive) {
+    markVideoAsLive(video);
+  } else if (metadata.isLive === false) {
+    video.isLive = false;
+    if (metadata.seconds !== undefined) video.seconds = metadata.seconds;
+    if (metadata.currentTime !== undefined) {
+      applyPlaybackTimeToVideo(video, metadata.currentTime);
+    }
+  } else if (metadata.seconds !== undefined) {
+    video.seconds = metadata.seconds;
+    if (metadata.currentTime !== undefined) {
+      applyPlaybackTimeToVideo(video, metadata.currentTime);
+    }
+  } else if (metadata.currentTime !== undefined) {
+    applyPlaybackTimeToVideo(video, metadata.currentTime);
+  }
+  if (metadata.paused !== undefined) video.paused = metadata.paused;
+  if (metadata.volume !== undefined) video.volume = metadata.volume;
+  if (metadata.muted !== undefined) video.muted = metadata.muted;
+}
+
+function getEffectiveWatchedSeconds(video: VideoData): number {
+  if (video.isLive || video.excluded) return 0;
+  if (video.seconds <= 0) return 0;
+  return Math.min(video.currentTime, video.seconds);
+}
+
+function getWatchedPercent(video: VideoData): number {
+  if (video.isLive || video.seconds <= 0) return 0;
+  return Math.min(100, Math.max(0, (video.currentTime / video.seconds) * 100));
+}
+
+function getQueueVideos(): VideoData[] {
+  return videoData.filter((video) => !video.excluded && !video.isLive);
+}
+
+function estimateCurrentTimeFromCache(video: VideoData, cached: CachedMetadata): number {
+  if (cached.isLive || video.isLive) return 0;
+  const base = cached.currentTime ?? 0;
+  const shouldEstimate =
+    cached.timestamp != null &&
+    (cached.paused === false || (cached.paused === undefined && video.audible));
+  if (!shouldEstimate) return base;
+  const elapsed = (Date.now() - cached.timestamp) / 1000;
+  const estimated = base + elapsed;
+  if (cached.seconds > 0) return Math.min(cached.seconds, estimated);
+  if (video.seconds > 0) return Math.min(video.seconds, estimated);
+  return estimated;
+}
+
+function clampVideoCurrentTime(video: VideoData): void {
+  if (video.isLive || video.seconds <= 0) return;
+  video.currentTime = Math.min(video.currentTime, video.seconds);
+}
+
+function applyPlaybackTimeToVideo(video: VideoData, currentTime: number): void {
+  if (video.isLive) {
+    video.currentTime = 0;
+    return;
+  }
+  video.currentTime = currentTime;
+  clampVideoCurrentTime(video);
+}
+
+function markVideoAsLive(video: VideoData): void {
+  video.isLive = true;
+  video.seconds = 0;
+  video.currentTime = 0;
+}
+
+function applyCachedDurableMetadataToVideo(video: VideoData, cached: CachedMetadata): void {
   video.title = cached.title || video.title;
   video.channelName = cached.channelName || "";
-  video.seconds = cached.seconds || 0;
   video.isLive = cached.isLive || false;
+  if (video.isLive) {
+    markVideoAsLive(video);
+    return;
+  }
+  video.seconds = cached.seconds || 0;
+}
+
+function applyCachedPlaybackToVideo(video: VideoData, cached: CachedMetadata): void {
+  if (video.isLive || cached.isLive) {
+    markVideoAsLive(video);
+    return;
+  }
   video.paused = cached.paused;
+  video.volume = cached.volume;
+  video.muted = cached.muted;
+  if (cached.currentTime != null || cached.timestamp != null) {
+    video.currentTime = estimateCurrentTimeFromCache(video, cached);
+    clampVideoCurrentTime(video);
+  }
+}
+
+function applyCachedMetadataToVideo(video: VideoData, cached: CachedMetadata): void {
+  applyCachedDurableMetadataToVideo(video, cached);
+  applyCachedPlaybackToVideo(video, cached);
 }
 
 function buildVideoFromTab(
@@ -112,10 +240,12 @@ browser.runtime.onMessage.addListener((message) => {
   if (message.action === "tab-synced") {
     const video = videoData.find((v) => v.id === message.tabId);
     if (video) {
-      video.seconds = message.metadata.seconds;
-      video.title = message.metadata.title;
-      video.channelName = message.metadata.channelName;
-      video.isLive = message.metadata.isLive || false;
+      applyProbedMetadataToVideo(video, {
+        title: message.metadata.title,
+        channelName: message.metadata.channelName,
+        seconds: message.metadata.seconds,
+        isLive: message.metadata.isLive || false,
+      });
       video.suspended = false;
       scheduleProbeRender();
     }
@@ -273,7 +403,9 @@ async function applyPlaybackStateToVideo(video: VideoData): Promise<PlaybackStat
   const playback = await getPlaybackState(video.id);
   if (!playback) return null;
   video.paused = playback.paused;
-  video.currentTime = playback.currentTime;
+  video.volume = playback.volume;
+  video.muted = playback.muted;
+  applyPlaybackTimeToVideo(video, playback.currentTime);
   return playback;
 }
 
@@ -356,7 +488,9 @@ function scheduleNowPlayingRefine(): void {
 
 function applyLocalPlaybackControl(tabId: number, video: VideoData, state: PlaybackState): boolean {
   video.paused = state.paused;
-  video.currentTime = state.currentTime;
+  video.volume = state.volume;
+  video.muted = state.muted;
+  applyPlaybackTimeToVideo(video, state.currentTime);
   const activelyPlaying = isPlaybackActive(state);
   if (activelyPlaying) {
     if (!resolvedNowPlayingTabIds.includes(tabId)) {
@@ -545,14 +679,14 @@ function getQueueStats(): {
   totalRemaining: number;
   videoCount: number;
 } {
-  const includedVideos = videoData.filter((video) => !video.excluded);
-  const totalSeconds = includedVideos.reduce((sum, video) => sum + video.seconds, 0);
-  const totalWatched = includedVideos.reduce((sum, video) => sum + video.currentTime, 0);
+  const queueVideos = getQueueVideos();
+  const totalSeconds = queueVideos.reduce((sum, video) => sum + video.seconds, 0);
+  const totalWatched = queueVideos.reduce((sum, video) => sum + getEffectiveWatchedSeconds(video), 0);
   return {
     totalSeconds,
     totalWatched,
     totalRemaining: Math.max(0, totalSeconds - totalWatched),
-    videoCount: includedVideos.length,
+    videoCount: queueVideos.length,
   };
 }
 
@@ -567,6 +701,12 @@ function startLiveTick(): void {
 }
 
 function stopLiveTick(): void {
+  const primaryId = getNowPlayingTabId();
+  const primary = primaryId ? findVideoByTabId(primaryId) : undefined;
+  if (primary && primary.seconds > 0 && !primary.isLive) {
+    persistVideoPlaybackToCache(primary);
+  }
+
   if (liveTickInterval != null) {
     clearInterval(liveTickInterval);
     liveTickInterval = null;
@@ -592,12 +732,15 @@ async function livePlaybackTick(): Promise<void> {
       const playback = await getPlaybackState(primary.id);
       if (card && playback) {
         primary.paused = playback.paused;
-        primary.currentTime = playback.currentTime;
+        primary.volume = playback.volume;
+        primary.muted = playback.muted;
+        applyPlaybackTimeToVideo(primary, playback.currentTime);
         updateNowPlayingCard(card, primary, playback, isTabActivelyPlaying(primary));
       }
     }
 
     refreshQueueStatsFromState();
+    updateVideoListCardsFromState();
 
     const now = Date.now();
     if (now - lastNowPlayingDetectAt < NOW_PLAYING_DETECT_MS) return;
@@ -615,7 +758,9 @@ async function livePlaybackTick(): Promise<void> {
         const playback = await getPlaybackState(nextPrimary.id);
         if (card && playback) {
           nextPrimary.paused = playback.paused;
-          nextPrimary.currentTime = playback.currentTime;
+          nextPrimary.volume = playback.volume;
+          nextPrimary.muted = playback.muted;
+          applyPlaybackTimeToVideo(nextPrimary, playback.currentTime);
           updateNowPlayingCard(card, nextPrimary, playback, isTabActivelyPlaying(nextPrimary));
         }
       }
@@ -1007,12 +1152,30 @@ function bindNowPlayingCardEvents(): void {
     void persistLastPlayingTabId(tabId);
     scheduleNowPlayingRefine();
   });
+
+  card.addEventListener("change", (event) => {
+    const target = event.target as HTMLElement;
+    if (!target.classList.contains("np-volume")) return;
+    const tabId = parseInt(card.dataset.npTabId || "0", 10);
+    const video = tabId ? findVideoByTabId(tabId) : undefined;
+    if (!tabId || !video) return;
+    const value = parseInt((target as HTMLInputElement).value, 10);
+    video.volume = value / 100;
+    video.muted = value === 0;
+    persistVideoPlaybackToCache(video);
+  });
 }
 
 function updateNowPlayingCardTime(card: HTMLElement, video: VideoData): void {
-  const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
+  const watchedPercent = getWatchedPercent(video);
   const progressEl = card.querySelector(".np-progress") as HTMLElement | null;
-  if (progressEl) progressEl.style.width = `${watchedPercent}%`;
+  if (progressEl) {
+    if (video.isLive) {
+      progressEl.style.width = "0%";
+    } else {
+      progressEl.style.width = `${watchedPercent}%`;
+    }
+  }
 
   const timeEl = card.querySelector(".np-time") as HTMLElement | null;
   if (!timeEl) return;
@@ -1116,8 +1279,8 @@ function renderNowPlayingCard(primary: VideoData | null, confirmedPlaying: Video
     primary,
     {
       paused: primary.paused ?? !isTabActivelyPlaying(primary),
-      volume: 0,
-      muted: false,
+      volume: primary.volume ?? 1,
+      muted: primary.muted ?? false,
       currentTime: primary.currentTime,
     },
     isTabActivelyPlaying(primary)
@@ -1154,7 +1317,9 @@ async function refineNowPlaying(): Promise<void> {
       const playback = await getPlaybackState(primary.id);
       if (playback) {
         primary.paused = playback.paused;
-        primary.currentTime = playback.currentTime;
+        primary.volume = playback.volume;
+        primary.muted = playback.muted;
+        applyPlaybackTimeToVideo(primary, playback.currentTime);
         updateNowPlayingCard(card, primary, playback, isTabActivelyPlaying(primary));
       }
     }
@@ -1202,7 +1367,7 @@ function updateHeaderStats(
 }
 
 function updateVideoListItem(item: HTMLElement, video: VideoData): void {
-  const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
+  const watchedPercent = getWatchedPercent(video);
   const isNowPlaying = isTabActivelyPlaying(video);
   const isActiveTab = video.active && !isNowPlaying;
   const stateClasses = isNowPlaying
@@ -1429,7 +1594,7 @@ async function getYouTubeTabs(): Promise<void> {
                                video.title !== "YouTube" &&
                                !/^\(\d+\)\s*/.test(video.title);
 
-      // Skip probing if the tab is inactive and inaudible, and we already have valid cached metadata
+      // Inactive tabs: still refresh playback position from cache estimate, or light probe
       if (hasValidMetadata && !video.active && !video.audible) {
         return;
       }
@@ -1445,20 +1610,17 @@ async function getYouTubeTabs(): Promise<void> {
           contentMeta.title &&
           (contentMeta.seconds > 0 || contentMeta.isLive)
         ) {
-          video.title = contentMeta.title;
-          video.channelName = contentMeta.channelName || "";
-          video.seconds = contentMeta.seconds;
-          video.currentTime = contentMeta.currentTime;
-          video.isLive = contentMeta.isLive;
-          
-          requestMetadataUpdate(video.url, {
-            seconds: video.seconds,
-            title: video.title,
-            channelName: video.channelName,
-            currentTime: video.currentTime,
-            isLive: video.isLive,
-            videoId: expectedVideoId ?? undefined,
+          applyProbedMetadataToVideo(video, {
+            title: contentMeta.title,
+            channelName: contentMeta.channelName || "",
+            seconds: contentMeta.seconds,
+            currentTime: contentMeta.currentTime,
+            isLive: contentMeta.isLive,
+            paused: contentMeta.paused,
+            volume: contentMeta.volume,
+            muted: contentMeta.muted,
           });
+          requestMetadataUpdate(video.url, buildMetadataForCache(video, expectedVideoId ?? undefined));
           scheduleProbeRender();
           return;
         }
@@ -1469,13 +1631,16 @@ async function getYouTubeTabs(): Promise<void> {
 
 
       try {
-          const results = await browser.scripting.executeScript({
+        const results = await browser.scripting.executeScript({
           target: { tabId: video.id },
           world: "MAIN",
           args: [hasValidMetadata],
           func: (hasMetadata: boolean) => {
             const videoElement = document.querySelector("video");
             const currentTime = videoElement ? videoElement.currentTime : 0;
+            const volume = videoElement ? videoElement.volume : 1;
+            const muted = videoElement ? videoElement.muted : false;
+            const paused = videoElement ? videoElement.paused : true;
 
             // Current video ID: watch ?v= or Shorts /shorts/VIDEO_ID
             const shortsMatch = window.location.pathname.match(/^\/shorts\/([^/?]+)/);
@@ -1492,13 +1657,16 @@ async function getYouTubeTabs(): Promise<void> {
             const isSpaTransition = playerVideoId && currentVideoId && playerVideoId !== currentVideoId;
 
             if (hasMetadata && !isSpaTransition) {
-              return { currentTime, skipMetadata: true };
+              return { currentTime, volume, muted, paused, skipMetadata: true };
             }
 
             // If SPA transition detected, return a special flag to invalidate any cached data
             if (isSpaTransition) {
               return {
                 currentTime,
+                volume,
+                muted,
+                paused,
                 spaTransition: true,
                 currentVideoId,
                 skipMetadata: false
@@ -1573,6 +1741,9 @@ async function getYouTubeTabs(): Promise<void> {
                 channelName: channel || videoDetails?.author || "",
                 title: title || "YouTube Video",
                 isLive,
+                paused,
+                volume,
+                muted,
                 skipMetadata: false
               };
             } catch (error) {
@@ -1583,6 +1754,9 @@ async function getYouTubeTabs(): Promise<void> {
                  channelName: channel,
                  title: document.title.replace(/^\(\d+\)\s*/g, "").replace(" - YouTube", "").trim() || "YouTube Video",
                  isLive: false,
+                 paused,
+                 volume,
+                 muted,
                  skipMetadata: false
                };
             }
@@ -1594,18 +1768,23 @@ async function getYouTubeTabs(): Promise<void> {
           
           // SPA transition: content script observer will have updated; ask it for metadata (retry once after 500ms)
           if (result.spaTransition) {
-            video.currentTime = result.currentTime || 0;
+            applyPlaybackTimeToVideo(video, result.currentTime || 0);
             const expectedId = getVideoIdFromUrl(video.url);
             const tryContentScript = async (): Promise<boolean> => {
               const meta = await browser.tabs.sendMessage(video.id, { action: "get-metadata" }).catch(() => null);
               if (meta?.videoId === expectedId && meta?.title && (meta.seconds > 0 || meta.isLive)) {
-                video.title = meta.title;
-                video.channelName = meta.channelName ?? "";
-                video.seconds = meta.seconds;
-                video.currentTime = meta.currentTime ?? 0;
-                video.isLive = meta.isLive ?? false;
+                applyProbedMetadataToVideo(video, {
+                  title: meta.title,
+                  channelName: meta.channelName ?? "",
+                  seconds: meta.seconds,
+                  currentTime: meta.currentTime ?? 0,
+                  isLive: meta.isLive ?? false,
+                  paused: meta.paused,
+                  volume: meta.volume,
+                  muted: meta.muted,
+                });
                 if (video.seconds > 0 || video.isLive) {
-                  requestMetadataUpdate(video.url, { seconds: video.seconds, title: video.title, channelName: video.channelName, currentTime: video.currentTime, isLive: video.isLive, videoId: expectedId ?? undefined });
+                  requestMetadataUpdate(video.url, buildMetadataForCache(video, expectedId ?? undefined));
                 }
                 scheduleProbeRender();
                 return true;
@@ -1619,31 +1798,34 @@ async function getYouTubeTabs(): Promise<void> {
           }
           
           if (result.skipMetadata) {
-            // Only update currentTime
-            video.currentTime = result.currentTime || 0;
+            applyProbedMetadataToVideo(video, {
+              currentTime: result.currentTime || 0,
+              volume: result.volume,
+              muted: result.muted,
+              paused: result.paused,
+            });
+            if (!video.isLive && video.seconds > 0) {
+              persistVideoPlaybackToCache(video);
+            }
             scheduleProbeRender();
           } else {
             const duration = result.duration || 0;
-            
-            // Always update title/channel if we got valid data (not just "Loading...")
+
             const hasValidTitle = result.title && result.title !== "Loading..." && result.title !== "YouTube Video";
             if (hasValidTitle || duration > 0 || result.isLive) {
-              video.title = result.title || video.title;
-              video.channelName = result.channelName || video.channelName;
-              video.seconds = duration;
-              video.currentTime = result.currentTime || 0;
-              video.isLive = result.isLive || false;
+              applyProbedMetadataToVideo(video, {
+                title: result.title || video.title,
+                channelName: result.channelName || video.channelName,
+                seconds: duration,
+                currentTime: result.currentTime || 0,
+                isLive: result.isLive || false,
+                volume: result.volume,
+                muted: result.muted,
+                paused: result.paused,
+              });
 
-              // Only cache if we have meaningful data (duration or live status)
               if (duration > 0 || result.isLive) {
-                requestMetadataUpdate(video.url, {
-                  seconds: video.seconds,
-                  title: video.title,
-                  channelName: video.channelName,
-                  currentTime: video.currentTime,
-                  isLive: video.isLive,
-                  videoId: expectedVideoId ?? undefined,
-                });
+                requestMetadataUpdate(video.url, buildMetadataForCache(video, expectedVideoId ?? undefined));
               }
               scheduleProbeRender();
             }

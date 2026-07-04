@@ -18,6 +18,8 @@ export interface VideoData {
   videoId?: string | null;
   audible?: boolean;
   paused?: boolean;
+  volume?: number;
+  muted?: boolean;
 }
 
 export const MAX_CACHE_AGE_MS = 48 * 60 * 60 * 1000;
@@ -35,6 +37,8 @@ export interface CachedMetadata {
   languageName?: string | null;
   audible?: boolean;
   paused?: boolean;
+  volume?: number;
+  muted?: boolean;
 }
 
 export function isCacheEntryUsable(cached: CachedMetadata | undefined): cached is CachedMetadata {
@@ -149,11 +153,14 @@ export function toDurableMetadata(metadata: Omit<CachedMetadata, "timestamp">): 
     seconds: metadata.seconds,
     title: metadata.title,
     channelName: metadata.channelName,
-    currentTime: 0,
+    currentTime: metadata.currentTime,
     isLive: metadata.isLive,
     videoId: metadata.videoId,
     language: metadata.language,
     languageName: metadata.languageName,
+    volume: metadata.volume,
+    muted: metadata.muted,
+    paused: metadata.paused,
   };
 }
 

@@ -34,7 +34,7 @@ import {
   isStoreUpdatedMessage,
   type StoreState,
 } from "../../utils/store";
-import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl } from "../../utils/format";
+import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl, normalizeText } from "../../utils/format";
 import { normalizeLanguageCode } from "../../utils/captionLanguage";
 import {
   buildTabsFromVideos,
@@ -918,11 +918,11 @@ function filterVideosForDisplay(videos: VideoData[]): VideoData[] {
   refreshScopeVideoIdCountsFromVideos(videos);
   let result = videos;
   if (searchQuery) {
-    const searchQueryLower = searchQuery.toLowerCase();
+    const searchQueryNormalized = normalizeText(searchQuery);
     result = result.filter(
       (video) =>
-        video.title.toLowerCase().includes(searchQueryLower) ||
-        video.channelName.toLowerCase().includes(searchQueryLower)
+        normalizeText(video.title).includes(searchQueryNormalized) ||
+        normalizeText(video.channelName).includes(searchQueryNormalized)
     );
   }
   if (showDuplicatesOnly) {
@@ -935,11 +935,11 @@ function filterSessionTabsForDisplay(tabs: SavedSessionTab[]): SavedSessionTab[]
   refreshScopeVideoIdCountsFromSessionTabs(tabs);
   let result = tabs;
   if (searchQuery) {
-    const searchLower = searchQuery.toLowerCase();
+    const searchNormalized = normalizeText(searchQuery);
     result = result.filter(
       (tab) =>
-        (tab.title ?? "").toLowerCase().includes(searchLower) ||
-        (tab.channelName ?? "").toLowerCase().includes(searchLower)
+        normalizeText(tab.title ?? "").includes(searchNormalized) ||
+        normalizeText(tab.channelName ?? "").includes(searchNormalized)
     );
   }
   if (showDuplicatesOnly) {
@@ -2052,15 +2052,15 @@ function renderSidebar() {
 
 async function refreshSavedSessionsSidebar() {
   const sessions = await getSavedSessions();
-  const query = sessionSidebarSearch.trim().toLowerCase();
+  const query = normalizeText(sessionSidebarSearch.trim());
   const filtered = query
-    ? sessions.filter((s) => s.name.toLowerCase().includes(query))
+    ? sessions.filter((session) => normalizeText(session.name).includes(query))
     : sessions;
 
   const fp = [
     query,
     selectedSession?.id ?? "",
-    filtered.map((s) => `${s.id}:${s.name}:${s.savedAt}:${s.tabs?.length ?? 0}:${s.pinned ? 1 : 0}`).join("|"),
+    filtered.map((session) => `${session.id}:${session.name}:${session.savedAt}:${session.tabs?.length ?? 0}:${session.pinned ? 1 : 0}`).join("|"),
   ].join("\x1f");
   if (fp === lastSavedSessionsFingerprint) return;
   lastSavedSessionsFingerprint = fp;
@@ -2078,7 +2078,7 @@ async function refreshSavedSessionsSidebar() {
       : emptyMessage("No saved sessions");
     return;
   }
-  const isSelected = (sid: string) => selectedSession?.id === sid;
+  const isSelected = (sessionId: string) => selectedSession?.id === sessionId;
   const pinIcon = `<svg class="shrink-0 w-3 h-3 text-accent" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>`;
   container.innerHTML = filtered
     .map((savedSession) => {

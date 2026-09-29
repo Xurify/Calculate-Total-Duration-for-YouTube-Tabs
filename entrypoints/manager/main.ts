@@ -35,7 +35,7 @@ import {
   type StoreState,
 } from "../../utils/store";
 import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl, normalizeText } from "../../utils/format";
-import { normalizeLanguageCode } from "../../utils/captionLanguage";
+import { detectLanguageFromPlayerResponse, normalizeLanguageCode } from "../../utils/captionLanguage";
 import {
   buildTabsFromVideos,
   countItemsByVideoId,
@@ -70,6 +70,8 @@ let thumbnailQuality: 'standard' | 'high' = 'high';
 let isSettingsOpen = false;
 
 let sortOption: string = 'duration-desc';
+/** Tab + video ids whose spoken language was read from the page player response. */
+const pageLanguageConfirmed = new Set<string>();
 
 const SORT_SELECT_OPTIONS = [
   { value: "index-asc", label: "Original Order" },
@@ -475,8 +477,10 @@ async function probeTabsMetadata() {
 
     const expectedVideoId = getVideoIdFromUrl(video.url);
     const hasCore = hasValidCoreMetadata(video);
+    const pageLanguageKey = `${video.id}:${expectedVideoId ?? ""}`;
+    const needPageLanguage = !pageLanguageConfirmed.has(pageLanguageKey);
     const skipHeavyProbe =
-      hasCore && video.language !== undefined && !video.active && !video.audible;
+      hasCore && !needPageLanguage && !video.active && !video.audible;
 
     try {
       const contentMeta = await browser.tabs
@@ -502,9 +506,6 @@ async function probeTabsMetadata() {
           video.currentTime = contentMeta.currentTime;
           video.isLive = contentMeta.isLive;
           persistVideoMetadata(video, expectedVideoId);
-          // Content script runs isolated and often cannot see ytInitialPlayerResponse.
-          // Keep going into the page world until language is actually known.
-          if (video.language !== undefined) return;
         }
 
         if (skipHeavyProbe) return;
@@ -537,82 +538,68 @@ async function probeTabsMetadata() {
           const isSpaTransition =
             playerVideoId && currentVideoId && playerVideoId !== currentVideoId;
 
-          const detectLanguage = () => {
-            if (!playerResponse) {
-              return { language: undefined as string | null | undefined, languageName: undefined as string | null | undefined };
-            }
-            const captionTracks =
-              playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-            if (!captionTracks?.length) {
-              return { language: null as string | null, languageName: null as string | null };
-            }
-
-            const normalizeCode = (code: string) => code.trim().toLowerCase().split("-")[0];
-            const displayName = (track: {
-              languageCode?: string;
-              name?: { simpleText?: string };
-            }) => (track.name?.simpleText || track.languageCode || "").split("(")[0].trim();
-
+          const readLanguageSource = () => {
+            if (!playerResponse) return undefined;
             const micro = playerResponse?.microformat?.playerMicroformatRenderer;
-            const preferredCode =
-              playerResponse?.videoDetails?.defaultAudioLanguageCode ||
-              micro?.defaultAudioLanguage ||
-              playerResponse?.videoDetails?.defaultLanguage ||
-              micro?.defaultLanguage ||
-              null;
+            const renderer = playerResponse?.captions?.playerCaptionsTracklistRenderer;
+            const mapFormats = (list: Array<{ audioTrack?: { id?: string; displayName?: string; audioIsDefault?: boolean; isAutoDubbed?: boolean } }> | undefined) =>
+              (list || [])
+                .filter((format) => format?.audioTrack?.id)
+                .map((format) => ({
+                  audioTrack: {
+                    id: format.audioTrack?.id,
+                    displayName: format.audioTrack?.displayName,
+                    audioIsDefault: format.audioTrack?.audioIsDefault,
+                    isAutoDubbed: format.audioTrack?.isAutoDubbed,
+                  },
+                }));
 
-            const asrTracks = captionTracks.filter(
-              (track: { kind?: string; languageCode?: string }) =>
-                track.kind === "asr" && track.languageCode
-            );
-
-            const matchesPreferred = (track: { languageCode?: string }) =>
-              preferredCode &&
-              track.languageCode &&
-              normalizeCode(track.languageCode) === normalizeCode(preferredCode);
-
-            if (preferredCode) {
-              const preferredAsr = asrTracks.find(matchesPreferred);
-              if (preferredAsr?.languageCode) {
-                return {
-                  language: preferredAsr.languageCode,
-                  languageName: displayName(preferredAsr) || preferredAsr.languageCode,
-                };
-              }
-              const preferredAny = captionTracks.find(matchesPreferred);
-              if (preferredAny?.languageCode) {
-                return {
-                  language: preferredAny.languageCode,
-                  languageName: displayName(preferredAny) || preferredAny.languageCode,
-                };
-              }
-            }
-
-            const chosenAsr = asrTracks.length === 1 ? asrTracks[0] : asrTracks[0];
-            if (chosenAsr?.languageCode) {
-              return {
-                language: chosenAsr.languageCode,
-                languageName: displayName(chosenAsr) || chosenAsr.languageCode,
-              };
-            }
-
-            const first = captionTracks.find((track: { languageCode?: string }) => track.languageCode);
-            if (!first?.languageCode) {
-              return { language: undefined as string | undefined, languageName: undefined as string | undefined };
-            }
             return {
-              language: first.languageCode,
-              languageName: displayName(first) || first.languageCode,
+              videoDetails: {
+                defaultAudioLanguageCode: playerResponse?.videoDetails?.defaultAudioLanguageCode,
+                defaultLanguage: playerResponse?.videoDetails?.defaultLanguage,
+              },
+              microformat: {
+                playerMicroformatRenderer: {
+                  defaultAudioLanguage: micro?.defaultAudioLanguage,
+                  defaultLanguage: micro?.defaultLanguage,
+                },
+              },
+              captions: renderer
+                ? {
+                    playerCaptionsTracklistRenderer: {
+                      captionTracks: (renderer.captionTracks || []).map((track: {
+                        kind?: string;
+                        languageCode?: string;
+                        name?: { simpleText?: string };
+                      }) => ({
+                        kind: track.kind,
+                        languageCode: track.languageCode,
+                        name: track.name?.simpleText ? { simpleText: track.name.simpleText } : undefined,
+                      })),
+                      audioTracks: (renderer.audioTracks || []).map((track: {
+                        audioTrackId?: string;
+                        defaultCaptionTrackIndex?: number;
+                      }) => ({
+                        audioTrackId: track.audioTrackId,
+                        defaultCaptionTrackIndex: track.defaultCaptionTrackIndex,
+                      })),
+                      defaultAudioTrackIndex: renderer.defaultAudioTrackIndex,
+                    },
+                  }
+                : undefined,
+              streamingData: {
+                formats: mapFormats(playerResponse?.streamingData?.formats),
+                adaptiveFormats: mapFormats(playerResponse?.streamingData?.adaptiveFormats),
+              },
             };
           };
 
           if (hasMetadata && !isSpaTransition) {
-            const detected = detectLanguage();
             return {
               currentTime,
               skipMetadata: true,
-              language: detected.language,
-              languageName: detected.languageName,
+              languageSource: readLanguageSource(),
             };
           }
 
@@ -695,8 +682,6 @@ async function probeTabsMetadata() {
             title = title.replace(/^\(\d+\)\s*/g, "");
             title = title.replace(" - YouTube", "").trim();
 
-            const detected = detectLanguage();
-
             return {
               duration: isLive ? 0 : duration || videoElement?.duration || 0,
               currentTime,
@@ -704,8 +689,7 @@ async function probeTabsMetadata() {
               title: title || "YouTube Video",
               isLive,
               skipMetadata: false,
-              language: detected.language,
-              languageName: detected.languageName,
+              languageSource: readLanguageSource(),
             };
           } catch (error) {
             return {
@@ -726,6 +710,24 @@ async function probeTabsMetadata() {
 
       if (results[0]?.result) {
         const result = results[0].result;
+
+        if (result.languageSource) {
+          const detected = detectLanguageFromPlayerResponse(result.languageSource);
+          result.language = detected.language;
+          result.languageName = detected.languageName;
+          const renderer = result.languageSource.captions?.playerCaptionsTracklistRenderer;
+          const trackCount = renderer?.captionTracks?.length ?? 0;
+          const formats = [
+            ...(result.languageSource.streamingData?.formats ?? []),
+            ...(result.languageSource.streamingData?.adaptiveFormats ?? []),
+          ];
+          const hasAudioHint =
+            formats.some((format) => format.audioTrack?.id) ||
+            typeof renderer?.defaultAudioTrackIndex === "number";
+          if (detected.language || trackCount === 0 || hasAudioHint) {
+            pageLanguageConfirmed.add(pageLanguageKey);
+          }
+        }
 
         if (result.spaTransition) {
           video.currentTime = result.currentTime || 0;

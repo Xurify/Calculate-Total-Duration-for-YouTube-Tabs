@@ -95,8 +95,10 @@ function readPlayerResponseFromPage(): PlayerResponseShape | null {
   return null;
 }
 
-function extractLanguageFromDom(): DetectedLanguage {
+/** undefined = player response not readable yet. null language = read, no captions. */
+function extractLanguageFromDom(): DetectedLanguage | undefined {
   const playerResponse = readPlayerResponseFromPage();
+  if (!playerResponse) return undefined;
   return detectLanguageFromPlayerResponse(playerResponse);
 }
 
@@ -149,7 +151,9 @@ function readMetadataFromDom(): CachedMetadataPayload {
     isLive = true;
   }
 
-  const { language, languageName } = extractLanguageFromDom();
+  const detected = extractLanguageFromDom();
+  const language = detected?.language;
+  const languageName = detected?.languageName;
   const volume = videoEl ? videoEl.volume : 1;
   const muted = videoEl ? videoEl.muted : false;
   const paused = videoEl ? videoEl.paused : true;

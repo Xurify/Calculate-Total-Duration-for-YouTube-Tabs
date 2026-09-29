@@ -502,7 +502,9 @@ async function probeTabsMetadata() {
           video.currentTime = contentMeta.currentTime;
           video.isLive = contentMeta.isLive;
           persistVideoMetadata(video, expectedVideoId);
-          return;
+          // Content script runs isolated and often cannot see ytInitialPlayerResponse.
+          // Keep going into the page world until language is actually known.
+          if (video.language !== undefined) return;
         }
 
         if (skipHeavyProbe) return;
@@ -536,10 +538,13 @@ async function probeTabsMetadata() {
             playerVideoId && currentVideoId && playerVideoId !== currentVideoId;
 
           const detectLanguage = () => {
+            if (!playerResponse) {
+              return { language: undefined as string | null | undefined, languageName: undefined as string | null | undefined };
+            }
             const captionTracks =
               playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
             if (!captionTracks?.length) {
-              return { language: undefined as string | undefined, languageName: undefined as string | undefined };
+              return { language: null as string | null, languageName: null as string | null };
             }
 
             const normalizeCode = (code: string) => code.trim().toLowerCase().split("-")[0];
@@ -2130,19 +2135,7 @@ function sessionTabGroupKey(tab: SavedSessionTab): string {
   return "";
 }
 
-function isMetadataSettling(videos: VideoData[] = allVideos): boolean {
-  return videos.some(
-    (video) =>
-      !video.suspended &&
-      (!hasValidCoreMetadata(video) || video.language === undefined)
-  );
-}
-
-/** Keep DOM order stable while durations/titles stream in; resort once metadata settles. */
 function sortVideosForDisplay(videos: VideoData[]): VideoData[] {
-  if (isMetadataSettling(videos) && sortOption !== "index-asc") {
-    return [...videos].sort((a, b) => a.index - b.index);
-  }
   return sortVideos(videos);
 }
 
@@ -2153,13 +2146,6 @@ function sortSessionTabsForDisplay(tabs: SavedSessionTab[]): SavedSessionTab[] {
 
 function orderLiveGroupEntries(groups: [string, VideoData[]][]): [string, VideoData[]][] {
   const entries = [...groups];
-  if (isMetadataSettling()) {
-    return entries.sort((a, b) => {
-      const minA = Math.min(...a[1].map((video) => video.index));
-      const minB = Math.min(...b[1].map((video) => video.index));
-      return minA - minB;
-    });
-  }
   if (sortOption === "channel-asc" || sortOption === "title-asc") {
     return entries.sort((a, b) => a[0].localeCompare(b[0]));
   }
@@ -2422,7 +2408,6 @@ function tabListStructureFingerprint(): string {
     thumbnailQuality,
     [...collapsedGroups].sort().join(","),
     [...selectedTabIds].sort((a, b) => a - b).join(","),
-    String(isMetadataSettling(videosToShow)),
     orderedSections(liveTabSectionsState.sections)
       .map((s) => `${s.id}:${s.name}:${s.order}:${s.emoji ?? ""}:${s.colorIndex ?? 0}`)
       .join("|"),

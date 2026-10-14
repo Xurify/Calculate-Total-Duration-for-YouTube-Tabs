@@ -153,7 +153,7 @@ export default defineContentScript({
     > = {
       name: "shelve_and_clear_reading_item",
       description:
-        "Removes an item from Chrome's Reading List after it has been reviewed or saved to a Mandala Method pillar shelf using save_link_to_shelf.",
+        "Removes an item from Chrome's Reading List after it has been reviewed or saved to a Mandala Method pillar shelf using add_link.",
       inputSchema: {
         type: "object",
         properties: {

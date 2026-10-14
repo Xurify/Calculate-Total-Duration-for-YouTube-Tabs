@@ -59,7 +59,7 @@ const DEFAULT_PREFS: UserPrefs = {
   sortByDuration: false,
   excludedUrls: [],
   thumbnailQuality: "high",
-  layoutMode: "grid",
+  layoutMode: "list",
   groupingMode: "none",
   sortOption: "duration-desc",
 };

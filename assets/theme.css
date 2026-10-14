@@ -1,0 +1,129 @@
+@theme {
+  --font-sans: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Newsreader Variable", ui-serif, Georgia, "Times New Roman", serif;
+
+  --color-surface: light-dark(#f4eee1, #1a1714);
+  --color-surface-elevated: light-dark(#faf6ec, #231f1b);
+  --color-surface-hover: light-dark(#e9e1cf, #2d2822);
+  --color-border: light-dark(#d8cdb6, #3b352d);
+  --color-border-hover: light-dark(#c4b69a, #4d453a);
+  --color-text-primary: light-dark(#2a241c, #efe7da);
+  --color-text-secondary: light-dark(#574e41, #b5aa98);
+  --color-text-muted: light-dark(#6c6254, #8c8274);
+  --color-accent: light-dark(#94560c, #e3aa50);
+  --color-accent-hover: light-dark(#7d470a, #efbc6a);
+  --color-on-accent: light-dark(#fffaf0, #1a1714);
+  --color-danger: light-dark(#b0362a, #ec8274);
+  --color-danger-hover: light-dark(#962c21, #f29a8e);
+  --color-warning: light-dark(#8a6508, #d9b94a);
+  --color-warning-hover: light-dark(#735306, #e4c868);
+  --color-success: light-dark(#3c7229, #9cc486);
+  --color-youtube: light-dark(#cf2a22, #ff5a52);
+  --color-scrim: light-dark(rgba(42, 36, 28, 0.45), rgba(0, 0, 0, 0.65));
+
+  --section-coral: light-dark(#c4513f, #e0705c);
+  --section-amber: light-dark(#a8860f, #d9b94a);
+  --section-lime: light-dark(#6b8e23, #a3c45a);
+  --section-teal: light-dark(#2a8077, #5cc2b2);
+  --section-sky: light-dark(#3a7ca8, #6bb1d9);
+  --section-indigo: light-dark(#5865b0, #9aa4e0);
+  --section-violet: light-dark(#8059a8, #b79ae0);
+  --section-rose: light-dark(#b3476a, #e08aa4);
+}
+
+:root {
+  color-scheme: light dark;
+  --shadow-ink: light-dark(rgba(74, 52, 20, 0.22), rgba(0, 0, 0, 0.6));
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background-color: var(--color-surface);
+    color: var(--color-text-primary);
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-accent) 70%, transparent);
+    outline-offset: 2px;
+  }
+
+  input[type="text"],
+  input[type="search"] {
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  input[type="text"]:focus-visible,
+  input[type="search"]:focus-visible {
+    outline: none;
+    border-color: color-mix(in srgb, var(--color-accent) 60%, var(--color-border));
+  }
+
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="range"] {
+    accent-color: var(--color-accent);
+  }
+
+  ::selection {
+    background-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) transparent;
+  }
+}
+
+.font-numeric {
+  font-family: var(--font-display);
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+.theme-option {
+  border-radius: 0.375rem;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  border: 0;
+  background: transparent;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.theme-option:hover {
+  color: var(--color-text-primary);
+}
+
+.theme-option[aria-pressed="true"] {
+  background-color: var(--color-surface-hover);
+  color: var(--color-accent);
+}
+
+/* Paper-like grain so large flat areas read as a desk, not a void. Barely visible on purpose. */
+.paper-grain {
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--color-text-primary) 4%, transparent) 0.5px,
+    transparent 0.5px
+  );
+  background-size: 4px 4px;
+}

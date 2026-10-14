@@ -1,22 +1,28 @@
 @import "tailwindcss";
+@import "../../assets/theme.css";
 
 @theme {
   /* Chrome action popups are capped at 600px tall — do not exceed this. */
   --height-popup: 600px;
-  --color-surface: #0f0f0f;
-  --color-surface-elevated: #212121;
-  --color-surface-hover: #3f3f3f;
-  --color-border: rgba(255, 255, 255, 0.1);
-  --color-text-primary: #f1f1f1;
-  --color-text-secondary: #aaaaaa;
-  --color-text-muted: #717171;
-  --color-accent: #ff0000;
-  --color-accent-muted: rgba(255, 0, 0, 0.15);
-  --color-success: #2e7d32;
 }
 
 [data-v-header] {
   view-transition-name: dashboard-header;
+}
+
+@layer components {
+  .popup-icon {
+    @apply w-8 h-8 flex items-center justify-center rounded-lg border-0 bg-transparent text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer active:scale-95;
+  }
+
+  .np-card {
+    @apply rounded-[14px] border border-border bg-surface-elevated p-3 transition-[border-color,box-shadow] duration-300;
+    box-shadow: 0 10px 30px -24px var(--shadow-ink);
+  }
+
+  .np-card--playing {
+    @apply border-accent/40;
+  }
 }
 
 html,

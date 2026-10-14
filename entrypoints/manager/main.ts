@@ -50,6 +50,7 @@ import {
   type DuplicateSummary,
   type SaveSessionPayload,
 } from "../../utils/sessions";
+import { queryReadingList, removeReadingListItem, type ReadingListItem } from "../../utils/readingList";
 
 interface WindowGroup {
   id: number;
@@ -62,6 +63,9 @@ let allVideos: VideoData[] = [];
 let windowGroups: WindowGroup[] = [];
 let currentWindowId: number | 'all' = 'all';
 let selectedTabIds = new Set<number>();
+let isReadingListView = false;
+let readingListItems: ReadingListItem[] = [];
+let selectedPlaybackSpeed = 1.0;
 
 let searchQuery = "";
 let groupingMode: 'none' | 'channel' | 'language' = 'none';
@@ -348,7 +352,7 @@ async function fetchTabs(skipInitialRender = false) {
     .filter(window => groups.has(window.id!))
     .map((window, windowIndex) => {
       const tabs = groups.get(window.id!) || [];
-      const duration = tabs.reduce((acc, video) => acc + video.seconds, 0);
+      const duration = tabs.reduce((accumulator, video) => accumulator + video.seconds, 0);
       return {
         id: window.id!,
         tabs,
@@ -380,8 +384,8 @@ async function fetchTabs(skipInitialRender = false) {
 }
 
 function recomputeWindowGroupDurations(): void {
-  for (const g of windowGroups) {
-    g.duration = g.tabs.reduce((acc, v) => acc + v.seconds, 0);
+  for (const group of windowGroups) {
+    group.duration = group.tabs.reduce((accumulator, video) => accumulator + video.seconds, 0);
   }
 }
 
@@ -1251,9 +1255,9 @@ async function saveVideosAsSession(videos: VideoData[], windowLabel?: string): P
     await executeSaveSession(payload, tabs, sections);
     lastSavedSessionsFingerprint = "";
     await refreshSavedSessionsSidebar();
-  } catch (err) {
-    console.error("Save session failed:", err);
-    showToast(err instanceof Error ? err.message : "Could not save session.");
+  } catch (error) {
+    console.error("Save session failed:", error);
+    showToast(error instanceof Error ? error.message : "Could not save session.");
   }
 }
 
@@ -1266,8 +1270,8 @@ async function loadSessionInNewWindow(sessionId: string) {
   try {
     const opened = await restoreSession(session, options);
     showToast(opened > 0 ? `Opened ${opened} tab${opened === 1 ? "" : "s"}` : "All tabs from this session are already open.");
-  } catch (err) {
-    console.error("Restore session failed:", err);
+  } catch (error) {
+    console.error("Restore session failed:", error);
     showToast("Could not open session tabs.");
   }
 }
@@ -1675,7 +1679,7 @@ function renderLiveVideosInnerHtml(
     .map(([groupName, groupVideos]) => {
       const ck = nestedChannelCollapseKey(collapseScopeId, groupName);
       const isCollapsed = collapsedGroups.has(ck);
-      const groupDuration = groupVideos.reduce((acc, video) => acc + video.seconds, 0);
+      const groupDuration = groupVideos.reduce((accumulator, video) => accumulator + video.seconds, 0);
       const sortedGroupVideos = sortVideosForDisplay(groupVideos);
       const allSelected = groupVideos.every((video) => selectedTabIds.has(video.id));
       const someSelected = !allSelected && groupVideos.some((video) => selectedTabIds.has(video.id));
@@ -2000,40 +2004,127 @@ function saveSettings(): void {
     layoutMode,
     groupingMode,
     sortOption,
-  }).catch((err) => {
-    console.warn("Failed to save settings:", err);
+  }).catch((error) => {
+    console.warn("Failed to save settings:", error);
   });
+}
+
+async function loadReadingList(): Promise<void> {
+  readingListItems = await queryReadingList(false);
+  const badgeElement = document.getElementById("reading-list-badge");
+  if (badgeElement) {
+    badgeElement.textContent = String(readingListItems.length);
+  }
+}
+
+function extractDomain(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    return parsed.hostname.replace(/^www\./, "");
+  } catch {
+    return rawUrl;
+  }
+}
+
+function formatAddedAgo(timestampMs: number): string {
+  if (!timestampMs) return "";
+  const diffSeconds = Math.max(0, Math.floor((Date.now() - timestampMs) / 1000));
+  if (diffSeconds < 60) return "Just now";
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 30) return `${diffDays}d ago`;
+  return new Date(timestampMs).toLocaleDateString();
+}
+
+function renderReadingListCard(item: ReadingListItem): string {
+  const isYouTube = isYoutubeWatchOrShortsUrl(item.url);
+  const domain = extractDomain(item.url);
+  const addedTime = formatAddedAgo(item.creationTime);
+
+  const domainBadgeHtml = isYouTube
+    ? `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-500/15 text-red-400 border border-red-500/30">
+        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        YouTube Study
+      </span>`
+    : `<span class="text-[10px] bg-surface-elevated border border-border text-text-secondary px-2 py-0.5 rounded-full font-medium">
+        ${escapeHtml(domain)}
+      </span>`;
+
+  const timeHtml = addedTime
+    ? `<span class="text-[10px] text-text-muted font-mono">${escapeHtml(addedTime)}</span>`
+    : "";
+
+  return `
+    <div class="reading-list-card group p-3.5 rounded-xl border border-border bg-surface hover:bg-surface-elevated/70 hover:border-border-hover transition-all flex items-center justify-between gap-4" data-reading-list-url="${escapeHtml(item.url)}">
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-2 mb-1.5">
+          ${domainBadgeHtml}
+          ${timeHtml}
+        </div>
+        <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" class="reading-list-title text-sm font-semibold text-text-primary hover:text-accent transition-colors truncate block" title="${escapeHtml(item.title || item.url)}">
+          ${escapeHtml(item.title || item.url)}
+        </a>
+        <div class="text-[11px] text-text-muted truncate mt-0.5 font-mono opacity-60">${escapeHtml(item.url)}</div>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <button type="button" class="reading-list-open-btn px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-surface-elevated text-text-secondary hover:text-text-primary text-xs font-semibold border border-border flex items-center gap-1.5 transition-colors cursor-pointer active:scale-95" title="Open in new tab">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          <span>Open</span>
+        </button>
+        <button type="button" class="reading-list-remove-btn w-8 h-8 rounded-lg hover:bg-red-500/10 text-text-muted hover:text-red-400 flex items-center justify-center transition-colors border border-transparent hover:border-red-500/20 cursor-pointer active:scale-95" title="Remove from reading list">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        </button>
+      </div>
+    </div>
+  `;
 }
 
 function renderSidebar() {
   const container = document.getElementById("window-list-windows");
   if (!container) return;
 
-  const totalDuration = allVideos.reduce((acc, video) => acc + video.seconds, 0);
+  const totalDuration = allVideos.reduce((accumulator, video) => accumulator + video.seconds, 0);
   const totalTabs = allVideos.length;
 
-  const fp = [
+  const navReadingList = document.getElementById("nav-reading-list");
+  if (navReadingList) {
+    if (isReadingListView) {
+      navReadingList.classList.add("bg-surface-hover", "text-text-primary");
+      navReadingList.classList.remove("text-text-muted");
+    } else {
+      navReadingList.classList.remove("bg-surface-hover", "text-text-primary");
+      navReadingList.classList.add("text-text-muted");
+    }
+  }
+
+  const fingerprint = [
+    String(isReadingListView),
     String(currentWindowId),
     String(totalTabs),
     String(totalDuration),
-    windowGroups.map((g) => `${g.id}:${g.label}:${g.duration}:${g.tabs.length}`).join("|"),
+    windowGroups.map((group) => `${group.id}:${group.label}:${group.duration}:${group.tabs.length}`).join("|"),
   ].join("\x1f");
 
-  if (fp === lastSidebarFingerprint) return;
-  lastSidebarFingerprint = fp;
+  if (fingerprint === lastSidebarFingerprint) return;
+  lastSidebarFingerprint = fingerprint;
 
   document.getElementById("global-stats-count")!.textContent =
     `${totalTabs} videos · ${formatTime(totalDuration)}`;
 
+  const isAllActive = currentWindowId === 'all' && !isReadingListView;
   let html = `
-    <button type="button" class="sidebar-item sidebar-all-windows-row w-full text-left px-2.5 py-2 rounded-md mb-1 flex items-center justify-between transition-colors ${currentWindowId === 'all' ? 'bg-surface-hover text-text-primary' : 'text-text-muted hover:bg-surface-hover/50 hover:text-text-secondary'}" data-sidebar-type="all">
+    <button type="button" class="sidebar-item sidebar-all-windows-row w-full text-left px-2.5 py-2 rounded-md mb-1 flex items-center justify-between transition-colors ${isAllActive ? 'bg-surface-hover text-text-primary' : 'text-text-muted hover:bg-surface-hover/50 hover:text-text-secondary'}" data-sidebar-type="all">
       <span class="text-xs font-semibold">All Windows</span>
       <span class="text-[10px] bg-surface-elevated border border-border px-1.5 rounded-full tabular-nums">${totalTabs}</span>
     </button>
   `;
 
-  windowGroups.forEach(group => {
-    const isActive = currentWindowId === group.id;
+  windowGroups.forEach((group) => {
+    const isActive = currentWindowId === group.id && !isReadingListView;
     html += `
       <button type="button" class="sidebar-item sidebar-window-row w-full text-left px-2.5 py-2 rounded-md mb-1 flex items-center justify-between transition-colors ${isActive ? 'bg-surface-hover text-text-primary' : 'text-text-muted hover:bg-surface-hover/50 hover:text-text-secondary'}" data-sidebar-type="window" data-window-id="${group.id}">
         <div class="truncate pr-2 min-w-0">
@@ -2144,15 +2235,15 @@ function orderLiveGroupEntries(groups: [string, VideoData[]][]): [string, VideoD
   }
   if (sortOption === "duration-desc") {
     return entries.sort((a, b) => {
-      const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
-      const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
+      const durationA = a[1].reduce((accumulator, video) => accumulator + video.seconds, 0);
+      const durationB = b[1].reduce((accumulator, video) => accumulator + video.seconds, 0);
       return durationB - durationA;
     });
   }
   if (sortOption === "duration-asc") {
     return entries.sort((a, b) => {
-      const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
-      const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
+      const durationA = a[1].reduce((accumulator, video) => accumulator + video.seconds, 0);
+      const durationB = b[1].reduce((accumulator, video) => accumulator + video.seconds, 0);
       return durationA - durationB;
     });
   }
@@ -2198,7 +2289,7 @@ function updateCurrentViewStatsFromState(): void {
   if (!headerStats) return;
   const videosToShow = getLiveVideosForCurrentView();
   const duplicateSummary = summarizeDuplicates(scopeVideoIdCounts);
-  const duration = videosToShow.reduce((acc, video) => acc + video.seconds, 0);
+  const duration = videosToShow.reduce((accumulator, video) => accumulator + video.seconds, 0);
   headerStats.innerText = formatViewStats(videosToShow.length, duration, duplicateSummary);
 }
 
@@ -2243,7 +2334,7 @@ function updateTabListAggregateHeadersFromState(): void {
     const spans = statsEl.querySelectorAll("span");
     if (spans.length >= 3) {
       spans[0]!.textContent = `${groupVideos.length} videos`;
-      spans[2]!.textContent = formatTime(groupVideos.reduce((acc, video) => acc + video.seconds, 0));
+      spans[2]!.textContent = formatTime(groupVideos.reduce((accumulator, video) => accumulator + video.seconds, 0));
     }
   });
 }
@@ -2603,6 +2694,46 @@ function renderMain() {
 
   const viewToolbar = document.getElementById("view-toolbar");
 
+  if (isReadingListView) {
+    if (viewToolbar) viewToolbar.classList.add("hidden");
+    headerTitle.innerText = "Reading List";
+    headerStats.innerText = `${readingListItems.length} unread ${readingListItems.length === 1 ? "article" : "articles"}`;
+
+    const fingerprintReadingList = `reading-list:${readingListItems.length}:${readingListItems.map((item) => item.url).join("|")}`;
+    if (fingerprintReadingList === lastTabListFingerprint) {
+      skippedTabListDom = true;
+      return;
+    }
+
+    if (readingListItems.length === 0) {
+      tabListContainerInnerHtmlUpdated = true;
+      setTabListInnerHTML(
+        container,
+        `<div class="flex flex-col items-center justify-center py-16 text-center text-text-muted px-4">
+          <div class="w-12 h-12 rounded-xl bg-surface-elevated border border-border flex items-center justify-center mb-3 text-text-muted">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M6 6h10"/><path d="M6 10h10"/></svg>
+          </div>
+          <p class="text-sm font-semibold text-text-primary">No unread reading list articles</p>
+          <p class="text-xs text-text-muted max-w-sm mt-1 leading-relaxed">Articles and links saved to Chrome's Reading List appear here for study triage and queueing.</p>
+        </div>`
+      );
+      lastTabListFingerprint = fingerprintReadingList;
+      return;
+    }
+
+    const cardsHtml = readingListItems
+      .map((item) => renderReadingListCard(item))
+      .join("");
+
+    tabListContainerInnerHtmlUpdated = true;
+    setTabListInnerHTML(
+      container,
+      `<div class="space-y-2 pb-8 max-w-4xl">${cardsHtml}</div>`
+    );
+    lastTabListFingerprint = fingerprintReadingList;
+    return;
+  }
+
   if (selectedSession) {
     if (viewToolbar) viewToolbar.classList.remove("hidden");
     const session = selectedSession;
@@ -2719,7 +2850,7 @@ function renderMain() {
   const videosToShow = filterVideosForDisplay(baseVideos);
   const duplicateSummary = summarizeDuplicates(scopeVideoIdCounts);
   updateDuplicatesFilterButton(duplicateSummary);
-  const duration = videosToShow.reduce((acc, video) => acc + video.seconds, 0);
+  const duration = videosToShow.reduce((accumulator, video) => accumulator + video.seconds, 0);
   headerStats.innerText = formatViewStats(videosToShow.length, duration, duplicateSummary);
 
   const fpLive = tabListStructureFingerprint();
@@ -2770,7 +2901,7 @@ function renderMain() {
       container,
       orderLiveGroupEntries(Array.from(groups.entries())).map(([groupName, videos]) => {
       const isCollapsed = collapsedGroups.has(groupName);
-      const groupDuration = videos.reduce((acc, video) => acc + video.seconds, 0);
+      const groupDuration = videos.reduce((accumulator, video) => accumulator + video.seconds, 0);
       const sortedGroupVideos = sortVideosForDisplay(videos);
 
       const allSelected = videos.every(video => selectedTabIds.has(video.id));
@@ -3169,10 +3300,10 @@ function currentSectionsForMove(): SessionSection[] {
 }
 
 function moveToSectionPopoverSig(): string {
-  const ctx = selectedSession ? `s:${selectedSession.id}` : "live";
+  const context = selectedSession ? `s:${selectedSession.id}` : "live";
   const sections = currentSectionsForMove();
-  if (sections.length === 0) return `${ctx}\x1f0`;
-  return `${ctx}\x1f${orderedSections(sections).map((s) => `${s.id}:${s.name}:${s.emoji ?? ""}:${s.colorIndex ?? 0}`).join("|")}`;
+  if (sections.length === 0) return `${context}\x1f0`;
+  return `${context}\x1f${orderedSections(sections).map((s) => `${s.id}:${s.name}:${s.emoji ?? ""}:${s.colorIndex ?? 0}`).join("|")}`;
 }
 
 function updateMoveToSectionPopover(): void {
@@ -3213,12 +3344,17 @@ function updateSelectionUI() {
   const count = document.getElementById("selection-count");
   const closeBtn = document.getElementById("btn-close-selected");
   const moveWrap = document.getElementById("move-to-section-wrap");
+  const stageSelectedBtn = document.getElementById("btn-stage-study-selected");
 
   const inSessionView = selectedSession != null;
   const selectionSize = inSessionView ? selectedSessionTabUrls.size : selectedTabIds.size;
   const hasSections = currentSectionsForMove().length > 0;
 
-  if (selectionSize > 0) {
+  if (stageSelectedBtn) {
+    stageSelectedBtn.classList.toggle("hidden", inSessionView || isReadingListView);
+  }
+
+  if (selectionSize > 0 && !isReadingListView) {
     bar?.classList.remove("hidden");
     bar?.classList.add("flex");
     if (count) count.innerText = `${selectionSize} selected`;
@@ -3284,6 +3420,132 @@ function updateSelectionUI() {
 
     syncFlatGroupHeaderCheckboxes();
     syncNestedGroupHeaderCheckboxes();
+  }
+}
+
+function openStudySessionModal(targetTabIds?: number[]): void {
+  const modal = document.getElementById("study-session-modal");
+  if (!modal) return;
+
+  let queueTabIds: number[] = [];
+  if (targetTabIds && targetTabIds.length > 0) {
+    queueTabIds = targetTabIds;
+  } else if (selectedTabIds.size > 0) {
+    queueTabIds = Array.from(selectedTabIds);
+  } else {
+    let baseVideos: VideoData[] = [];
+    if (currentWindowId === "all") {
+      baseVideos = allVideos;
+    } else {
+      const group = windowGroups.find((windowGroup) => windowGroup.id === currentWindowId);
+      if (group) baseVideos = group.tabs;
+    }
+    const visibleVideos = filterVideosForDisplay(baseVideos);
+    queueTabIds = visibleVideos.map((video) => video.id);
+  }
+
+  if (queueTabIds.length === 0) {
+    showToast("No active YouTube tabs available to stage.");
+    return;
+  }
+
+  const previewContainer = document.getElementById("study-queue-preview");
+  const countBadge = document.getElementById("study-queue-count");
+  if (countBadge) countBadge.textContent = String(queueTabIds.length);
+
+  if (previewContainer) {
+    const queueVideos = queueTabIds
+      .map((tabId) => allVideos.find((video) => video.id === tabId))
+      .filter((video): video is VideoData => Boolean(video));
+
+    if (queueVideos.length === 0) {
+      previewContainer.innerHTML = `<div class="p-2 text-text-muted text-center">No tabs found.</div>`;
+    } else {
+      previewContainer.innerHTML = queueVideos
+        .map(
+          (video, index) => `
+          <div class="flex items-center gap-2 p-1.5 rounded bg-surface-elevated/50 border border-border/40 text-xs text-text-primary" data-queue-tab-id="${video.id}">
+            <span class="w-4 text-center font-mono text-[10px] text-text-muted shrink-0">${index + 1}</span>
+            <span class="truncate flex-1 font-medium">${escapeHtml(video.title)}</span>
+            <span class="text-[10px] font-mono text-text-muted shrink-0 px-1.5 py-0.5 rounded bg-surface border border-border">${formatTime(video.seconds)}</span>
+          </div>
+        `
+        )
+        .join("");
+    }
+  }
+
+  updateSpeedSelectorUI(selectedPlaybackSpeed);
+
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+}
+
+function closeStudySessionModal(): void {
+  const modal = document.getElementById("study-session-modal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+}
+
+function updateSpeedSelectorUI(speed: number): void {
+  selectedPlaybackSpeed = speed;
+  const speedButtons = document.querySelectorAll(".study-speed-btn");
+  speedButtons.forEach((button) => {
+    const buttonSpeed = parseFloat(button.getAttribute("data-speed") || "1");
+    if (Math.abs(buttonSpeed - speed) < 0.01) {
+      button.classList.add("text-accent", "bg-surface-hover");
+      button.classList.remove("text-text-muted");
+    } else {
+      button.classList.remove("text-accent", "bg-surface-hover");
+      button.classList.add("text-text-muted");
+    }
+  });
+}
+
+async function handleLaunchStudyQueue(): Promise<void> {
+  const previewElements = document.querySelectorAll("#study-queue-preview [data-queue-tab-id]");
+  const orderedTabIds = Array.from(previewElements)
+    .map((element) => parseInt(element.getAttribute("data-queue-tab-id") || "", 10))
+    .filter((tabId) => Number.isInteger(tabId) && tabId > 0);
+
+  if (orderedTabIds.length === 0) {
+    showToast("No tabs queued to stage.");
+    return;
+  }
+
+  const stashCheckbox = document.getElementById("study-stash-distractions") as HTMLInputElement | null;
+  const stashDistractionTabs = stashCheckbox?.checked ?? false;
+  const sessionNameInput = document.getElementById("study-session-name-input") as HTMLInputElement | null;
+  const sessionName = sessionNameInput?.value.trim() || "Stashed Backlog";
+
+  try {
+    const response = await browser.runtime.sendMessage({
+      action: "stage-focused-study-queue",
+      payload: {
+        orderedTabIds,
+        stashDistractionTabs,
+        sessionName,
+        playbackSpeed: selectedPlaybackSpeed,
+      },
+    });
+
+    if (response?.success) {
+      closeStudySessionModal();
+      selectedTabIds.clear();
+      updateSelectionUI();
+      showToast(
+        stashDistractionTabs && response.stashedCount > 0
+          ? `Focused queue started. Stashed ${response.stashedCount} distraction tabs.`
+          : `Focused queue started at ${selectedPlaybackSpeed}x speed.`
+      );
+      await fetchTabs();
+      await refreshSavedSessionsSidebar();
+    } else {
+      showToast(response?.errorMessage || "Failed to stage study queue.");
+    }
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "Error staging study queue.");
   }
 }
 
@@ -3368,17 +3630,66 @@ function setupListeners() {
     }
   });
 
+  document.getElementById("btn-stage-study-selected")?.addEventListener("click", () => {
+    openStudySessionModal(Array.from(selectedTabIds));
+  });
+
+  document.getElementById("btn-stage-study-header")?.addEventListener("click", () => {
+    openStudySessionModal();
+  });
+
+  document.getElementById("study-modal-close")?.addEventListener("click", closeStudySessionModal);
+  document.getElementById("study-modal-cancel")?.addEventListener("click", closeStudySessionModal);
+
+  document.getElementById("study-modal-submit")?.addEventListener("click", () => {
+    void handleLaunchStudyQueue();
+  });
+
+  document.getElementById("study-session-modal")?.addEventListener("click", (event) => {
+    if ((event.target as HTMLElement).id === "study-session-modal") {
+      closeStudySessionModal();
+    }
+  });
+
+  document.querySelectorAll(".study-speed-btn").forEach((button) => {
+    button.addEventListener("click", () => {
+      const speed = parseFloat(button.getAttribute("data-speed") || "1");
+      if (!isNaN(speed)) {
+        updateSpeedSelectorUI(speed);
+      }
+    });
+  });
+
+  const stashCheckbox = document.getElementById("study-stash-distractions") as HTMLInputElement | null;
+  const sessionNameWrap = document.getElementById("study-session-name-wrap");
+  stashCheckbox?.addEventListener("change", () => {
+    if (sessionNameWrap) {
+      sessionNameWrap.classList.toggle("hidden", !stashCheckbox.checked);
+    }
+  });
+
   document.getElementById("window-list")?.addEventListener("click", async (event) => {
     const item = (event.target as HTMLElement).closest(".sidebar-item");
     if (!item) return;
     const type = item.getAttribute("data-sidebar-type");
     if (type === "all") {
+      isReadingListView = false;
       selectedSession = null;
       selectedSessionTabUrls.clear();
       currentWindowId = "all";
       refreshSavedSessionsSidebar();
       render();
+    } else if (type === "reading-list") {
+      isReadingListView = true;
+      selectedSession = null;
+      selectedSessionTabUrls.clear();
+      currentWindowId = "all";
+      selectedTabIds.clear();
+      updateSelectionUI();
+      refreshSavedSessionsSidebar();
+      render();
     } else if (type === "window") {
+      isReadingListView = false;
       selectedSession = null;
       selectedSessionTabUrls.clear();
       const id = item.getAttribute("data-window-id");
@@ -3388,6 +3699,7 @@ function setupListeners() {
         render();
       }
     } else if (type === "session") {
+      isReadingListView = false;
       const id = item.getAttribute("data-session-id");
       if (!id) return;
       const sessions = await getSavedSessions();
@@ -3435,6 +3747,30 @@ function setupListeners() {
 
   document.getElementById("tab-list")?.addEventListener("click", async (event) => {
     const target = event.target as HTMLElement;
+
+    const readingCard = target.closest(".reading-list-card") as HTMLElement | null;
+    if (readingCard) {
+      const url = readingCard.getAttribute("data-reading-list-url");
+      if (url) {
+        if (target.closest(".reading-list-remove-btn")) {
+          event.stopPropagation();
+          const removed = await removeReadingListItem(url);
+          if (removed) {
+            showToast("Removed from Reading List");
+            await loadReadingList();
+            render();
+          } else {
+            showToast("Failed to remove item from Reading List");
+          }
+          return;
+        }
+        if (target.closest(".reading-list-open-btn")) {
+          event.stopPropagation();
+          await browser.tabs.create({ url, active: true });
+          return;
+        }
+      }
+    }
 
     if (target.closest(".section-collapse-toggle")) {
       const btn = target.closest(".section-collapse-toggle") as HTMLElement;
@@ -3536,7 +3872,7 @@ function setupListeners() {
       allVideos = allVideos.filter((video) => video.id !== id);
       for (const group of windowGroups) {
         group.tabs = group.tabs.filter((video) => video.id !== id);
-        group.duration = group.tabs.reduce((acc, video) => acc + video.seconds, 0);
+        group.duration = group.tabs.reduce((accumulator, video) => accumulator + video.seconds, 0);
       }
       windowGroups = windowGroups.filter((group) => group.tabs.length > 0);
       lastTabListFingerprint = tabListStructureFingerprint();
@@ -3867,9 +4203,9 @@ function setupListeners() {
       if (selectedSession?.id === context.sessionId) await reloadSelectedSessionFromStorage();
       showToast(merged ? `Added tabs to "${merged.name}"` : "Could not update session.");
       render();
-    } catch (err) {
-      console.error("Add to session failed:", err);
-      showToast(err instanceof Error ? err.message : "Could not add tabs.");
+    } catch (error) {
+      console.error("Add to session failed:", error);
+      showToast(error instanceof Error ? error.message : "Could not add tabs.");
     }
   });
 
@@ -3885,9 +4221,9 @@ function setupListeners() {
       lastSavedSessionsFingerprint = "";
       await refreshSavedSessionsSidebar();
       showToast(copy ? `Duplicated as "${copy.name}"` : "Could not duplicate session.");
-    } catch (err) {
-      console.error("Duplicate session failed:", err);
-      showToast(err instanceof Error ? err.message : "Could not duplicate session.");
+    } catch (error) {
+      console.error("Duplicate session failed:", error);
+      showToast(error instanceof Error ? error.message : "Could not duplicate session.");
     }
   });
 
@@ -3917,8 +4253,8 @@ function setupListeners() {
       await refreshSavedSessionsSidebar();
       showToast(`Renamed to "${nextName}"`);
       render();
-    } catch (err) {
-      console.error("Rename session failed:", err);
+    } catch (error) {
+      console.error("Rename session failed:", error);
       showToast("Could not rename session.");
     }
   });
@@ -4066,59 +4402,59 @@ function setupListeners() {
     document.getElementById("move-to-section-popover")?.classList.toggle("hidden");
   });
 
-  document.getElementById("move-to-section-popover")?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const btn = (e.target as HTMLElement).closest("[data-ctx-section-id], [data-move-section-id]") as HTMLElement | null;
-    if (!btn) return;
-    const raw = btn.getAttribute("data-ctx-section-id") ?? btn.getAttribute("data-move-section-id");
+  document.getElementById("move-to-section-popover")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const button = (event.target as HTMLElement).closest("[data-ctx-section-id], [data-move-section-id]") as HTMLElement | null;
+    if (!button) return;
+    const raw = button.getAttribute("data-ctx-section-id") ?? button.getAttribute("data-move-section-id");
     void moveSelectionToSection(raw === "" || raw === null ? null : raw);
     document.getElementById("move-to-section-popover")?.classList.add("hidden");
   });
 
-  document.getElementById("move-to-section-wrap")?.addEventListener("click", (e) => e.stopPropagation());
+  document.getElementById("move-to-section-wrap")?.addEventListener("click", (event) => event.stopPropagation());
 
-  document.getElementById("tab-section-context-items")?.addEventListener("click", async (e) => {
-    const btn = (e.target as HTMLElement).closest("[data-ctx-section-id]") as HTMLElement | null;
-    if (!btn || !tabSectionContextTarget) return;
-    const raw = btn.getAttribute("data-ctx-section-id");
+  document.getElementById("tab-section-context-items")?.addEventListener("click", async (event) => {
+    const button = (event.target as HTMLElement).closest("[data-ctx-section-id]") as HTMLElement | null;
+    if (!button || !tabSectionContextTarget) return;
+    const raw = button.getAttribute("data-ctx-section-id");
     const sectionId = raw === "" || raw === null ? null : raw;
-    const t = tabSectionContextTarget;
+    const currentTarget = tabSectionContextTarget;
     document.getElementById("tab-section-context-menu")?.classList.add("hidden");
     tabSectionContextTarget = null;
-    if (t.mode === "session") {
-      await moveSessionTabsToSection([t.url], sectionId);
+    if (currentTarget.mode === "session") {
+      await moveSessionTabsToSection([currentTarget.url], sectionId);
     } else {
-      await moveLiveVideosToSection([t.tabId], sectionId);
+      await moveLiveVideosToSection([currentTarget.tabId], sectionId);
     }
   });
 
   document.getElementById("section-ctx-rename")?.addEventListener("click", async () => {
-    const ctx = sectionHeaderContextTarget;
+    const targetContext = sectionHeaderContextTarget;
     document.getElementById("section-header-context-menu")?.classList.add("hidden");
-    if (!ctx) return;
+    if (!targetContext) return;
     const sections = currentSectionsForMove();
-    const sec = sections.find((s) => s.id === ctx.sectionId);
-    if (!sec) return;
-    const name = await showNameSessionModal(sec.name, "Rename section");
+    const section = sections.find((s) => s.id === targetContext.sectionId);
+    if (!section) return;
+    const name = await showNameSessionModal(section.name, "Rename section");
     if (name === null) return;
-    await renameSectionById(ctx.sectionId, name);
+    await renameSectionById(targetContext.sectionId, name);
     sectionHeaderContextTarget = null;
   });
 
   document.getElementById("section-ctx-delete")?.addEventListener("click", async () => {
-    const ctx = sectionHeaderContextTarget;
+    const targetContext = sectionHeaderContextTarget;
     document.getElementById("section-header-context-menu")?.classList.add("hidden");
-    if (!ctx) return;
+    if (!targetContext) return;
     sectionHeaderContextTarget = null;
     const sections = currentSectionsForMove();
-    const sec = sections.find((s) => s.id === ctx.sectionId);
+    const section = sections.find((s) => s.id === targetContext.sectionId);
     const confirmed = await showConfirm({
       title: "Delete section",
-      message: `Delete “${sec?.name ?? "section"}”? Videos move to Unsorted.`,
+      message: `Delete “${section?.name ?? "section"}”? Videos move to Unsorted.`,
       confirmLabel: "Delete",
       confirmDanger: true,
     });
-    if (confirmed) await deleteSectionById(ctx.sectionId);
+    if (confirmed) await deleteSectionById(targetContext.sectionId);
   });
 
   document.getElementById("tab-list")?.addEventListener("contextmenu", (event) => {
@@ -4232,8 +4568,8 @@ function setupListeners() {
       anchor.click();
       URL.revokeObjectURL(url);
       showToast("Sessions exported.");
-    } catch (err) {
-      console.error("Export failed:", err);
+    } catch (error) {
+      console.error("Export failed:", error);
       showToast("Could not export sessions.");
     }
   });
@@ -4269,9 +4605,9 @@ function setupListeners() {
       lastSavedSessionsFingerprint = "";
       await refreshSavedSessionsSidebar();
       showToast(`Imported ${count} session${count === 1 ? "" : "s"}.`);
-    } catch (err) {
-      console.error("Import failed:", err);
-      showToast(err instanceof Error ? err.message : "Could not import sessions.");
+    } catch (error) {
+      console.error("Import failed:", error);
+      showToast(error instanceof Error ? error.message : "Could not import sessions.");
     }
   });
 
@@ -4322,6 +4658,11 @@ function render() {
 
 document.addEventListener("DOMContentLoaded", () => {
   setupListeners();
+  const urlParameters = new URLSearchParams(window.location.search);
+  if (urlParameters.get("view") === "reading-list") {
+    isReadingListView = true;
+  }
+  void loadReadingList();
   void refreshSavedSessionsSidebar().then(() => fetchTabs());
 
   browser.tabs.onRemoved.addListener(scheduleFetchTabsFromEvents);

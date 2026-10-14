@@ -16,6 +16,7 @@ import {
   type StoreState,
 } from "../../utils/store";
 import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl } from "../../utils/format";
+import { queryReadingList } from "../../utils/readingList";
 
 const VERSION_NUMBER = packageJson.version;
 
@@ -61,8 +62,8 @@ function handleStoreUpdated(message: { prefs?: StoreState["prefs"]; metadataCach
 
 /** Persist prefs in background — UI already updated in memory. */
 function saveStorage(): void {
-  void saveStorageUtil(videoData, sortByDuration).catch((err) => {
-    console.warn("Failed to save prefs:", err);
+  void saveStorageUtil(videoData, sortByDuration).catch((error) => {
+    console.warn("Failed to save prefs:", error);
   });
 }
 
@@ -781,16 +782,17 @@ function goToSettings(): void {
   render();
 }
 
-async function openManager(): Promise<void> {
-  const managerUrl = browser.runtime.getURL("/manager.html");
-  const tabs = await browser.tabs.query({ url: managerUrl });
+async function openManager(queryParameter = ""): Promise<void> {
+  const managerBaseUrl = browser.runtime.getURL("/manager.html");
+  const targetUrl = browser.runtime.getURL(`/manager.html${queryParameter}`);
+  const tabs = await browser.tabs.query({ url: managerBaseUrl });
   if (tabs.length > 0 && tabs[0].id != null) {
-    await browser.tabs.update(tabs[0].id, { active: true });
+    await browser.tabs.update(tabs[0].id, { url: targetUrl, active: true });
     if (tabs[0].windowId != null) {
       await browser.windows.update(tabs[0].windowId, { focused: true });
     }
   } else {
-    await browser.tabs.create({ url: managerUrl });
+    await browser.tabs.create({ url: targetUrl });
   }
 }
 
@@ -965,8 +967,14 @@ function setupApp() {
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
           </div>
           <div class="min-w-0 flex-1">
-            <div class="text-[13px] font-bold text-text-primary leading-none tracking-tight">Watch Queue</div>
-            <div class="text-[11px] text-text-muted leading-tight mt-0.5">YouTube tabs in this window</div>
+            <div class="flex items-center gap-1.5">
+              <span class="text-[13px] font-bold text-text-primary leading-none tracking-tight">Study Harvester</span>
+              <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30" title="WebMCP active">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                WebMCP
+              </span>
+            </div>
+            <div class="text-[11px] text-text-muted leading-tight mt-0.5">YouTube tabs & study focus</div>
           </div>
           <div class="flex items-center gap-0.5 p-0.5 rounded-full bg-surface-elevated ring-1 ring-inset ring-white/10 shrink-0">
             <button id="refresh-tabs" class="w-7 h-7 flex items-center justify-center rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 cursor-pointer group/refresh active:scale-95" title="Refresh tabs">
@@ -1003,6 +1011,16 @@ function setupApp() {
               <span>Total queue</span>
               <span id="stat-total" class="ml-1 text-text-secondary font-medium tabular-nums min-w-[5.5rem] inline-block">--:--</span>
             </p>
+            <div class="mt-2.5 pt-2 border-t border-white/10 flex items-center gap-2">
+              <button id="popup-stage-study" type="button" class="flex-1 py-1.5 px-2.5 rounded-lg bg-accent/15 hover:bg-accent/25 text-accent text-[11px] font-semibold border border-accent/30 flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-95" title="Focus study queue from open YouTube tabs">
+                <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                <span>Study Focus</span>
+              </button>
+              <button id="popup-reading-list" type="button" class="py-1.5 px-2.5 rounded-lg bg-surface hover:bg-surface-hover text-text-secondary hover:text-text-primary text-[11px] font-medium border border-border flex items-center gap-1.5 transition-colors cursor-pointer active:scale-95" title="Open Reading List in Manager">
+                <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M6 6h10"/></svg>
+                <span id="popup-reading-count" class="tabular-nums font-mono text-[10px] text-text-muted">0</span>
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -1049,6 +1067,29 @@ function setupApp() {
   document.getElementById("go-to-settings")?.addEventListener("click", goToSettings);
   document.getElementById("open-manager")?.addEventListener("click", () => {
     void openManager();
+  });
+  document.getElementById("popup-reading-list")?.addEventListener("click", () => {
+    void openManager("?view=reading-list");
+  });
+  document.getElementById("popup-stage-study")?.addEventListener("click", async () => {
+    const queueVideos = getQueueVideos();
+    if (queueVideos.length === 0) return;
+    const orderedTabIds = queueVideos.map((video) => video.id);
+    try {
+      const response = await browser.runtime.sendMessage({
+        action: "stage-focused-study-queue",
+        payload: {
+          orderedTabIds,
+          stashDistractionTabs: false,
+          playbackSpeed: 1.0,
+        },
+      });
+      if (response?.success) {
+        window.close();
+      }
+    } catch (error) {
+      console.warn("Failed to stage study queue from popup:", error);
+    }
   });
   document.getElementById("refresh-tabs")?.addEventListener("click", getYouTubeTabs);
   document.getElementById("sort-order")?.addEventListener("click", () => {
@@ -1364,6 +1405,11 @@ function updateHeaderStats(
     btnTab.className = !sortByDuration ? sortActive : sortIdle;
     btnLen.className = sortByDuration ? sortActive : sortIdle;
   }
+
+  void queryReadingList(false).then((items) => {
+    const badgeElement = document.getElementById("popup-reading-count");
+    if (badgeElement) badgeElement.textContent = String(items.length);
+  });
 }
 
 function updateVideoListItem(item: HTMLElement, video: VideoData): void {

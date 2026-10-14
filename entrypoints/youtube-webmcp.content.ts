@@ -97,46 +97,6 @@ function getMoviePlayerElement(): MoviePlayerElement | null {
   return document.getElementById("movie_player") as MoviePlayerElement | null;
 }
 
-function getPlayerResponseFromWindow(): PlayerResponseData | null {
-  const moviePlayer = getMoviePlayerElement();
-  if (typeof moviePlayer?.getPlayerResponse === "function") {
-    try {
-      const response = moviePlayer.getPlayerResponse();
-      if (response?.videoDetails) {
-        return response;
-      }
-    } catch {
-      // Continue fallback search
-    }
-  }
-
-  const windowWithPlayerResponse = window as unknown as {
-    ytInitialPlayerResponse?: PlayerResponseData;
-  };
-  if (windowWithPlayerResponse.ytInitialPlayerResponse) {
-    return windowWithPlayerResponse.ytInitialPlayerResponse;
-  }
-
-  for (const scriptElement of document.querySelectorAll("script:not([src])")) {
-    const scriptContent = scriptElement.textContent;
-    if (!scriptContent || !scriptContent.includes("ytInitialPlayerResponse")) {
-      continue;
-    }
-    const match =
-      scriptContent.match(/var ytInitialPlayerResponse\s*=\s*({.+?});/s) ||
-      scriptContent.match(/window\["ytInitialPlayerResponse"\]\s*=\s*({.+?});/s);
-    if (match) {
-      try {
-        return JSON.parse(match[1]) as PlayerResponseData;
-      } catch {
-        // Continue searching
-      }
-    }
-  }
-
-  return null;
-}
-
 function getVideoIdFromCurrentLocation(): string | null {
   try {
     const pathname = window.location.pathname;
@@ -152,6 +112,56 @@ function getVideoIdFromCurrentLocation(): string | null {
   } catch {
     // Ignore URL parse failures
   }
+  return null;
+}
+
+function getPlayerResponseFromWindow(expectedVideoId?: string | null): PlayerResponseData | null {
+  const moviePlayer = getMoviePlayerElement();
+  if (typeof moviePlayer?.getPlayerResponse === "function") {
+    try {
+      const response = moviePlayer.getPlayerResponse();
+      if (response?.videoDetails) {
+        if (!expectedVideoId || response.videoDetails.videoId === expectedVideoId) {
+          return response;
+        }
+      }
+    } catch {
+      // Continue fallback search
+    }
+  }
+
+  const windowWithPlayerResponse = window as unknown as {
+    ytInitialPlayerResponse?: PlayerResponseData;
+  };
+  if (windowWithPlayerResponse.ytInitialPlayerResponse?.videoDetails) {
+    if (
+      !expectedVideoId ||
+      windowWithPlayerResponse.ytInitialPlayerResponse.videoDetails.videoId === expectedVideoId
+    ) {
+      return windowWithPlayerResponse.ytInitialPlayerResponse;
+    }
+  }
+
+  for (const scriptElement of document.querySelectorAll("script:not([src])")) {
+    const scriptContent = scriptElement.textContent;
+    if (!scriptContent || !scriptContent.includes("ytInitialPlayerResponse")) {
+      continue;
+    }
+    const match =
+      scriptContent.match(/var ytInitialPlayerResponse\s*=\s*({.+?});/s) ||
+      scriptContent.match(/window\["ytInitialPlayerResponse"\]\s*=\s*({.+?});/s);
+    if (match) {
+      try {
+        const parsedResponse = JSON.parse(match[1]) as PlayerResponseData;
+        if (!expectedVideoId || parsedResponse.videoDetails?.videoId === expectedVideoId) {
+          return parsedResponse;
+        }
+      } catch {
+        // Continue searching
+      }
+    }
+  }
+
   return null;
 }
 
@@ -180,9 +190,17 @@ interface Json3CaptionPayload {
 }
 
 function decodeHtmlEntities(encodedText: string): string {
-  const textarea = document.createElement("textarea");
-  textarea.innerHTML = encodedText;
-  return textarea.value;
+  return encodedText
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_fullMatch, charCodeString) => String.fromCharCode(Number(charCodeString)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_fullMatch, hexCodeString) =>
+      String.fromCharCode(parseInt(hexCodeString, 16))
+    );
 }
 
 async function fetchTranscriptSegments(
@@ -195,10 +213,10 @@ async function fetchTranscriptSegments(
     if (jsonResponse.ok) {
       const jsonData = (await jsonResponse.json()) as Json3CaptionPayload;
       if (Array.isArray(jsonData.events)) {
-        for (const event of jsonData.events) {
-          const startSeconds = (event.tStartMs ?? 0) / 1000;
-          const durationSeconds = (event.dDurationMs ?? 0) / 1000;
-          const text = (event.segs ?? [])
+        for (const captionEvent of jsonData.events) {
+          const startSeconds = (captionEvent.tStartMs ?? 0) / 1000;
+          const durationSeconds = (captionEvent.dDurationMs ?? 0) / 1000;
+          const text = (captionEvent.segs ?? [])
             .map((segment) => segment.utf8 ?? "")
             .join("")
             .trim();
@@ -218,16 +236,17 @@ async function fetchTranscriptSegments(
   try {
     const xmlResponse = await fetch(baseUrl);
     const xmlText = await xmlResponse.text();
-    const xmlDocument = new DOMParser().parseFromString(xmlText, "text/xml");
-    const textNodes = xmlDocument.querySelectorAll("text");
-    textNodes.forEach((node) => {
-      const startSeconds = parseFloat(node.getAttribute("start") || "0");
-      const durationSeconds = parseFloat(node.getAttribute("dur") || "0");
-      const text = decodeHtmlEntities(node.textContent?.trim() || "");
+    const textTagRegex = /<text\s+start="([\d.]+)"(?:\s+dur="([\d.]+)")?[^>]*>([\s\S]*?)<\/text>/gi;
+    let match: RegExpExecArray | null;
+    while ((match = textTagRegex.exec(xmlText)) !== null) {
+      const startSeconds = parseFloat(match[1]) || 0;
+      const durationSeconds = match[2] ? parseFloat(match[2]) || 0 : 0;
+      const rawText = match[3].replace(/<[^>]+>/g, "").trim();
+      const text = decodeHtmlEntities(rawText);
       if (text) {
         segments.push({ startSeconds, durationSeconds, text });
       }
-    });
+    }
   } catch (error) {
     console.warn("[WebMCP] Failed to fetch or parse transcript XML:", error);
   }
@@ -259,7 +278,7 @@ export default defineContentScript({
       execute: () => {
         const videoElement = document.querySelector("video");
         const videoId = getVideoIdFromCurrentLocation();
-        const playerResponse = getPlayerResponseFromWindow();
+        const playerResponse = getPlayerResponseFromWindow(videoId);
 
         let durationSeconds = 0;
         if (videoElement && isFinite(videoElement.duration) && videoElement.duration > 0) {
@@ -352,7 +371,7 @@ export default defineContentScript({
       },
       execute: async (inputArguments) => {
         const videoId = getVideoIdFromCurrentLocation();
-        const playerResponse = getPlayerResponseFromWindow();
+        const playerResponse = getPlayerResponseFromWindow(videoId);
         const captionTracks =
           playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
 
@@ -443,6 +462,16 @@ export default defineContentScript({
           return true;
         });
 
+        if (filteredSegments.length === 0) {
+          return {
+            videoId,
+            available: false,
+            message: "No transcript segments found or matched the criteria.",
+            segments: [],
+            fullText: "",
+          };
+        }
+
         const fullText = filteredSegments.map((segment) => segment.text).join(" ");
 
         return {
@@ -475,19 +504,20 @@ export default defineContentScript({
         properties: {
           action: {
             type: "string",
+            enum: ["play", "pause", "toggle", "seek", "set_speed", "set_volume", "mute", "unmute"],
             description: "Playback action to perform",
           },
           seekSeconds: {
             type: "number",
-            description: "Target timestamp in seconds for the seek action",
+            description: "Target timestamp in seconds for the seek action (required when action is 'seek')",
           },
           playbackSpeed: {
             type: "number",
-            description: "Target playback rate (e.g. 0.75, 1.0, 1.25, 1.5, 2.0)",
+            description: "Target playback rate (e.g. 0.75, 1.0, 1.25, 1.5, 2.0; required when action is 'set_speed')",
           },
           volume: {
             type: "number",
-            description: "Volume level between 0.0 and 1.0",
+            description: "Volume level between 0.0 and 1.0 (required when action is 'set_volume')",
           },
         },
         required: ["action"],
@@ -500,7 +530,24 @@ export default defineContentScript({
         const moviePlayer = getMoviePlayerElement();
         const videoElement = document.querySelector("video");
         if (!moviePlayer && !videoElement) {
-          return { success: false, message: "No video player element found on the active page." };
+          return { success: false, errorMessage: "No video player element found on the active page." };
+        }
+
+        const validActions = [
+          "play",
+          "pause",
+          "toggle",
+          "seek",
+          "set_speed",
+          "set_volume",
+          "mute",
+          "unmute",
+        ] as const;
+        if (!validActions.includes(inputArguments.action)) {
+          return {
+            success: false,
+            errorMessage: `Unknown playback action "${inputArguments.action}". Valid actions are: ${validActions.join(", ")}`,
+          };
         }
 
         switch (inputArguments.action) {
@@ -534,39 +581,60 @@ export default defineContentScript({
             }
             break;
           case "seek":
-            if (typeof inputArguments.seekSeconds === "number") {
-              const targetSeconds = Math.max(0, inputArguments.seekSeconds);
-              if (typeof moviePlayer?.seekTo === "function") {
-                moviePlayer.seekTo(targetSeconds, true);
-              } else if (videoElement) {
-                videoElement.currentTime = targetSeconds;
-              }
+            if (typeof inputArguments.seekSeconds !== "number" || isNaN(inputArguments.seekSeconds)) {
+              return {
+                success: false,
+                errorMessage: "seekSeconds is required and must be a valid number when action is 'seek'.",
+              };
+            }
+            const targetSeconds = Math.max(0, inputArguments.seekSeconds);
+            if (typeof moviePlayer?.seekTo === "function") {
+              moviePlayer.seekTo(targetSeconds, true);
+            } else if (videoElement) {
+              videoElement.currentTime = targetSeconds;
             }
             break;
           case "set_speed":
-            if (typeof inputArguments.playbackSpeed === "number" && inputArguments.playbackSpeed > 0) {
-              if (typeof moviePlayer?.setPlaybackRate === "function") {
-                moviePlayer.setPlaybackRate(inputArguments.playbackSpeed);
-              }
-              if (videoElement) {
-                videoElement.playbackRate = inputArguments.playbackSpeed;
-              }
+            if (
+              typeof inputArguments.playbackSpeed !== "number" ||
+              isNaN(inputArguments.playbackSpeed) ||
+              inputArguments.playbackSpeed <= 0
+            ) {
+              return {
+                success: false,
+                errorMessage: "playbackSpeed is required and must be a positive number when action is 'set_speed'.",
+              };
+            }
+            if (typeof moviePlayer?.setPlaybackRate === "function") {
+              moviePlayer.setPlaybackRate(inputArguments.playbackSpeed);
+            }
+            if (videoElement) {
+              videoElement.playbackRate = inputArguments.playbackSpeed;
             }
             break;
           case "set_volume":
-            if (typeof inputArguments.volume === "number") {
-              const clampedVolume = Math.min(1, Math.max(0, inputArguments.volume));
-              if (typeof moviePlayer?.setVolume === "function") {
-                moviePlayer.setVolume(clampedVolume * 100);
-                if (clampedVolume > 0 && typeof moviePlayer?.unMute === "function") {
-                  moviePlayer.unMute();
-                }
+            if (
+              typeof inputArguments.volume !== "number" ||
+              isNaN(inputArguments.volume) ||
+              inputArguments.volume < 0 ||
+              inputArguments.volume > 1
+            ) {
+              return {
+                success: false,
+                errorMessage: "volume is required and must be a number between 0.0 and 1.0 when action is 'set_volume'.",
+              };
+            }
+            const clampedVolume = inputArguments.volume;
+            if (typeof moviePlayer?.setVolume === "function") {
+              moviePlayer.setVolume(clampedVolume * 100);
+              if (clampedVolume > 0 && typeof moviePlayer?.unMute === "function") {
+                moviePlayer.unMute();
               }
-              if (videoElement) {
-                videoElement.volume = clampedVolume;
-                if (clampedVolume > 0 && videoElement.muted) {
-                  videoElement.muted = false;
-                }
+            }
+            if (videoElement) {
+              videoElement.volume = clampedVolume;
+              if (clampedVolume > 0 && videoElement.muted) {
+                videoElement.muted = false;
               }
             }
             break;
@@ -656,17 +724,6 @@ export default defineContentScript({
       execute: async (inputArguments) => {
         const result = await sendBridgeRequest("stage-focused-study-queue", inputArguments);
 
-        if (typeof inputArguments.playbackSpeed === "number") {
-          const moviePlayer = getMoviePlayerElement();
-          const videoElement = document.querySelector("video");
-          if (typeof moviePlayer?.setPlaybackRate === "function") {
-            moviePlayer.setPlaybackRate(inputArguments.playbackSpeed);
-          }
-          if (videoElement) {
-            videoElement.playbackRate = inputArguments.playbackSpeed;
-          }
-        }
-
         if (result && typeof result === "object" && "stashedCount" in result) {
           const stashedResult = result as { stashedCount: number };
           if (stashedResult.stashedCount > 0) {
@@ -680,52 +737,12 @@ export default defineContentScript({
       },
     };
 
-    const getReadingListCatalogTool: WebMcpToolDefinition<Record<string, unknown>, unknown> = {
-      name: "get_reading_list_catalog",
-      description:
-        "Retrieves all unread articles saved in Chrome's Reading List. Useful for discovering saved articles that align with current Mandala Method goals.",
-      annotations: {
-        readOnlyHint: true,
-      },
-      execute: async () => {
-        return await sendBridgeRequest("get-reading-list-catalog", {});
-      },
-    };
-
-    const shelveAndClearReadingItemTool: WebMcpToolDefinition<
-      { url: string },
-      unknown
-    > = {
-      name: "shelve_and_clear_reading_item",
-      description:
-        "Removes an item from Chrome's Reading List after it has been reviewed or saved to a Mandala Method pillar shelf.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          url: {
-            type: "string",
-            description: "URL of the reading list item to remove",
-          },
-        },
-        required: ["url"],
-      },
-      annotations: {
-        readOnlyHint: false,
-        consequentialHint: true,
-      },
-      execute: async (inputArguments) => {
-        return await sendBridgeRequest("shelve-and-clear-reading-item", inputArguments);
-      },
-    };
-
     await Promise.all([
       registerWebMcpTool(getActiveVideoDetailsTool, abortController.signal),
       registerWebMcpTool(getVideoTranscriptTool, abortController.signal),
       registerWebMcpTool(controlPlaybackTool, abortController.signal),
       registerWebMcpTool(getOpenTabsCatalogTool, abortController.signal),
       registerWebMcpTool(stageFocusedStudyQueueTool, abortController.signal),
-      registerWebMcpTool(getReadingListCatalogTool, abortController.signal),
-      registerWebMcpTool(shelveAndClearReadingItemTool, abortController.signal),
     ]);
   },
 });

@@ -34,7 +34,7 @@ import {
   isStoreUpdatedMessage,
   type StoreState,
 } from "../../utils/store";
-import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl, normalizeText } from "../../utils/format";
+import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl, normalizeText, isYoutubeWatchOrShortsUrl } from "../../utils/format";
 import { detectLanguageFromPlayerResponse, normalizeLanguageCode } from "../../utils/captionLanguage";
 import {
   buildTabsFromVideos,
@@ -290,18 +290,7 @@ async function fetchTabs(skipInitialRender = false) {
   applyPrefsFromStore();
   liveTabSectionsState = sectionsState;
 
-  const youtubeTabs = allTabs.filter(tab => {
-    if (!tab.url) return false;
-    try {
-      const url = new URL(tab.url);
-      return (
-        (url.hostname.endsWith("youtube.com") || url.hostname === "youtube.com") &&
-        (url.pathname.startsWith("/watch") || url.pathname.startsWith("/shorts"))
-      );
-    } catch {
-      return false;
-    }
-  });
+  const youtubeTabs = allTabs.filter(tab => Boolean(tab.url && isYoutubeWatchOrShortsUrl(tab.url)));
 
   const oldVideosMap = new Map<number, VideoData>();
   allVideos.forEach((video) => {

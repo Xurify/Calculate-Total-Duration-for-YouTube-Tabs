@@ -241,13 +241,6 @@ export default defineContentScript({
       "get-open-tabs-catalog": () => browser.runtime.sendMessage({ action: "get-open-tabs-catalog" }),
       "stage-focused-study-queue": (payload) =>
         browser.runtime.sendMessage({ action: "stage-focused-study-queue", payload }),
-      "get-reading-list-catalog": () =>
-        browser.runtime.sendMessage({ action: "get-reading-list-catalog" }),
-      "shelve-and-clear-reading-item": (payload) =>
-        browser.runtime.sendMessage({
-          action: "shelve-and-clear-reading-item",
-          url: (payload as { url: string })?.url,
-        }),
     });
 
     if (!isWatchOrShorts()) return;

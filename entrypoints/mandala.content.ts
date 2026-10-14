@@ -7,7 +7,7 @@ import { registerBridgeListener } from "../utils/webmcpBridge";
 export default defineContentScript({
   matches: [
     "https://mandalamethod.vercel.app/*",
-    "http://localhost:3000/*",
+    "http://localhost:5173/*",
   ],
   main() {
     registerBridgeListener({

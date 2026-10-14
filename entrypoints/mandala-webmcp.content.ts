@@ -2,7 +2,7 @@
  * Mandala WebMCP Content Script (runs in MAIN world).
  * Injects Study Harvester tools onto mandalamethod.vercel.app so that browser AI
  * agents can query open YouTube tabs, stage study queues, and inspect Chrome's Reading
- * List directly alongside Mandala's chart tools (PR #12).
+ * List directly alongside Mandala's chart tools (PR #12 / PR #15).
  */
 import {
   isWebMcpSupported,
@@ -11,52 +11,10 @@ import {
 } from "../utils/webmcp";
 import { sendBridgeRequest } from "../utils/webmcpBridge";
 
-function showHarvesterToast(messageText: string) {
-  const existingToast = document.getElementById("webmcp-harvester-toast");
-  if (existingToast) {
-    existingToast.remove();
-  }
-
-  const toastContainer = document.createElement("div");
-  toastContainer.id = "webmcp-harvester-toast";
-  toastContainer.textContent = messageText;
-  Object.assign(toastContainer.style, {
-    position: "fixed",
-    bottom: "24px",
-    right: "24px",
-    backgroundColor: "#0f172a",
-    color: "#f8fafc",
-    padding: "12px 18px",
-    borderRadius: "10px",
-    boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.3)",
-    fontSize: "14px",
-    fontWeight: "500",
-    fontFamily: "system-ui, -apple-system, sans-serif",
-    zIndex: "999999",
-    border: "1px solid rgba(255, 255, 255, 0.12)",
-    transition: "opacity 0.25s ease-in-out, transform 0.25s ease-in-out",
-    opacity: "0",
-    transform: "translateY(8px)",
-    pointerEvents: "none",
-  });
-
-  document.body.appendChild(toastContainer);
-  requestAnimationFrame(() => {
-    toastContainer.style.opacity = "1";
-    toastContainer.style.transform = "translateY(0)";
-  });
-
-  window.setTimeout(() => {
-    toastContainer.style.opacity = "0";
-    toastContainer.style.transform = "translateY(8px)";
-    window.setTimeout(() => toastContainer.remove(), 300);
-  }, 4000);
-}
-
 export default defineContentScript({
   matches: [
     "https://mandalamethod.vercel.app/*",
-    "http://localhost:3000/*",
+    "http://localhost:5173/*",
   ],
   world: "MAIN",
   runAt: "document_idle",
@@ -120,25 +78,14 @@ export default defineContentScript({
         consequentialHint: true,
       },
       execute: async (inputArguments) => {
-        const result = await sendBridgeRequest("stage-focused-study-queue", inputArguments);
-
-        if (result && typeof result === "object" && "stashedCount" in result) {
-          const stashedResult = result as { stashedCount: number };
-          if (stashedResult.stashedCount > 0) {
-            showHarvesterToast(
-              `Stashed ${stashedResult.stashedCount} tabs into "${inputArguments.sessionName || "Stashed Backlog"}"`
-            );
-          }
-        }
-
-        return result;
+        return await sendBridgeRequest("stage-focused-study-queue", inputArguments);
       },
     };
 
     const getReadingListCatalogTool: WebMcpToolDefinition<Record<string, unknown>, unknown> = {
       name: "get_reading_list_catalog",
       description:
-        "Retrieves all unread articles saved in Chrome's Reading List. Enables the agent to match saved articles with Mandala pillars and prepare them for your reading shelf.",
+        "Retrieves all unread articles saved in Chrome's Reading List. Enables the agent to match saved articles with Mandala pillars and prepare them for your reading shelf using read_shelves, add_shelf_link, or update_shelf_link.",
       annotations: {
         readOnlyHint: true,
       },
@@ -153,7 +100,7 @@ export default defineContentScript({
     > = {
       name: "shelve_and_clear_reading_item",
       description:
-        "Removes an item from Chrome's Reading List after it has been reviewed or saved to a Mandala Method pillar shelf using add_link.",
+        "Removes an item from Chrome's Reading List after it has been reviewed or saved to a Mandala Method pillar shelf using add_shelf_link.",
       inputSchema: {
         type: "object",
         properties: {

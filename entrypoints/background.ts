@@ -8,7 +8,7 @@ import {
 } from "../utils/storage";
 import { applyMetadataBatchToCache, normalizeMetadataBatch } from "../utils/store";
 import { detectLanguageFromPlayerResponse } from "../utils/captionLanguage";
-import { getVideoIdFromUrl } from "../utils/format";
+import { getVideoIdFromUrl, isYoutubeWatchOrShortsUrl } from "../utils/format";
 import { queryReadingList, removeReadingListItem } from "../utils/readingList";
 
 const BATCH_FLUSH_MS = 80;
@@ -120,30 +120,50 @@ export default defineBackground(() => {
     }
 
     if (message.action === "get-open-tabs-catalog") {
-      void getOpenTabsCatalog().then((catalog) => {
-        sendResponse(catalog);
-      });
+      void getOpenTabsCatalog()
+        .then((catalog) => sendResponse({ success: true, catalog }))
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        );
       return true;
     }
 
     if (message.action === "stage-focused-study-queue") {
-      void stageFocusedStudyQueue(message.payload as StageQueuePayload).then((result) => {
-        sendResponse(result);
-      });
+      void stageFocusedStudyQueue(message.payload as StageQueuePayload, _sender.tab?.id)
+        .then((result) => sendResponse(result))
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        );
       return true;
     }
 
     if (message.action === "get-reading-list-catalog") {
-      void queryReadingList(false).then((items) => {
-        sendResponse({ items });
-      });
+      void queryReadingList(false)
+        .then((items) => sendResponse({ success: true, items }))
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        );
       return true;
     }
 
     if (message.action === "shelve-and-clear-reading-item" && message.url) {
-      void removeReadingListItem(message.url as string).then((success) => {
-        sendResponse({ success, removedUrl: message.url });
-      });
+      void removeReadingListItem(message.url as string)
+        .then((success) => sendResponse({ success, removedUrl: message.url }))
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        );
       return true;
     }
   });
@@ -159,11 +179,11 @@ interface StageQueuePayload {
 async function getOpenTabsCatalog() {
   await storeReady;
   const tabs = await browser.tabs.query({});
-  const youtubeTabs = tabs.filter(
-    (tab) => tab.url && (tab.url.includes("youtube.com") || tab.url.includes("youtu.be"))
+  const videoTabs = tabs.filter(
+    (tab) => Boolean(tab.url && isYoutubeWatchOrShortsUrl(tab.url))
   );
 
-  return youtubeTabs.map((tab) => {
+  return videoTabs.map((tab) => {
     const rawUrl = tab.url || "";
     const normalizedUrl = normalizeYoutubeUrl(rawUrl);
     const cached = storeMetadataCache[normalizedUrl];
@@ -189,19 +209,42 @@ async function getOpenTabsCatalog() {
   });
 }
 
-async function stageFocusedStudyQueue(payload: StageQueuePayload) {
+async function stageFocusedStudyQueue(payload: StageQueuePayload, senderTabId?: number) {
   await storeReady;
-  const orderedTabIds = payload.orderedTabIds || [];
-  const orderedSet = new Set(orderedTabIds);
 
-  const tabs = await browser.tabs.query({});
-  const youtubeTabs = tabs.filter(
-    (tab) => tab.url && (tab.url.includes("youtube.com") || tab.url.includes("youtu.be"))
+  if (!payload || !Array.isArray(payload.orderedTabIds) || payload.orderedTabIds.length === 0) {
+    throw new Error("orderedTabIds must be a non-empty array of valid YouTube tab IDs.");
+  }
+
+  const hasInvalidType = payload.orderedTabIds.some(
+    (tabId) => typeof tabId !== "number" || !Number.isInteger(tabId) || tabId <= 0
   );
+  if (hasInvalidType) {
+    throw new Error("All entries in orderedTabIds must be positive numeric tab IDs.");
+  }
+
+  const allTabs = await browser.tabs.query({});
+  const videoTabs = allTabs.filter(
+    (tab) => Boolean(tab.url && isYoutubeWatchOrShortsUrl(tab.url))
+  );
+
+  const videoTabIdSet = new Set(
+    videoTabs.map((tab) => tab.id).filter((tabId): tabId is number => typeof tabId === "number")
+  );
+
+  const missingIds = payload.orderedTabIds.filter((tabId) => !videoTabIdSet.has(tabId));
+  if (missingIds.length > 0) {
+    throw new Error(
+      `Invalid tab ID(s): ${missingIds.join(", ")}. Every ID in orderedTabIds must correspond to an open YouTube watch or shorts tab.`
+    );
+  }
+
+  const orderedTabIds = payload.orderedTabIds;
+  const orderedSet = new Set(orderedTabIds);
 
   let stashedCount = 0;
   if (payload.stashDistractionTabs) {
-    const unselectedTabs = youtubeTabs.filter(
+    const unselectedTabs = videoTabs.filter(
       (tab) => tab.id !== undefined && !orderedSet.has(tab.id)
     );
 
@@ -229,7 +272,14 @@ async function stageFocusedStudyQueue(payload: StageQueuePayload) {
         .filter((tabId): tabId is number => typeof tabId === "number");
 
       if (tabIdsToRemove.length > 0) {
-        await browser.tabs.remove(tabIdsToRemove);
+        const callerIsTargeted = senderTabId !== undefined && tabIdsToRemove.includes(senderTabId);
+        if (callerIsTargeted) {
+          setTimeout(() => {
+            void browser.tabs.remove(tabIdsToRemove).catch(() => {});
+          }, 150);
+        } else {
+          await browser.tabs.remove(tabIdsToRemove);
+        }
       }
     }
   }
@@ -237,6 +287,27 @@ async function stageFocusedStudyQueue(payload: StageQueuePayload) {
   const firstTabId = orderedTabIds[0];
   if (firstTabId !== undefined) {
     await browser.tabs.update(firstTabId, { active: true });
+
+    if (typeof payload.playbackSpeed === "number" && payload.playbackSpeed > 0) {
+      try {
+        await browser.scripting.executeScript({
+          target: { tabId: firstTabId },
+          func: (speed: number) => {
+            const video = document.querySelector("video");
+            if (video) video.playbackRate = speed;
+            const moviePlayer = document.getElementById("movie_player") as unknown as {
+              setPlaybackRate?: (rate: number) => void;
+            };
+            if (typeof moviePlayer?.setPlaybackRate === "function") {
+              moviePlayer.setPlaybackRate(speed);
+            }
+          },
+          args: [payload.playbackSpeed],
+        });
+      } catch {
+        // Tab scripting may not be permitted if tab is discarded or restricted
+      }
+    }
   }
 
   return {

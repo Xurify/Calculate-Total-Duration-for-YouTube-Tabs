@@ -56,3 +56,27 @@ export function normalizeText(text: string): string {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
 }
+
+export function isYoutubeWatchOrShortsUrl(rawUrl: string): boolean {
+  if (!rawUrl) return false;
+  try {
+    const urlObject = new URL(rawUrl);
+    const hostname = urlObject.hostname.toLowerCase();
+    const pathname = urlObject.pathname;
+
+    const isYoutubeHost = hostname === "youtube.com" || hostname.endsWith(".youtube.com");
+    if (isYoutubeHost) {
+      return pathname.startsWith("/watch") || pathname.startsWith("/shorts");
+    }
+
+    const isShortHost = hostname === "youtu.be" || hostname.endsWith(".youtu.be");
+    if (isShortHost) {
+      return pathname.replace(/^\//, "").length > 0;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+

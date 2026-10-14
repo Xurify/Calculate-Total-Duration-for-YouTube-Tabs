@@ -53,12 +53,12 @@ function detectClozemasterLanguage(): {
   };
 }
 
-function extractReviewsReadyCount(): number {
+function extractReviewsReadyCount(): number | null {
   const selectors = [
     ".reviews-count",
     "[data-test='reviews-count']",
-    ".stat-value",
     ".review-button .badge",
+    ".dashboard-reviews-count",
   ];
 
   for (const selector of selectors) {
@@ -71,7 +71,7 @@ function extractReviewsReadyCount(): number {
     }
   }
 
-  return 0;
+  return null;
 }
 
 function extractActiveSentence(): {
@@ -97,13 +97,15 @@ function extractActiveSentence(): {
 }
 
 function convertCardsToTsv(cards: ClozeCardInput[]): string {
-  const lines = cards.map((card) => {
-    const sanitizedSentence = card.sentence.replace(/\r?\n|\r|\t/g, " ").trim();
-    const sanitizedTranslation = card.translation.replace(/\r?\n|\r|\t/g, " ").trim();
-    const sanitizedTargetWord = card.targetWord.replace(/\r?\n|\r|\t/g, " ").trim();
-    const sanitizedHint = (card.hint || "").replace(/\r?\n|\r|\t/g, " ").trim();
-    return `${sanitizedSentence}\t${sanitizedTranslation}\t${sanitizedTargetWord}\t${sanitizedHint}`;
-  });
+  const lines = cards
+    .filter((card) => Boolean(card && card.sentence && card.targetWord && card.translation))
+    .map((card) => {
+      const sanitizedSentence = (card.sentence || "").replace(/\r?\n|\r|\t/g, " ").trim();
+      const sanitizedTranslation = (card.translation || "").replace(/\r?\n|\r|\t/g, " ").trim();
+      const sanitizedTargetWord = (card.targetWord || "").replace(/\r?\n|\r|\t/g, " ").trim();
+      const sanitizedHint = (card.hint || "").replace(/\r?\n|\r|\t/g, " ").trim();
+      return `${sanitizedSentence}\t${sanitizedTranslation}\t${sanitizedTargetWord}\t${sanitizedHint}`;
+    });
 
   return lines.join("\n");
 }
@@ -156,16 +158,16 @@ export default defineContentScript({
       },
     };
 
-    const addSentencesToCustomDeckTool: WebMcpToolDefinition<
+    const stageClozeCardsTool: WebMcpToolDefinition<
       {
         collectionName?: string;
         cards: ClozeCardInput[];
       },
       unknown
     > = {
-      name: "add_sentences_to_custom_deck",
+      name: "stage_cloze_cards",
       description:
-        "Transforms harvested sentences from YouTube videos or study materials into formatted Clozemaster cloze flashcards and stages them for collection import.",
+        "Transforms harvested sentences from YouTube videos or study materials into formatted Clozemaster cloze flashcards and stages them for collection import (or injects them directly into the import textarea if on the import page).",
       inputSchema: {
         type: "object",
         properties: {
@@ -175,7 +177,7 @@ export default defineContentScript({
           },
           cards: {
             type: "array",
-            description: "List of cloze sentences to add",
+            description: "List of cloze sentences to stage",
             items: {
               type: "object",
               properties: {
@@ -209,9 +211,19 @@ export default defineContentScript({
       },
       execute: (inputArguments) => {
         const collectionName = inputArguments.collectionName?.trim() || "YouTube Immersion";
-        const cards = inputArguments.cards || [];
+        const cards = Array.isArray(inputArguments.cards) ? inputArguments.cards : [];
+        const validCards = cards.filter(
+          (card) => Boolean(card && card.sentence && card.targetWord && card.translation)
+        );
 
-        const tsvContent = convertCardsToTsv(cards);
+        if (validCards.length === 0) {
+          return {
+            success: false,
+            errorMessage: "No valid cards provided. Each card must include sentence, targetWord, and translation.",
+          };
+        }
+
+        const tsvContent = convertCardsToTsv(validCards);
 
         // Check if an import textarea exists in the DOM to populate directly
         const importTextarea = document.querySelector(
@@ -220,45 +232,60 @@ export default defineContentScript({
 
         let injectedIntoDom = false;
         if (importTextarea) {
-          importTextarea.value = importTextarea.value ? `${importTextarea.value}\n${tsvContent}` : tsvContent;
+          const previousValue = importTextarea.value;
+          const nextValue = previousValue ? `${previousValue}\n${tsvContent}` : tsvContent;
+          const nativeTextareaValueSetter = Object.getOwnPropertyDescriptor(
+            window.HTMLTextAreaElement.prototype,
+            "value"
+          )?.set;
+          if (typeof nativeTextareaValueSetter === "function") {
+            nativeTextareaValueSetter.call(importTextarea, nextValue);
+          } else {
+            importTextarea.value = nextValue;
+          }
           importTextarea.dispatchEvent(new Event("input", { bubbles: true }));
           importTextarea.dispatchEvent(new Event("change", { bubbles: true }));
           injectedIntoDom = true;
         }
 
         // Persist to local storage as safety net
+        let stagedToStorage = false;
         try {
           const rawStaged = window.localStorage.getItem("clozemaster_staged_harvest");
           const stagedList: StagedClozeCollection[] = rawStaged ? JSON.parse(rawStaged) : [];
           stagedList.unshift({
             collectionName,
             timestamp: Date.now(),
-            cards,
+            cards: validCards,
             tsvContent,
           });
           window.localStorage.setItem(
             "clozemaster_staged_harvest",
             JSON.stringify(stagedList.slice(0, 10))
           );
-        } catch (error) {
-          console.warn("[Clozemaster WebMCP] Could not persist staged cards to localStorage:", error);
+          stagedToStorage = true;
+        } catch (storageError) {
+          console.warn("[Clozemaster WebMCP] Could not persist staged cards to localStorage:", storageError);
         }
 
         return {
           success: true,
           collectionName,
-          cardsCount: cards.length,
+          cardsCount: validCards.length,
           tsvContent,
           injectedIntoDom,
-          preview: cards.slice(0, 3),
-          message: `Successfully prepared ${cards.length} cards for Clozemaster collection "${collectionName}".`,
+          stagedToStorage,
+          preview: validCards.slice(0, 3),
+          message: injectedIntoDom
+            ? `Injected ${validCards.length} cards into Clozemaster import textarea and staged for collection "${collectionName}".`
+            : `Staged ${validCards.length} cards for Clozemaster collection "${collectionName}" in local storage (ready to paste or import).`,
         };
       },
     };
 
     await Promise.all([
       registerWebMcpTool(getClozemasterSessionSummaryTool, abortController.signal),
-      registerWebMcpTool(addSentencesToCustomDeckTool, abortController.signal),
+      registerWebMcpTool(stageClozeCardsTool, abortController.signal),
     ]);
   },
 });

@@ -8,9 +8,6 @@ export default defineConfig({
     permissions: ["tabs", "scripting", "storage", "readingList"],
     host_permissions: [
       "*://*.youtube.com/*",
-      "*://*.clozemaster.com/*",
-      "https://mandalamethod.vercel.app/*",
-      "http://localhost:3000/*",
     ],
   },
   dev: {

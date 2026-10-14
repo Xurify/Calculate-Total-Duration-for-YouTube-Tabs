@@ -7,7 +7,6 @@ export interface WebMcpToolAnnotations {
   readOnlyHint?: boolean;
   consequentialHint?: boolean;
   untrustedContentHint?: boolean;
-  debugging?: boolean;
 }
 
 export interface WebMcpToolDefinition<
@@ -77,9 +76,13 @@ export async function registerWebMcpTool<
     if (parentSignal.aborted) {
       return null;
     }
-    parentSignal.addEventListener("abort", () => {
-      abortController.abort();
-    });
+    parentSignal.addEventListener(
+      "abort",
+      () => {
+        abortController.abort();
+      },
+      { once: true }
+    );
   }
 
   try {

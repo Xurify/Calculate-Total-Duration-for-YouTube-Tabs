@@ -30,7 +30,10 @@ export function sendBridgeRequest<RequestPayload, ResponseResult>(
   payload: RequestPayload
 ): Promise<ResponseResult> {
   return new Promise((resolve, reject) => {
-    const requestIdentifier = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const requestIdentifier =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
     const timeoutTimer = window.setTimeout(() => {
       window.removeEventListener("message", messageHandler);

@@ -690,6 +690,8 @@ async function probeTabsMetadata() {
               isLive,
               skipMetadata: false,
               languageSource: readLanguageSource(),
+              language: undefined as string | null | undefined,
+              languageName: undefined as string | null | undefined,
             };
           } catch (error) {
             return {
@@ -701,8 +703,8 @@ async function probeTabsMetadata() {
                 "YouTube Video",
               isLive: false,
               skipMetadata: false,
-              language: undefined,
-              languageName: undefined,
+              language: undefined as string | null | undefined,
+              languageName: undefined as string | null | undefined,
             };
           }
         },

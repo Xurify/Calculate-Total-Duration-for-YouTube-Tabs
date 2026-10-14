@@ -34,7 +34,7 @@ import {
   isStoreUpdatedMessage,
   type StoreState,
 } from "../../utils/store";
-import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl, normalizeText } from "../../utils/format";
+import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl, normalizeText, isYoutubeWatchOrShortsUrl } from "../../utils/format";
 import { detectLanguageFromPlayerResponse, normalizeLanguageCode } from "../../utils/captionLanguage";
 import {
   buildTabsFromVideos,
@@ -290,18 +290,7 @@ async function fetchTabs(skipInitialRender = false) {
   applyPrefsFromStore();
   liveTabSectionsState = sectionsState;
 
-  const youtubeTabs = allTabs.filter(tab => {
-    if (!tab.url) return false;
-    try {
-      const url = new URL(tab.url);
-      return (
-        (url.hostname.endsWith("youtube.com") || url.hostname === "youtube.com") &&
-        (url.pathname.startsWith("/watch") || url.pathname.startsWith("/shorts"))
-      );
-    } catch {
-      return false;
-    }
-  });
+  const youtubeTabs = allTabs.filter(tab => Boolean(tab.url && isYoutubeWatchOrShortsUrl(tab.url)));
 
   const oldVideosMap = new Map<number, VideoData>();
   allVideos.forEach((video) => {
@@ -690,6 +679,8 @@ async function probeTabsMetadata() {
               isLive,
               skipMetadata: false,
               languageSource: readLanguageSource(),
+              language: undefined as string | null | undefined,
+              languageName: undefined as string | null | undefined,
             };
           } catch (error) {
             return {
@@ -701,8 +692,8 @@ async function probeTabsMetadata() {
                 "YouTube Video",
               isLive: false,
               skipMetadata: false,
-              language: undefined,
-              languageName: undefined,
+              language: undefined as string | null | undefined,
+              languageName: undefined as string | null | undefined,
             };
           }
         },

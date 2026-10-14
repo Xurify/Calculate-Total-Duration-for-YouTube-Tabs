@@ -8,6 +8,7 @@ import {
   detectLanguageFromPlayerResponse,
   type DetectedLanguage,
 } from "../utils/captionLanguage";
+import { registerBridgeListener } from "../utils/webmcpBridge";
 
 const DEBOUNCE_MS = 150;
 
@@ -173,7 +174,7 @@ function readMetadataFromDom(): CachedMetadataPayload {
   };
 }
 
-function scheduleRead(ctx: { setTimeout: (fn: () => void, ms: number) => unknown }) {
+function scheduleRead(context: { setTimeout: (fn: () => void, ms: number) => unknown }) {
   const now = Date.now();
   const timeSinceLastRead = now - lastReadTime;
 
@@ -183,7 +184,7 @@ function scheduleRead(ctx: { setTimeout: (fn: () => void, ms: number) => unknown
     }
     clearTimeout(debounceTimer as unknown as number);
   }
-  debounceTimer = ctx.setTimeout(() => {
+  debounceTimer = context.setTimeout(() => {
     debounceTimer = null;
     if (!isWatchOrShorts()) return;
     lastMetadata = readMetadataFromDom();
@@ -234,8 +235,14 @@ function setPlaybackVolume(volume: number) {
 }
 
 export default defineContentScript({
-  matches: ["*://*.youtube.com/watch*", "*://*.youtube.com/shorts*"],
-  main(ctx) {
+  matches: ["*://*.youtube.com/*"],
+  main(context) {
+    registerBridgeListener({
+      "get-open-tabs-catalog": () => browser.runtime.sendMessage({ action: "get-open-tabs-catalog" }),
+      "stage-focused-study-queue": (payload) =>
+        browser.runtime.sendMessage({ action: "stage-focused-study-queue", payload }),
+    });
+
     if (!isWatchOrShorts()) return;
 
     const target =
@@ -247,7 +254,7 @@ export default defineContentScript({
     const observer = new MutationObserver(() => {
       perf.totalMutations++;
       perf.mutationsSinceLastRead++;
-      scheduleRead(ctx);
+      scheduleRead(context);
     });
 
     observer.observe(target, {
@@ -260,21 +267,21 @@ export default defineContentScript({
       const titleObserver = new MutationObserver(() => {
         perf.totalMutations++;
         perf.mutationsSinceLastRead++;
-        scheduleRead(ctx);
+        scheduleRead(context);
       });
       titleObserver.observe(titleEl, { childList: true });
     }
 
-    ctx.addEventListener(document, "durationchange", () => scheduleRead(ctx), true);
-    ctx.addEventListener(document, "loadedmetadata", () => scheduleRead(ctx), true);
+    context.addEventListener(document, "durationchange", () => scheduleRead(context), true);
+    context.addEventListener(document, "loadedmetadata", () => scheduleRead(context), true);
 
     lastMetadata = readMetadataFromDom();
     perf.totalReads++;
-    scheduleRead(ctx);
+    scheduleRead(context);
 
-    ctx.addEventListener(window, "popstate", () => scheduleRead(ctx));
-    ctx.addEventListener(window, "hashchange", () => scheduleRead(ctx));
-    ctx.addEventListener(document, "yt-navigate-finish", () => scheduleRead(ctx));
+    context.addEventListener(window, "popstate", () => scheduleRead(context));
+    context.addEventListener(window, "hashchange", () => scheduleRead(context));
+    context.addEventListener(document, "yt-navigate-finish", () => scheduleRead(context));
 
     browser.runtime.onMessage.addListener(
       (

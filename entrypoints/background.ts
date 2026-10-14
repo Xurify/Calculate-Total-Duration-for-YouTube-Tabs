@@ -1,11 +1,15 @@
 import {
   loadPrefsAndMetadataCache,
   normalizeYoutubeUrl,
+  saveSession,
   type CachedMetadata,
+  type SavedSessionTab,
   type UserPrefs,
 } from "../utils/storage";
 import { applyMetadataBatchToCache, normalizeMetadataBatch } from "../utils/store";
 import { detectLanguageFromPlayerResponse } from "../utils/captionLanguage";
+import { getVideoIdFromUrl, isYoutubeWatchOrShortsUrl } from "../utils/format";
+import { queryReadingList, removeReadingListItem } from "../utils/readingList";
 
 const BATCH_FLUSH_MS = 80;
 let pendingCacheUpdates = new Map<string, { url: string; metadata: Omit<CachedMetadata, "timestamp"> }>();
@@ -114,8 +118,204 @@ export default defineBackground(() => {
       sendResponse({ started: true });
       return true;
     }
+
+    if (message.action === "get-open-tabs-catalog") {
+      void getOpenTabsCatalog()
+        .then((catalog) => sendResponse({ success: true, catalog }))
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        );
+      return true;
+    }
+
+    if (message.action === "stage-focused-study-queue") {
+      void stageFocusedStudyQueue(message.payload as StageQueuePayload, _sender.tab?.id)
+        .then((result) => sendResponse(result))
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        );
+      return true;
+    }
+
+    if (message.action === "get-reading-list-catalog") {
+      void queryReadingList(false)
+        .then((items) => sendResponse({ success: true, items }))
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        );
+      return true;
+    }
+
+    if (message.action === "shelve-and-clear-reading-item" && message.url) {
+      void removeReadingListItem(message.url as string)
+        .then((success) => sendResponse({ success, removedUrl: message.url }))
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        );
+      return true;
+    }
   });
 });
+
+interface StageQueuePayload {
+  orderedTabIds: number[];
+  stashDistractionTabs?: boolean;
+  sessionName?: string;
+  playbackSpeed?: number;
+}
+
+async function getOpenTabsCatalog() {
+  await storeReady;
+  const tabs = await browser.tabs.query({});
+  const videoTabs = tabs.filter(
+    (tab) => Boolean(tab.url && isYoutubeWatchOrShortsUrl(tab.url))
+  );
+
+  return videoTabs.map((tab) => {
+    const rawUrl = tab.url || "";
+    const normalizedUrl = normalizeYoutubeUrl(rawUrl);
+    const cached = storeMetadataCache[normalizedUrl];
+    const durationSeconds = cached?.seconds || 0;
+    const currentTimeSeconds = cached?.currentTime || 0;
+    const remainingSeconds = Math.max(0, durationSeconds - currentTimeSeconds);
+
+    return {
+      tabId: tab.id,
+      windowId: tab.windowId,
+      videoId: cached?.videoId ?? getVideoIdFromUrl(rawUrl),
+      title: cached?.title || tab.title || "YouTube Video",
+      channelName: cached?.channelName || "",
+      durationSeconds,
+      currentTimeSeconds,
+      remainingSeconds,
+      url: rawUrl,
+      isLive: cached?.isLive || false,
+      language: cached?.language ?? null,
+      languageName: cached?.languageName ?? null,
+      active: tab.active ?? false,
+    };
+  });
+}
+
+async function stageFocusedStudyQueue(payload: StageQueuePayload, senderTabId?: number) {
+  await storeReady;
+
+  if (!payload || !Array.isArray(payload.orderedTabIds) || payload.orderedTabIds.length === 0) {
+    throw new Error("orderedTabIds must be a non-empty array of valid YouTube tab IDs.");
+  }
+
+  const hasInvalidType = payload.orderedTabIds.some(
+    (tabId) => typeof tabId !== "number" || !Number.isInteger(tabId) || tabId <= 0
+  );
+  if (hasInvalidType) {
+    throw new Error("All entries in orderedTabIds must be positive numeric tab IDs.");
+  }
+
+  const allTabs = await browser.tabs.query({});
+  const videoTabs = allTabs.filter(
+    (tab) => Boolean(tab.url && isYoutubeWatchOrShortsUrl(tab.url))
+  );
+
+  const videoTabIdSet = new Set(
+    videoTabs.map((tab) => tab.id).filter((tabId): tabId is number => typeof tabId === "number")
+  );
+
+  const missingIds = payload.orderedTabIds.filter((tabId) => !videoTabIdSet.has(tabId));
+  if (missingIds.length > 0) {
+    throw new Error(
+      `Invalid tab ID(s): ${missingIds.join(", ")}. Every ID in orderedTabIds must correspond to an open YouTube watch or shorts tab.`
+    );
+  }
+
+  const orderedTabIds = payload.orderedTabIds;
+  const orderedSet = new Set(orderedTabIds);
+
+  let stashedCount = 0;
+  if (payload.stashDistractionTabs) {
+    const unselectedTabs = videoTabs.filter(
+      (tab) => tab.id !== undefined && !orderedSet.has(tab.id)
+    );
+
+    if (unselectedTabs.length > 0) {
+      const tabsToStash: SavedSessionTab[] = unselectedTabs.map((tab) => {
+        const rawUrl = tab.url || "";
+        const normalizedUrl = normalizeYoutubeUrl(rawUrl);
+        const cached = storeMetadataCache[normalizedUrl];
+        return {
+          url: normalizedUrl,
+          title: cached?.title || tab.title || "YouTube Video",
+          channelName: cached?.channelName || "",
+          seconds: cached?.seconds || 0,
+          language: cached?.language ?? undefined,
+          languageName: cached?.languageName ?? undefined,
+        };
+      });
+
+      const sessionName = payload.sessionName?.trim() || "Stashed Backlog";
+      await saveSession(sessionName, tabsToStash);
+      stashedCount = tabsToStash.length;
+
+      const tabIdsToRemove = unselectedTabs
+        .map((tab) => tab.id)
+        .filter((tabId): tabId is number => typeof tabId === "number");
+
+      if (tabIdsToRemove.length > 0) {
+        const callerIsTargeted = senderTabId !== undefined && tabIdsToRemove.includes(senderTabId);
+        if (callerIsTargeted) {
+          setTimeout(() => {
+            void browser.tabs.remove(tabIdsToRemove).catch(() => {});
+          }, 150);
+        } else {
+          await browser.tabs.remove(tabIdsToRemove);
+        }
+      }
+    }
+  }
+
+  const firstTabId = orderedTabIds[0];
+  if (firstTabId !== undefined) {
+    await browser.tabs.update(firstTabId, { active: true });
+
+    if (typeof payload.playbackSpeed === "number" && payload.playbackSpeed > 0) {
+      try {
+        await browser.scripting.executeScript({
+          target: { tabId: firstTabId },
+          func: (speed: number) => {
+            const video = document.querySelector("video");
+            if (video) video.playbackRate = speed;
+            const moviePlayer = document.getElementById("movie_player") as unknown as {
+              setPlaybackRate?: (rate: number) => void;
+            };
+            if (typeof moviePlayer?.setPlaybackRate === "function") {
+              moviePlayer.setPlaybackRate(speed);
+            }
+          },
+          args: [payload.playbackSpeed],
+        });
+      } catch {
+        // Tab scripting may not be permitted if tab is discarded or restricted
+      }
+    }
+  }
+
+  return {
+    success: true,
+    stashedCount,
+    focusedTabId: firstTabId ?? null,
+  };
+}
 
 interface TabToSync {
   id: number;
@@ -260,8 +460,8 @@ async function fetchOneTab(tab: TabToSync): Promise<boolean> {
       scheduleFlush();
       browser.runtime.sendMessage({ action: "tab-synced", tabId: tab.id, metadata }).catch(() => {});
     }
-  } catch (err) {
-    console.error(`[Background] Error fetching ${tab.url}:`, err);
+  } catch (error) {
+    console.error(`[Background] Error fetching ${tab.url}:`, error);
   } finally {
     SYNC_IN_PROGRESS.delete(normalizedUrl);
   }

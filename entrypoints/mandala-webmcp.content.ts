@@ -85,7 +85,7 @@ export default defineContentScript({
     const getReadingListCatalogTool: WebMcpToolDefinition<Record<string, unknown>, unknown> = {
       name: "get_reading_list_catalog",
       description:
-        "Retrieves all unread articles saved in Chrome's Reading List. Enables the agent to match saved articles with Mandala pillars and prepare them for your reading shelf using read_shelves, add_shelf_link, or update_shelf_link.",
+        "Retrieves unread Chrome Reading List articles, each with an id. Pass that id to shelve_and_clear_reading_item. To save one onto a pillar, pass its address as path to add_shelf_link.",
       annotations: {
         readOnlyHint: true,
       },
@@ -95,28 +95,35 @@ export default defineContentScript({
     };
 
     const shelveAndClearReadingItemTool: WebMcpToolDefinition<
-      { url: string },
+      { id: string },
       unknown
     > = {
       name: "shelve_and_clear_reading_item",
       description:
-        "Removes an item from Chrome's Reading List after it has been reviewed or saved to a Mandala Method pillar shelf using add_shelf_link.",
+        "Removes one unread Reading List item after it has been saved to a pillar with add_shelf_link. Pass the id from get_reading_list_catalog. The extension resolves that id to the saved address.",
       inputSchema: {
         type: "object",
         properties: {
-          url: {
+          id: {
             type: "string",
-            description: "URL of the reading list item to remove",
+            description: "Id from get_reading_list_catalog, such as rl_1a2b3c4d. Not a web address.",
           },
         },
-        required: ["url"],
+        required: ["id"],
       },
       annotations: {
         readOnlyHint: false,
         consequentialHint: true,
       },
       execute: async (inputArguments) => {
-        return await sendBridgeRequest("shelve-and-clear-reading-item", inputArguments);
+        const id = typeof inputArguments.id === "string" ? inputArguments.id.trim() : "";
+        if (!id || id.includes("://") || id.includes("/")) {
+          return {
+            success: false,
+            errorMessage: "Pass the id from get_reading_list_catalog, not a web address.",
+          };
+        }
+        return await sendBridgeRequest("shelve-and-clear-reading-item", { id });
       },
     };
 

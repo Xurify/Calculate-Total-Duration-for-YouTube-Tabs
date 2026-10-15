@@ -23,7 +23,7 @@ import {
 } from "../utils/captionLanguage";
 import { resolveVideoLanguage } from "../utils/channelLanguage";
 import { getVideoIdFromUrl, isYoutubeWatchOrShortsUrl } from "../utils/format";
-import { queryReadingList, removeReadingListItem } from "../utils/readingList";
+import { queryReadingList, removeReadingListItemById } from "../utils/readingList";
 
 const BATCH_FLUSH_MS = 80;
 let pendingCacheUpdates = new Map<string, { url: string; metadata: Omit<CachedMetadata, "timestamp"> }>();
@@ -169,9 +169,20 @@ export default defineBackground(() => {
       return true;
     }
 
-    if (message.action === "shelve-and-clear-reading-item" && message.url) {
-      void removeReadingListItem(message.url as string)
-        .then((success) => sendResponse({ success, removedUrl: message.url }))
+    if (message.action === "shelve-and-clear-reading-item") {
+      const readingItemId = typeof message.id === "string" ? message.id : "";
+      void removeReadingListItemById(readingItemId)
+        .then((removed) => {
+          if (!removed) {
+            sendResponse({
+              success: false,
+              errorMessage:
+                "That id is not on the reading list. Call get_reading_list_catalog and pass an id from it.",
+            });
+            return;
+          }
+          sendResponse({ success: true, id: readingItemId });
+        })
         .catch((error) =>
           sendResponse({
             success: false,

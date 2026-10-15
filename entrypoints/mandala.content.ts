@@ -255,7 +255,7 @@ export default defineContentScript({
       "shelve-and-clear-reading-item": (payload) =>
         browser.runtime.sendMessage({
           action: "shelve-and-clear-reading-item",
-          url: (payload as { url: string })?.url,
+          id: (payload as { id?: string })?.id,
         }),
     });
 

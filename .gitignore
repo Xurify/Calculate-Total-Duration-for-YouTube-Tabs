@@ -17,6 +17,8 @@ web-ext.config.ts
 # Editor directories and files
 .vscode/*
 .cursor/*
+.claude/*
+pr2_body.md
 !.vscode/extensions.json
 .idea
 .DS_Store

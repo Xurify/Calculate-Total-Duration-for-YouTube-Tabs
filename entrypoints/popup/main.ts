@@ -1,5 +1,8 @@
 import "./style.css";
+import { initTheme, mountThemeControl, THEME_CONTROL_HTML } from "../../utils/theme";
 import packageJson from "../../package.json";
+
+initTheme();
 import {
   VideoData,
   CachedMetadata,
@@ -15,7 +18,8 @@ import {
   isStoreUpdatedMessage,
   type StoreState,
 } from "../../utils/store";
-import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl } from "../../utils/format";
+import { formatTime, formatCompact, formatDurationWords, formatOffset, parseTimeParam, getVideoIdFromUrl } from "../../utils/format";
+import { queryReadingList } from "../../utils/readingList";
 
 const VERSION_NUMBER = packageJson.version;
 
@@ -61,8 +65,8 @@ function handleStoreUpdated(message: { prefs?: StoreState["prefs"]; metadataCach
 
 /** Persist prefs in background — UI already updated in memory. */
 function saveStorage(): void {
-  void saveStorageUtil(videoData, sortByDuration).catch((err) => {
-    console.warn("Failed to save prefs:", err);
+  void saveStorageUtil(videoData, sortByDuration).catch((error) => {
+    console.warn("Failed to save prefs:", error);
   });
 }
 
@@ -781,16 +785,17 @@ function goToSettings(): void {
   render();
 }
 
-async function openManager(): Promise<void> {
-  const managerUrl = browser.runtime.getURL("/manager.html");
-  const tabs = await browser.tabs.query({ url: managerUrl });
+async function openManager(queryParameter = ""): Promise<void> {
+  const managerBaseUrl = browser.runtime.getURL("/manager.html");
+  const targetUrl = browser.runtime.getURL(`/manager.html${queryParameter}`);
+  const tabs = await browser.tabs.query({ url: managerBaseUrl });
   if (tabs.length > 0 && tabs[0].id != null) {
-    await browser.tabs.update(tabs[0].id, { active: true });
+    await browser.tabs.update(tabs[0].id, { url: targetUrl, active: true });
     if (tabs[0].windowId != null) {
       await browser.windows.update(tabs[0].windowId, { focused: true });
     }
   } else {
-    await browser.tabs.create({ url: managerUrl });
+    await browser.tabs.create({ url: targetUrl });
   }
 }
 
@@ -799,41 +804,53 @@ function renderNow(): void {
     stopLiveTick();
     resetVideoListFingerprint();
     app.innerHTML = `
-          <div data-v-header class="pt-4 px-4 pb-3 border-b border-border bg-gradient-to-b from-surface to-surface-elevated relative">
-            <div class="flex items-center gap-3 mb-3">
-              <button id="back-to-dashboard" class="w-9 h-9 flex items-center justify-center -ml-2 rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 bg-transparent cursor-pointer active:scale-[0.96]">
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          <div data-v-header class="pt-3.5 px-4 pb-3 relative">
+            <div class="flex items-center gap-2 mb-4">
+              <button id="back-to-dashboard" class="popup-icon -ml-1" aria-label="Back">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
               </button>
-              <h2 class="text-sm font-bold uppercase tracking-widest text-text-primary m-0 text-balance">Settings</h2>
+              <h2 class="font-display text-[18px] font-medium text-text-primary m-0">Settings</h2>
             </div>
             <div class="space-y-3">
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <div class="text-[12px] font-semibold text-text-primary">Appearance</div>
+                  <div class="text-[10px] text-text-muted">System follows your OS setting</div>
+                </div>
+                <div id="appearance-control"></div>
+              </div>
               <div class="pt-3 border-t border-border">
-                <button id="btn-clear-cache" class="w-full text-left p-3 rounded-lg border border-border bg-surface-hover/20 hover:bg-red-500/10 hover:border-red-500 group/clear transition-[background-color,border-color,color] cursor-pointer active:scale-[0.96]">
+                <button id="btn-clear-cache" class="w-full text-left p-3 rounded-lg border border-border bg-surface-hover/20 hover:bg-danger/10 hover:border-danger group/clear transition-[background-color,border-color,color] cursor-pointer active:scale-[0.96]">
                   <div class="flex items-center justify-between">
                     <div>
-                      <div class="text-[12px] font-semibold group-hover/clear:text-red-500 transition-colors">Clear Metadata Cache</div>
+                      <div class="text-[12px] font-semibold group-hover/clear:text-danger transition-colors">Clear Metadata Cache</div>
                       <div class="text-[10px] text-text-muted">Reset all stored titles and durations</div>
                     </div>
-                    <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 text-text-muted group-hover/clear:text-red-500 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 text-text-muted group-hover/clear:text-danger transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
                   </div>
                 </button>
               </div>
             </div>
             <div class="mt-3 pt-3 pb-0 border-t border-border/50 text-center">
-              <div class="text-[10px] text-text-muted font-medium opacity-40 uppercase tracking-tighter">Calculate Total Duration for YouTube Tabs v${VERSION_NUMBER}</div>
+              <div class="text-[11px] text-text-muted"><span class="font-display">Study Harvester</span> · v${VERSION_NUMBER}</div>
             </div>
           </div>
-          <div id="popup-confirm-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" aria-modal="true" role="dialog">
+          <div id="popup-confirm-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-scrim backdrop-blur-sm" aria-modal="true" role="dialog">
             <div class="bg-surface-elevated border border-border rounded-lg shadow-xl w-full max-w-[calc(100%-2rem)] mx-4 p-4">
               <h3 id="popup-confirm-title" class="text-sm font-bold text-text-primary mb-2"></h3>
               <p id="popup-confirm-message" class="text-xs text-text-secondary mb-4"></p>
               <div class="flex justify-end gap-2">
                 <button type="button" id="popup-confirm-cancel" class="px-3 py-1.5 text-xs font-medium rounded-md border border-border bg-surface-hover text-text-primary hover:bg-surface cursor-pointer">Cancel</button>
-                <button type="button" id="popup-confirm-ok" class="px-3 py-1.5 text-xs font-medium rounded-md border-0 bg-red-600 text-white hover:bg-red-700 cursor-pointer transition-colors">Clear cache</button>
+                <button type="button" id="popup-confirm-ok" class="px-3 py-1.5 text-xs font-medium rounded-md border-0 bg-danger text-on-accent hover:bg-danger-hover cursor-pointer transition-colors">Clear cache</button>
               </div>
             </div>
           </div>
         `;
+    const appearanceControl = document.getElementById("appearance-control");
+    if (appearanceControl) {
+      appearanceControl.innerHTML = THEME_CONTROL_HTML;
+      mountThemeControl(appearanceControl);
+    }
     document.getElementById("back-to-dashboard")!.addEventListener("click", () => {
       currentView = "dashboard";
       render();
@@ -868,12 +885,9 @@ function renderNow(): void {
     const listEl = document.getElementById("video-list");
     if (listEl) {
       listEl.innerHTML = `
-        <div class="flex flex-col items-center justify-center h-full min-h-[320px] px-8 text-center">
-          <div class="w-14 h-10 rounded-lg bg-accent flex items-center justify-center mb-5 shadow-[0_4px_20px_rgba(255,0,0,0.35)]">
-            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
-          </div>
-          <p class="text-sm font-medium text-text-primary mb-1">No tabs open</p>
-          <p class="text-xs text-text-muted leading-relaxed max-w-[240px]">Open YouTube videos in this window to build your watch queue.</p>
+        <div class="flex flex-col items-center justify-center h-full min-h-[260px] px-8 text-center">
+          <p class="font-display text-xl text-text-primary mb-1">The desk is clear</p>
+          <p class="text-xs text-text-muted leading-relaxed max-w-[240px]">Open YouTube videos in this window and they will line up here with the time they take.</p>
         </div>
       `;
     }
@@ -959,96 +973,100 @@ function setupApp() {
 
   app.innerHTML = `
     <div class="flex flex-col h-popup max-h-popup w-full bg-surface overflow-hidden">
-      <header data-v-header class="shrink-0 border-b border-white/10 bg-surface pb-2.5">
-        <div class="flex items-center gap-2.5 px-3 pt-2.5 pb-2">
-          <div class="w-8 h-6 rounded-md bg-accent flex items-center justify-center shrink-0 shadow-[0_1px_8px_rgba(255,0,0,0.35)]">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
-          </div>
-          <div class="min-w-0 flex-1">
-            <div class="text-[13px] font-bold text-text-primary leading-none tracking-tight">Watch Queue</div>
-            <div class="text-[11px] text-text-muted leading-tight mt-0.5">YouTube tabs in this window</div>
-          </div>
-          <div class="flex items-center gap-0.5 p-0.5 rounded-full bg-surface-elevated ring-1 ring-inset ring-white/10 shrink-0">
-            <button id="refresh-tabs" class="w-7 h-7 flex items-center justify-center rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 cursor-pointer group/refresh active:scale-95" title="Refresh tabs">
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="group-active/refresh:rotate-180 transition-transform duration-500"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg>
-            </button>
-            <button id="open-manager" class="w-7 h-7 flex items-center justify-center rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 cursor-pointer active:scale-95" title="Open full manager">
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
-            </button>
-            <button id="go-to-settings" class="w-7 h-7 flex items-center justify-center rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 cursor-pointer group/settings active:scale-95" title="Settings">
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="group-hover/settings:rotate-45 transition-transform duration-500"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
-            </button>
-          </div>
+      <header data-v-header class="shrink-0 px-4 pt-3.5 pb-1">
+        <div class="flex items-center gap-1">
+          <span class="font-display text-[18px] font-medium text-text-primary leading-none flex-1 min-w-0 truncate">Study Harvester</span>
+          <span class="inline-flex items-center gap-1 px-1.5 py-0.5 mr-1 rounded-full text-[9px] font-semibold bg-success/12 text-success border border-success/30" title="WebMCP active"><span class="w-1.5 h-1.5 rounded-full bg-success"></span>WebMCP</span>
+          <button id="refresh-tabs" type="button" class="popup-icon group/refresh" title="Refresh tabs" aria-label="Refresh tabs"><span class="group-active/refresh:rotate-180 transition-transform duration-500 flex"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg></span></button>
+          <button id="go-to-settings" type="button" class="popup-icon" title="Settings" aria-label="Settings"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
         </div>
-        <div class="mx-3 rounded-xl p-3 bg-surface-elevated/90 ring-1 ring-inset ring-white/10">
-          <div class="flex items-end justify-between gap-3">
-            <div class="min-w-0">
-              <p class="text-[10px] font-medium uppercase tracking-wider text-text-muted leading-none">Time left</p>
-              <p id="stat-remaining" class="text-[15px] font-bold tabular-nums text-text-primary leading-tight mt-1 truncate min-w-[5.5rem]">--:--</p>
-            </div>
-            <div class="text-right shrink-0">
-              <p class="text-[10px] font-medium uppercase tracking-wider text-text-muted leading-none">Watched</p>
-              <p id="stat-watched" class="text-[15px] font-bold tabular-nums text-accent leading-tight mt-1 min-w-[5.5rem]">--:--</p>
-            </div>
+        <div class="mt-4 flex flex-col gap-2.5">
+          <div class="font-display text-[34px] leading-none tracking-[-0.02em] text-text-primary"><span id="stat-remaining">0 min</span> <span class="text-text-muted">left</span></div>
+          <div class="h-1 rounded-full bg-border overflow-hidden"><div id="stat-overall-progress" class="h-full rounded-full bg-accent transition-[width] duration-700" style="width: 0%"></div></div>
+          <div class="flex items-center justify-between gap-2 text-[12px] text-text-secondary tabular-nums">
+            <span id="stat-video-count">0 videos</span>
+            <span><span id="stat-watched">0 min</span> watched · <span id="stat-watched-pct">0%</span></span>
           </div>
-          <div class="mt-3">
-            <div class="flex items-center justify-between gap-2 text-[10px] text-text-muted mb-1.5">
-              <span id="stat-video-count" class="tabular-nums">0 videos</span>
-              <span id="stat-watched-pct" class="tabular-nums font-medium text-text-secondary">0%</span>
-            </div>
-            <div class="h-1.5 rounded-full bg-white/10 overflow-hidden">
-              <div id="stat-overall-progress" class="h-full rounded-full bg-gradient-to-r from-accent to-red-400 transition-[width] duration-700" style="width: 0%"></div>
-            </div>
-            <p class="mt-1.5 text-[10px] text-text-muted tabular-nums">
-              <span>Total queue</span>
-              <span id="stat-total" class="ml-1 text-text-secondary font-medium tabular-nums min-w-[5.5rem] inline-block">--:--</span>
-            </p>
-          </div>
+          <span id="stat-total" class="hidden"></span>
         </div>
       </header>
 
-      <section id="now-playing" class="hidden shrink-0 border-b border-white/10">
-        <div id="np-card" class="px-3 py-2 transition-[background-color,box-shadow] duration-300 bg-accent/5 shadow-[inset_2px_0_0_0_#ff0000]" data-np-tab-id="">
-          <div class="flex gap-2.5 items-center">
-            <button type="button" class="np-thumb-btn relative shrink-0 w-[5.5rem] aspect-video rounded-sm overflow-hidden bg-surface-hover border border-white/10 group/thumb p-0 cursor-pointer" title="Open tab">
-              <img class="np-thumb w-full h-full object-cover hidden" alt="" width="88" height="50" />
-              <div class="absolute bottom-0 left-0 right-0 h-[3px] bg-black/50">
+      <section id="now-playing" class="hidden shrink-0 px-3 pt-3">
+        <div id="np-card" class="np-card" data-np-tab-id="">
+          <div class="flex gap-3">
+            <button type="button" class="np-thumb-btn relative shrink-0 w-[8.25rem] aspect-video rounded-lg overflow-hidden bg-surface-hover border-0 p-0 cursor-pointer" title="Open tab" aria-label="Open tab">
+              <img class="np-thumb w-full h-full object-cover hidden" alt="" width="132" height="74" />
+              <div class="absolute bottom-0 left-0 right-0 h-[3px] bg-black/40">
                 <div class="np-progress h-full bg-accent transition-[width] duration-500" style="width: 0%"></div>
               </div>
             </button>
-            <div class="flex-1 min-w-0 flex flex-col gap-1">
-              <button type="button" class="np-title text-left text-[13px] font-medium text-text-primary line-clamp-1 leading-tight cursor-pointer hover:underline decoration-white/30 underline-offset-2 border-0 bg-transparent p-0 w-full truncate" title="Open tab"></button>
-              <p class="np-channel text-[11px] text-text-secondary truncate"></p>
-              <div class="flex items-center gap-1.5">
-                <button type="button" class="np-play-pause w-7 h-7 shrink-0 flex items-center justify-center rounded-full bg-accent text-white border-0 cursor-pointer hover:bg-[#e60000] active:scale-95 transition-all" title="Play / Pause"></button>
-                <span class="np-time text-[11px] text-text-muted tabular-nums shrink-0 min-w-[4.5rem]"></span>
-                <svg class="np-volume-icon shrink-0 text-text-muted" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-                <div class="flex-1 min-w-0 flex items-center h-3">
-                  <input type="range" class="np-volume w-full h-1 m-0 p-0 cursor-pointer appearance-none rounded-full bg-white/15 accent-accent" min="0" max="100" value="0" aria-label="Volume" />
-                </div>
-                <button type="button" class="np-go-to-tab shrink-0 px-1.5 py-0.5 rounded text-[11px] text-text-muted hover:text-text-primary hover:bg-surface-hover border-0 bg-transparent cursor-pointer transition-colors" title="Go to tab">Open tab</button>
-              </div>
+            <div class="flex-1 min-w-0 flex flex-col justify-center gap-1">
+              <div class="np-kicker text-[10px] font-semibold uppercase tracking-[0.1em] text-accent">Playing now</div>
+              <button type="button" class="np-title font-display text-left text-[17px] font-medium leading-tight text-text-primary line-clamp-2 border-0 bg-transparent p-0 cursor-pointer hover:text-accent transition-colors" title="Open tab"></button>
+              <p class="np-channel text-[12px] text-text-muted truncate m-0"></p>
             </div>
           </div>
+          <div class="mt-2.5 flex items-center gap-2.5">
+            <button type="button" class="np-play-pause w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-accent text-on-accent border-0 cursor-pointer hover:bg-accent-hover active:scale-95 transition-colors" title="Play / Pause"></button>
+            <span class="np-time text-[12px] text-text-secondary tabular-nums shrink-0 min-w-[5rem]"></span>
+            <svg class="np-volume-icon shrink-0 text-text-muted" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+            <div class="flex-1 min-w-0 flex items-center h-3">
+              <input type="range" class="np-volume w-full h-1 m-0 p-0 cursor-pointer appearance-none rounded-full bg-border accent-accent" min="0" max="100" value="0" aria-label="Volume" />
+            </div>
+            <button type="button" class="np-go-to-tab shrink-0 text-[12px] font-semibold text-accent hover:text-accent-hover border-0 bg-transparent p-0 cursor-pointer" title="Go to tab">Go to tab</button>
+          </div>
         </div>
-        <p id="np-also-playing" class="hidden px-3 pb-2 -mt-0.5 text-[10px] text-text-muted truncate"></p>
+        <p id="np-also-playing" class="hidden px-1 pt-1.5 text-[11px] text-text-muted truncate m-0"></p>
       </section>
 
-      <div id="up-next-divider" class="flex items-center justify-between px-3 py-1.5 shrink-0 border-b border-white/5">
-        <span class="text-[13px] font-medium text-text-primary">Up next</span>
-        <div class="flex gap-0.5 p-0.5 rounded-full bg-surface-elevated ring-1 ring-inset ring-white/10">
-          <button id="sort-order" class="px-2.5 py-1 text-[11px] font-medium rounded-full cursor-pointer transition-all border-0 active:scale-95">Tab order</button>
-          <button id="sort-duration" class="px-2.5 py-1 text-[11px] font-medium rounded-full cursor-pointer transition-all border-0 active:scale-95">Length</button>
-        </div>
+      <div id="up-next-divider" class="flex items-baseline gap-3 px-4 pt-4 pb-1 shrink-0">
+        <span class="font-display text-[17px] font-medium text-text-primary flex-1">Up next</span>
+        <button id="sort-order" type="button">Tab order</button>
+        <button id="sort-duration" type="button">Longest first</button>
       </div>
 
-      <div id="video-list" class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-2 pb-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-track]:bg-transparent"></div>
+      <div id="video-list" class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-2 pb-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent"></div>
+
+      <footer class="shrink-0 px-3 py-3 border-t border-border bg-surface flex items-center gap-2">
+        <button id="popup-stage-study" type="button" class="flex-1 h-[38px] rounded-[10px] border-0 bg-accent text-on-accent text-[13px] font-semibold flex items-center justify-center gap-2 cursor-pointer hover:bg-accent-hover transition-colors active:scale-[0.98]" title="Start a focused study session from this window's tabs">
+          <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Start study session
+        </button>
+        <button id="open-manager" type="button" class="h-[38px] px-3.5 rounded-[10px] border border-border bg-surface-elevated text-text-primary text-[13px] font-medium cursor-pointer hover:bg-surface-hover transition-colors" title="Open the full desk">Open desk</button>
+        <button id="popup-reading-list" type="button" class="h-[38px] px-3 rounded-[10px] border border-border bg-surface-elevated text-text-secondary text-[12px] font-medium cursor-pointer hover:bg-surface-hover transition-colors flex items-center gap-1.5" title="Open reading list on the desk">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M6 6h10"/></svg>
+          <span id="popup-reading-count" class="tabular-nums">0</span>
+        </button>
+      </footer>
     </div>
   `;
 
   document.getElementById("go-to-settings")?.addEventListener("click", goToSettings);
   document.getElementById("open-manager")?.addEventListener("click", () => {
     void openManager();
+  });
+  document.getElementById("popup-reading-list")?.addEventListener("click", () => {
+    void openManager("?view=reading-list");
+  });
+  document.getElementById("popup-stage-study")?.addEventListener("click", async () => {
+    const queueVideos = getQueueVideos();
+    if (queueVideos.length === 0) return;
+    const orderedTabIds = queueVideos.map((video) => video.id);
+    try {
+      const response = await browser.runtime.sendMessage({
+        action: "stage-focused-study-queue",
+        payload: {
+          orderedTabIds,
+          stashDistractionTabs: false,
+          playbackSpeed: 1.0,
+        },
+      });
+      if (response?.success) {
+        window.close();
+      }
+    } catch (error) {
+      console.warn("Failed to stage study queue from popup:", error);
+    }
   });
   document.getElementById("refresh-tabs")?.addEventListener("click", getYouTubeTabs);
   document.getElementById("sort-order")?.addEventListener("click", () => {
@@ -1181,7 +1199,7 @@ function updateNowPlayingCardTime(card: HTMLElement, video: VideoData): void {
   if (!timeEl) return;
 
   if (video.isLive) {
-    timeEl.innerHTML = `<span class="px-1.5 py-0.5 rounded bg-red-500/20 text-red-500 text-[9px] font-bold">🔴 LIVE</span>`;
+    timeEl.innerHTML = `<span class="px-1.5 py-0.5 rounded bg-youtube/15 text-youtube text-[9px] font-bold">LIVE</span>`;
   } else if (video.seconds > 0) {
     timeEl.innerHTML = `
       <span class="${watchedPercent > 0 ? "text-text-secondary" : ""}">${formatCompact(video.currentTime)}</span>
@@ -1249,9 +1267,9 @@ function updateNowPlayingCard(
       vol === 0 ? VOLUME_ICON_MUTE : vol < 0.35 ? VOLUME_ICON_LOW : vol < 0.7 ? VOLUME_ICON_MED : VOLUME_ICON_HIGH;
     volumeIcon.innerHTML = paths;
   }
-  card.className = `px-3 py-2 transition-[background-color,box-shadow] duration-300 ${
-    isActivelyPlaying ? "bg-accent/5 shadow-[inset_2px_0_0_0_#ff0000]" : "shadow-[inset_2px_0_0_0_rgba(255,255,255,0.08)]"
-  }`;
+  card.className = `np-card${isActivelyPlaying ? " np-card--playing" : ""}`;
+  const kicker = card.querySelector(".np-kicker") as HTMLElement | null;
+  if (kicker) kicker.textContent = isActivelyPlaying ? "Playing now" : "Paused";
 }
 
 function renderNowPlayingCard(primary: VideoData | null, confirmedPlaying: VideoData[]): void {
@@ -1334,12 +1352,13 @@ function updateHeaderStats(
   videoCount: number,
   totalWatched = 0
 ) {
-  document.getElementById("stat-remaining")!.innerText = formatTime(totalRemaining);
+  document.getElementById("stat-remaining")!.innerText = formatDurationWords(totalRemaining);
   document.getElementById("stat-total")!.innerText = formatTime(totalSeconds);
-  document.getElementById("stat-video-count")!.innerText = `${videoCount} video${videoCount === 1 ? "" : "s"}`;
+  document.getElementById("stat-video-count")!.innerText =
+    `${videoCount} video${videoCount === 1 ? "" : "s"} · ${formatDurationWords(totalSeconds)} in total`;
 
   const watchedEl = document.getElementById("stat-watched");
-  if (watchedEl) watchedEl.innerText = formatTime(totalWatched);
+  if (watchedEl) watchedEl.innerText = formatDurationWords(totalWatched);
 
   const percent = totalSeconds > 0 ? (totalWatched / totalSeconds) * 100 : 0;
   const watchedPctEl = document.getElementById("stat-watched-pct");
@@ -1356,14 +1375,17 @@ function updateHeaderStats(
 
   const btnTab = document.getElementById("sort-order");
   const btnLen = document.getElementById("sort-duration");
-  const sortActive =
-    "px-2.5 py-1 text-[11px] font-medium rounded-full cursor-pointer transition-all border-0 active:scale-95 bg-accent text-white shadow-sm";
-  const sortIdle =
-    "px-2.5 py-1 text-[11px] font-medium rounded-full cursor-pointer transition-all border-0 active:scale-95 text-text-muted hover:text-text-secondary hover:bg-white/5";
+  const sortActive = "text-[12px] font-semibold text-text-primary border-0 bg-transparent p-0 cursor-pointer";
+  const sortIdle = "text-[12px] font-medium text-text-muted hover:text-text-secondary border-0 bg-transparent p-0 cursor-pointer transition-colors";
   if (btnTab && btnLen) {
     btnTab.className = !sortByDuration ? sortActive : sortIdle;
     btnLen.className = sortByDuration ? sortActive : sortIdle;
   }
+
+  void queryReadingList(false).then((items) => {
+    const badgeElement = document.getElementById("popup-reading-count");
+    if (badgeElement) badgeElement.textContent = String(items.length);
+  });
 }
 
 function updateVideoListItem(item: HTMLElement, video: VideoData): void {
@@ -1371,11 +1393,11 @@ function updateVideoListItem(item: HTMLElement, video: VideoData): void {
   const isNowPlaying = isTabActivelyPlaying(video);
   const isActiveTab = video.active && !isNowPlaying;
   const stateClasses = isNowPlaying
-    ? "bg-accent/5 shadow-[inset_2px_0_0_0_#ff0000]"
+    ? "bg-accent/8"
     : isActiveTab
-      ? "shadow-[inset_2px_0_0_0_rgba(255,255,255,0.12)]"
-      : "hover:bg-white/5";
-  item.className = `group relative flex h-[4.625rem] shrink-0 items-center gap-2 overflow-hidden p-1 transition-all duration-200 ${stateClasses} ${
+      ? "bg-surface-hover/50 hover:bg-surface-hover/70"
+      : "hover:bg-surface-hover/60";
+  item.className = `group relative flex h-[3.75rem] shrink-0 items-center gap-2.5 overflow-hidden px-2 rounded-[10px] transition-[background-color,opacity] duration-200 ${stateClasses} ${
     video.excluded ? "opacity-40 grayscale" : "opacity-100"
   }`;
 
@@ -1411,7 +1433,7 @@ function updateVideoListItem(item: HTMLElement, video: VideoData): void {
   const badgeEl = item.querySelector(".meta-duration-badge") as HTMLElement;
   const timeEl = item.querySelector(".meta-time") as HTMLElement;
   if (video.isLive) {
-    badgeEl.innerHTML = `<span class="px-1 py-px rounded text-[10px] font-bold bg-accent text-white">LIVE</span>`;
+    badgeEl.innerHTML = `<span class="px-1 py-px rounded text-[10px] font-bold bg-youtube text-white">LIVE</span>`;
     badgeEl.classList.remove("hidden");
     timeEl.classList.add("hidden");
   } else if (video.seconds > 0) {
@@ -1426,7 +1448,7 @@ function updateVideoListItem(item: HTMLElement, video: VideoData): void {
   } else if (video.suspended) {
     badgeEl.innerText = "—";
     badgeEl.classList.remove("hidden");
-    timeEl.innerHTML = `<span class="text-amber-500/90">Suspended</span>`;
+    timeEl.innerHTML = `<span class="text-warning">Suspended</span>`;
     timeEl.classList.remove("hidden");
   } else {
     badgeEl.classList.add("hidden");
@@ -1444,16 +1466,16 @@ function updateVideoListItem(item: HTMLElement, video: VideoData): void {
   if (item.dataset.controlsKey !== controlsKey) {
     item.dataset.controlsKey = controlsKey;
     controls.innerHTML = `
-          <button class="shrink-0 w-7 h-7 flex items-center justify-center rounded bg-surface-hover text-text-muted border-0 cursor-pointer transition-[background-color,color] hover:bg-accent hover:text-white active:scale-[0.96] jump-btn" title="Jump to tab">
-            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+          <button class="shrink-0 w-7 h-7 flex items-center justify-center rounded-md text-text-muted border-0 bg-transparent cursor-pointer transition-colors hover:bg-surface-hover hover:text-text-primary active:scale-[0.96] jump-btn" title="Go to tab" aria-label="Go to tab">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
           </button>
           ${
             video.suspended
-              ? `<button class="shrink-0 text-[10px] px-2 py-1 rounded bg-amber-500 text-white border-0 cursor-pointer transition-[background-color] hover:bg-amber-600 font-bold active:scale-[0.96] wake-up-btn">Wake up</button>`
+              ? `<button class="shrink-0 text-[11px] px-2 h-7 rounded-md bg-warning/15 text-warning border-0 cursor-pointer transition-colors hover:bg-warning/25 font-semibold active:scale-[0.96] wake-up-btn">Wake</button>`
               : ""
           }
-          <button class="shrink-0 text-[10px] px-2 py-1 rounded bg-surface-hover text-text-muted border-0 cursor-pointer transition-[background-color,color] hover:bg-accent hover:text-white active:scale-[0.96] toggle-btn">${
-            video.excluded ? "Show" : "Hide"
+          <button class="shrink-0 text-[11px] px-2 h-7 rounded-md text-text-muted border-0 bg-transparent cursor-pointer transition-colors hover:bg-surface-hover hover:text-text-primary font-medium active:scale-[0.96] toggle-btn">${
+            video.excluded ? "Count it" : "Skip"
           }</button>
       `;
   }
@@ -1479,6 +1501,7 @@ function updateVideoList(videos: VideoData[]) {
   });
 
   // 2. Create/Update (preserve DOM nodes; reorder to match sort)
+  let elapsed = 0;
   videos.forEach((video, index) => {
     let item = document.getElementById(`video-item-${video.id}`);
 
@@ -1488,28 +1511,34 @@ function updateVideoList(videos: VideoData[]) {
       item.dataset.id = video.id.toString();
       item.style.viewTransitionName = `video-${video.id}`;
       item.className =
-        "group relative flex h-[4.625rem] shrink-0 items-center gap-2 overflow-hidden p-1 transition-all duration-200";
+        "group relative flex h-[3.75rem] shrink-0 items-center gap-2.5 overflow-hidden px-2 rounded-[10px] transition-[background-color,opacity] duration-200";
       item.innerHTML = `
-            <div class="relative shrink-0 w-[5.5rem] aspect-video rounded-sm overflow-hidden bg-surface-hover border border-white/10">
+            <div class="relative shrink-0 w-[4.5rem] aspect-video rounded-md overflow-hidden bg-surface-hover">
               <img class="meta-thumb w-full h-full object-cover hidden" alt="" />
-              <div class="meta-duration-badge absolute bottom-1 right-1 px-1 py-px rounded-sm text-[10px] font-medium bg-black/80 text-white tabular-nums leading-none"></div>
+              <div class="meta-duration-badge absolute bottom-[3px] right-[3px] px-1 py-px rounded-[3px] text-[10px] font-medium bg-black/80 text-white tabular-nums leading-none"></div>
               <div class="meta-progress-track absolute bottom-0 left-0 right-0 h-[3px] bg-black/40">
                 <div class="meta-progress h-full bg-accent transition-[width] duration-700" style="width: 0%"></div>
               </div>
             </div>
-            <div class="flex-1 min-w-0 flex flex-col justify-center gap-0.5 pr-1">
-              <span class="meta-now-badge hidden self-start px-1.5 py-px rounded-full text-[9px] font-bold uppercase tracking-wide bg-accent/20 text-accent leading-none">Playing</span>
-              <div class="meta-title text-[13px] font-medium text-text-primary line-clamp-2 leading-snug"></div>
-              <div class="meta-channel text-[11px] text-text-secondary truncate"></div>
+            <div class="flex-1 min-w-0 flex flex-col justify-center gap-[2px]">
+              <span class="meta-now-badge hidden self-start text-[9px] font-semibold uppercase tracking-[0.1em] text-accent leading-none">Playing</span>
+              <div class="meta-title text-[13px] font-medium text-text-primary truncate leading-snug"></div>
+              <div class="meta-channel text-[11px] text-text-muted truncate"></div>
               <div class="meta-time text-[10px] text-text-muted tabular-nums"></div>
             </div>
-            <div class="meta-controls absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity bg-surface-elevated/95 backdrop-blur-md rounded-md p-1 shadow-lg ring-1 ring-white/10"></div>
+            <span class="meta-offset text-[11px] text-text-muted tabular-nums shrink-0 whitespace-nowrap"></span>
+            <div class="meta-controls absolute right-1 top-1/2 -translate-y-1/2 flex gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity bg-surface-elevated rounded-lg p-0.5 shadow-lg ring-1 ring-border"></div>
           `;
 
       container.appendChild(item);
     }
 
     updateVideoListItem(item, video);
+
+    const offsetEl = item.querySelector(".meta-offset") as HTMLElement | null;
+    const countsTowardQueue = !video.excluded && !video.isLive && !isTabActivelyPlaying(video);
+    if (offsetEl) offsetEl.textContent = countsTowardQueue ? formatOffset(elapsed) : "";
+    if (countsTowardQueue) elapsed += Math.max(0, video.seconds - video.currentTime);
 
     const referenceNode = container.children[index];
     if (referenceNode !== item) {

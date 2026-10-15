@@ -1,5 +1,8 @@
 import "./style.css";
+import { initTheme, mountThemeControl, THEME_CONTROL_HTML } from "../../utils/theme";
 import { closeAllCustomSelects, mountCustomSelect, type CustomSelectHandle } from "./custom-select";
+
+initTheme();
 import packageJson from "../../package.json";
 import {
   VideoData,
@@ -34,8 +37,13 @@ import {
   isStoreUpdatedMessage,
   type StoreState,
 } from "../../utils/store";
-import { formatTime, formatCompact, parseTimeParam, getVideoIdFromUrl, normalizeText, isYoutubeWatchOrShortsUrl } from "../../utils/format";
-import { detectLanguageFromPlayerResponse, normalizeLanguageCode } from "../../utils/captionLanguage";
+import { formatTime, formatCompact, formatDurationWords, formatOffset, parseTimeParam, getVideoIdFromUrl, normalizeText, isYoutubeWatchOrShortsUrl } from "../../utils/format";
+import {
+  detectLanguageFromPlayerResponse,
+  languageTextFromPlayerResponse,
+  normalizeLanguageCode,
+} from "../../utils/captionLanguage";
+import { resolveVideoLanguage } from "../../utils/channelLanguage";
 import {
   buildTabsFromVideos,
   countItemsByVideoId,
@@ -50,6 +58,7 @@ import {
   type DuplicateSummary,
   type SaveSessionPayload,
 } from "../../utils/sessions";
+import { queryReadingList, removeReadingListItem, type ReadingListItem } from "../../utils/readingList";
 
 interface WindowGroup {
   id: number;
@@ -62,10 +71,16 @@ let allVideos: VideoData[] = [];
 let windowGroups: WindowGroup[] = [];
 let currentWindowId: number | 'all' = 'all';
 let selectedTabIds = new Set<number>();
+let isReadingListView = false;
+/** Top-nav "Saved sessions" view: lists sessions instead of the board. */
+let isSessionsView = false;
+let savedSessionsCount = 0;
+let readingListItems: ReadingListItem[] = [];
+let selectedPlaybackSpeed = 1.0;
 
 let searchQuery = "";
 let groupingMode: 'none' | 'channel' | 'language' = 'none';
-let layoutMode: 'list' | 'grid' = 'grid';
+let layoutMode: 'list' | 'grid' = 'list';
 let thumbnailQuality: 'standard' | 'high' = 'high';
 let isSettingsOpen = false;
 
@@ -74,11 +89,11 @@ let sortOption: string = 'duration-desc';
 const pageLanguageConfirmed = new Set<string>();
 
 const SORT_SELECT_OPTIONS = [
-  { value: "index-asc", label: "Original Order" },
-  { value: "duration-desc", label: "Duration (High to Low)" },
-  { value: "duration-asc", label: "Duration (Low to High)" },
-  { value: "title-asc", label: "Title (A-Z)" },
-  { value: "channel-asc", label: "Channel (A-Z)" },
+  { value: "index-asc", label: "Tab order" },
+  { value: "duration-desc", label: "Longest first" },
+  { value: "duration-asc", label: "Shortest first" },
+  { value: "title-asc", label: "Title A to Z" },
+  { value: "channel-asc", label: "Channel A to Z" },
 ] as const;
 
 let sortSelectHandle: CustomSelectHandle | null = null;
@@ -348,7 +363,7 @@ async function fetchTabs(skipInitialRender = false) {
     .filter(window => groups.has(window.id!))
     .map((window, windowIndex) => {
       const tabs = groups.get(window.id!) || [];
-      const duration = tabs.reduce((acc, video) => acc + video.seconds, 0);
+      const duration = tabs.reduce((accumulator, video) => accumulator + video.seconds, 0);
       return {
         id: window.id!,
         tabs,
@@ -380,8 +395,8 @@ async function fetchTabs(skipInitialRender = false) {
 }
 
 function recomputeWindowGroupDurations(): void {
-  for (const g of windowGroups) {
-    g.duration = g.tabs.reduce((acc, v) => acc + v.seconds, 0);
+  for (const group of windowGroups) {
+    group.duration = group.tabs.reduce((accumulator, video) => accumulator + video.seconds, 0);
   }
 }
 
@@ -547,7 +562,12 @@ async function probeTabsMetadata() {
               videoDetails: {
                 defaultAudioLanguageCode: playerResponse?.videoDetails?.defaultAudioLanguageCode,
                 defaultLanguage: playerResponse?.videoDetails?.defaultLanguage,
+                videoId: playerResponse?.videoDetails?.videoId as string | undefined,
+                author: playerResponse?.videoDetails?.author as string | undefined,
+                title: playerResponse?.videoDetails?.title as string | undefined,
+                shortDescription: playerResponse?.videoDetails?.shortDescription as string | undefined,
               },
+              uiLanguage: document.documentElement.lang,
               microformat: {
                 playerMicroformatRenderer: {
                   defaultAudioLanguage: micro?.defaultAudioLanguage,
@@ -703,7 +723,13 @@ async function probeTabsMetadata() {
         const result = results[0].result;
 
         if (result.languageSource) {
-          const detected = detectLanguageFromPlayerResponse(result.languageSource);
+          const sourceDetails = result.languageSource.videoDetails;
+          const detected = await resolveVideoLanguage(
+            detectLanguageFromPlayerResponse(result.languageSource),
+            languageTextFromPlayerResponse(result.languageSource),
+            { channelName: sourceDetails?.author, videoId: sourceDetails?.videoId },
+            result.languageSource.uiLanguage
+          );
           result.language = detected.language;
           result.languageName = detected.languageName;
           const renderer = result.languageSource.captions?.playerCaptionsTracklistRenderer;
@@ -864,7 +890,7 @@ function filterUrlsMissingOnly(urls: string[], openIds: Set<string>): string[] {
 function duplicateBadgeHtml(url: string): string {
   const count = duplicateCountForUrl(scopeVideoIdCounts, url);
   if (count <= 1) return "";
-  return `<span class="text-[10px] bg-amber-500/15 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded-full font-bold shrink-0 tabular-nums" title="This video appears ${count} times in this view">×${count}</span>`;
+  return `<span class="text-[10px] bg-warning/15 text-warning border border-warning/30 px-1.5 py-0.5 rounded-full font-bold shrink-0 tabular-nums" title="This video appears ${count} times in this view">×${count}</span>`;
 }
 
 function shouldShowWindowBadge(): boolean {
@@ -886,7 +912,7 @@ function windowBadgeHtml(video: VideoData): string {
 function liveVideoStructurePart(video: VideoData): string {
   const groupKey =
     groupingMode === "channel" || groupingMode === "language" ? `|${videoGroupKey(video)}` : "";
-  return `${video.id}|${video.windowId ?? ""}|${video.url}${groupKey}`;
+  return `${video.id}|${video.windowId ?? ""}|${video.url}|${video.audible && !video.suspended ? 1 : 0}${groupKey}`;
 }
 
 function formatDuplicateStatsSuffix(summary: DuplicateSummary): string {
@@ -968,16 +994,16 @@ function updateDuplicatesFilterButton(summary: DuplicateSummary): void {
 function emptyListMessage(): string {
   if (showDuplicatesOnly) {
     return `
-      <div class="flex flex-col items-center justify-center h-full opacity-40">
-        <div class="text-4xl mb-4">✓</div>
-        <div>No duplicate videos in this view</div>
+      <div class="flex flex-col items-center justify-center py-16 px-6 text-center">
+        <div class="font-display text-xl text-text-primary">No duplicates here</div>
+        <div class="text-sm text-text-muted mt-1">Every video in this view is open only once.</div>
       </div>
     `;
   }
   return `
-      <div class="flex flex-col items-center justify-center h-full opacity-40">
-        <div class="text-4xl mb-4">📺</div>
-        <div>No videos found</div>
+      <div class="flex flex-col items-center justify-center py-16 px-6 text-center">
+        <div class="font-display text-xl text-text-primary">The desk is clear</div>
+        <div class="text-sm text-text-muted mt-1 max-w-sm">Open YouTube videos and they will line up here with the time they take.</div>
       </div>
     `;
 }
@@ -1251,9 +1277,9 @@ async function saveVideosAsSession(videos: VideoData[], windowLabel?: string): P
     await executeSaveSession(payload, tabs, sections);
     lastSavedSessionsFingerprint = "";
     await refreshSavedSessionsSidebar();
-  } catch (err) {
-    console.error("Save session failed:", err);
-    showToast(err instanceof Error ? err.message : "Could not save session.");
+  } catch (error) {
+    console.error("Save session failed:", error);
+    showToast(error instanceof Error ? error.message : "Could not save session.");
   }
 }
 
@@ -1266,8 +1292,8 @@ async function loadSessionInNewWindow(sessionId: string) {
   try {
     const opened = await restoreSession(session, options);
     showToast(opened > 0 ? `Opened ${opened} tab${opened === 1 ? "" : "s"}` : "All tabs from this session are already open.");
-  } catch (err) {
-    console.error("Restore session failed:", err);
+  } catch (error) {
+    console.error("Restore session failed:", error);
     showToast("Could not open session tabs.");
   }
 }
@@ -1320,7 +1346,7 @@ function escapeHtml(raw: string): string {
 }
 
 function sectionRailVar(colorIndex: number | "unsorted"): string {
-  if (colorIndex === "unsorted") return "rgba(255,255,255,0.14)";
+  if (colorIndex === "unsorted") return "var(--color-border)";
   return SECTION_RAIL_VARS[((colorIndex % SECTION_RAIL_VARS.length) + SECTION_RAIL_VARS.length) % SECTION_RAIL_VARS.length];
 }
 
@@ -1562,35 +1588,18 @@ function renderSectionHeaderHtml(options: {
 }): string {
   const isCollapsed = collapsedGroups.has(options.collapseKey);
   const rail = sectionRailVar(options.colorIndex);
-  const glow =
-    options.colorIndex === "unsorted"
-      ? "rgba(255,255,255,0.06)"
-      : `color-mix(in srgb, ${rail} 35%, transparent)`;
-  const surface =
-    options.colorIndex === "unsorted"
-      ? "var(--color-surface-elevated)"
-      : `color-mix(in srgb, var(--color-surface-elevated) 92%, ${rail})`;
   const dataSectionAttr = options.sectionId ? ` data-section-id="${escapeHtml(options.sectionId)}"` : "";
   return `
-    <div class="session-section-shell session-section-animate mb-3" style="--section-rail: ${rail}; --section-glow: ${glow}; --section-surface: ${surface}">
-      <div class="flex items-stretch gap-0">
-        <div class="session-section-rail mx-3 my-3" style="--section-rail: ${rail}" aria-hidden="true"></div>
-        <div class="flex-1 min-w-0 py-3 pr-3">
-          <div class="flex items-center gap-3 px-1">
-            <button type="button" class="section-collapse-toggle p-1.5 rounded-lg hover:bg-white/5 text-text-muted transition-transform duration-200 ${isCollapsed ? "-rotate-90" : ""}" data-section-collapse="${escapeHtml(options.collapseKey)}" aria-expanded="${isCollapsed ? "false" : "true"}">
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-            </button>
-            <div class="flex-1 min-w-0 flex items-baseline gap-2">
-              ${options.emoji ? `<span class="text-lg leading-none shrink-0" aria-hidden="true">${escapeHtml(options.emoji)}</span>` : ""}
-              <h3 class="session-section-title text-base font-semibold text-text-primary truncate cursor-default section-title-target"${dataSectionAttr}>${escapeHtml(options.title)}</h3>
-            </div>
-            <div class="flex items-center gap-2 shrink-0">
-              <span class="session-stat-pill">${escapeHtml(options.countLabel)}</span>
-              <span class="session-stat-pill font-mono">${escapeHtml(options.durationLabel)}</span>
-            </div>
-          </div>
-          ${options.subtitle ? `<p class="text-[11px] text-text-muted/90 pl-11 pr-1 mt-1 leading-snug">${escapeHtml(options.subtitle)}</p>` : ""}
-        </div>
+    <div class="queue-section-head" style="--section-rail: ${rail}">
+      <button type="button" class="section-collapse-toggle p-1 rounded-md hover:bg-surface-hover/60 text-text-muted transition-transform duration-200 ${isCollapsed ? "-rotate-90" : ""}" data-section-collapse="${escapeHtml(options.collapseKey)}" aria-expanded="${isCollapsed ? "false" : "true"}" aria-label="Collapse section">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="queue-section-line">
+        <span class="queue-section-dot" style="background: ${rail}" aria-hidden="true"></span>
+        <h3 class="queue-section-title cursor-default section-title-target"${dataSectionAttr}>${escapeHtml(options.title)}</h3>
+        ${options.countLabel.startsWith("0 ")
+          ? `<span class="session-stat-pill italic">empty</span>`
+          : `<span class="session-stat-pill">${escapeHtml(options.countLabel)}</span><span class="session-stat-pill">${escapeHtml(options.durationLabel)}</span>`}
       </div>
     </div>
   `;
@@ -1599,9 +1608,7 @@ function renderSectionHeaderHtml(options: {
 function renderSectionEmptyPlaceholder(colorIndex: number): string {
   const rail = sectionRailVar(colorIndex);
   return `
-    <div class="section-empty-hint mx-1 mb-4 py-8 px-4 text-center text-[12px] text-text-muted/80" style="--section-rail: ${rail}">
-      No videos here yet — right-click a video and choose <span class="text-text-secondary font-medium">Move to section</span>
-    </div>
+    <div class="section-empty-hint" style="--section-rail: ${rail}">Empty. Drag a video here, or right-click one and choose Move to pile.</div>
   `;
 }
 
@@ -1675,7 +1682,7 @@ function renderLiveVideosInnerHtml(
     .map(([groupName, groupVideos]) => {
       const ck = nestedChannelCollapseKey(collapseScopeId, groupName);
       const isCollapsed = collapsedGroups.has(ck);
-      const groupDuration = groupVideos.reduce((acc, video) => acc + video.seconds, 0);
+      const groupDuration = groupVideos.reduce((accumulator, video) => accumulator + video.seconds, 0);
       const sortedGroupVideos = sortVideosForDisplay(groupVideos);
       const allSelected = groupVideos.every((video) => selectedTabIds.has(video.id));
       const someSelected = !allSelected && groupVideos.some((video) => selectedTabIds.has(video.id));
@@ -1689,7 +1696,7 @@ function renderLiveVideosInnerHtml(
                     </button>
                     <div class="relative flex items-center justify-center w-4 h-4 cursor-pointer nested-group-selection-toggle" data-nested-group-scope="${escapeHtml(collapseScopeId)}" data-nested-group-name="${escapeHtml(groupName)}">
                       <input type="checkbox" class="peer appearance-none w-3.5 h-3.5 rounded border border-text-muted/40 checked:bg-accent checked:border-accent transition-colors cursor-pointer" ${allSelected ? "checked" : ""} ${someSelected ? "indeterminate" : ""}>
-                       <svg class="absolute w-2 h-2 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                       <svg class="absolute w-2 h-2 text-on-accent opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                        <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 ${someSelected && !allSelected ? "opacity-100" : ""}">
                           <div class="w-2 h-0.5 bg-accent"></div>
                        </div>
@@ -1732,7 +1739,7 @@ function buildSessionSectionedHtml(tabsToShow: SavedSessionTab[], sections: Sess
         ? renderSectionEmptyPlaceholder(color)
         : renderSessionTabsInnerHtml(tabs, color, section.id);
     parts.push(`
-      <div class="mb-8" data-section-wrapper="${escapeHtml(section.id)}">
+      <div class="queue-section" data-section-wrapper="${escapeHtml(section.id)}">
         ${header}
         <div class="pl-1 ${collapsed ? "hidden" : ""}" data-section-body="${escapeHtml(section.id)}">
           ${body}
@@ -1746,7 +1753,7 @@ function buildSessionSectionedHtml(tabsToShow: SavedSessionTab[], sections: Sess
     const header = renderSectionHeaderHtml({
       title: "Unsorted",
       emoji: "✦",
-      subtitle: "Videos not assigned to a section yet",
+      subtitle: "Videos not in any pile yet",
       collapseKey: ck,
       countLabel: `${unsorted.length} videos`,
       durationLabel: formatTime(dur),
@@ -1756,7 +1763,7 @@ function buildSessionSectionedHtml(tabsToShow: SavedSessionTab[], sections: Sess
     const body =
       unsorted.length === 0 ? "" : renderSessionTabsInnerHtml(unsorted, "unsorted", "__unsorted");
     parts.push(`
-      <div class="mb-8" data-section-wrapper="__unsorted">
+      <div class="queue-section" data-section-wrapper="__unsorted">
         ${header}
         <div class="pl-1 ${collapsed ? "hidden" : ""}" data-section-body="__unsorted">
           ${body}
@@ -1853,7 +1860,7 @@ function buildLiveSectionedHtml(videosToShow: VideoData[], sections: SessionSect
         ? renderSectionEmptyPlaceholder(color)
         : renderLiveVideosInnerHtml(videos, color, section.id);
     parts.push(`
-      <div class="mb-8" data-section-wrapper="${escapeHtml(section.id)}">
+      <div class="queue-section" data-section-wrapper="${escapeHtml(section.id)}">
         ${header}
         <div class="pl-1 ${collapsed ? "hidden" : ""}" data-section-body="${escapeHtml(section.id)}">
           ${body}
@@ -1867,7 +1874,7 @@ function buildLiveSectionedHtml(videosToShow: VideoData[], sections: SessionSect
     const header = renderSectionHeaderHtml({
       title: "Unsorted",
       emoji: "✦",
-      subtitle: "Videos not assigned to a section yet",
+      subtitle: "Videos not in any pile yet",
       collapseKey: ck,
       countLabel: `${unsorted.length} videos`,
       durationLabel: formatTime(dur),
@@ -1876,7 +1883,7 @@ function buildLiveSectionedHtml(videosToShow: VideoData[], sections: SessionSect
     const collapsed = collapsedGroups.has(ck);
     const body = unsorted.length === 0 ? "" : renderLiveVideosInnerHtml(unsorted, "unsorted", "__unsorted");
     parts.push(`
-      <div class="mb-8" data-section-wrapper="__unsorted">
+      <div class="queue-section" data-section-wrapper="__unsorted">
         ${header}
         <div class="pl-1 ${collapsed ? "hidden" : ""}" data-section-body="__unsorted">
           ${body}
@@ -1966,12 +1973,12 @@ function showConfirm(options: ConfirmOptions): Promise<boolean> {
     messageEl.textContent = options.message;
     okBtn.textContent = options.confirmLabel ?? "OK";
     cancelBtn.textContent = options.cancelLabel ?? "Cancel";
-    okBtn.classList.remove("bg-accent", "hover:opacity-90", "bg-red-600", "hover:bg-red-700", "text-white");
-    okBtn.classList.add("text-white");
+    okBtn.classList.remove("bg-accent", "hover:bg-accent-hover", "bg-danger", "hover:bg-danger-hover");
+    okBtn.classList.add("text-on-accent");
     if (options.confirmDanger) {
-      okBtn.classList.add("bg-red-600", "hover:bg-red-700");
+      okBtn.classList.add("bg-danger", "hover:bg-danger-hover");
     } else {
-      okBtn.classList.add("bg-accent", "hover:opacity-90");
+      okBtn.classList.add("bg-accent", "hover:bg-accent-hover");
     }
     const close = (result: boolean) => {
       modal.classList.add("hidden");
@@ -2000,56 +2007,266 @@ function saveSettings(): void {
     layoutMode,
     groupingMode,
     sortOption,
-  }).catch((err) => {
-    console.warn("Failed to save settings:", err);
+  }).catch((error) => {
+    console.warn("Failed to save settings:", error);
   });
+}
+
+async function loadReadingList(): Promise<void> {
+  readingListItems = await queryReadingList(false);
+  const badgeElement = document.getElementById("reading-list-badge");
+  if (badgeElement) {
+    badgeElement.textContent = String(readingListItems.length);
+  }
+}
+
+function extractDomain(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    return parsed.hostname.replace(/^www\./, "");
+  } catch {
+    return rawUrl;
+  }
+}
+
+function formatAddedAgo(timestampMs: number): string {
+  if (!timestampMs) return "";
+  const diffSeconds = Math.max(0, Math.floor((Date.now() - timestampMs) / 1000));
+  if (diffSeconds < 60) return "Just now";
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 30) return `${diffDays}d ago`;
+  return new Date(timestampMs).toLocaleDateString();
+}
+
+function renderReadingListCard(item: ReadingListItem): string {
+  const isYouTube = isYoutubeWatchOrShortsUrl(item.url);
+  const domain = extractDomain(item.url);
+  const addedTime = formatAddedAgo(item.creationTime);
+
+  const domainBadgeHtml = isYouTube
+    ? `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-youtube/12 text-youtube border border-youtube/30">
+        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        YouTube Study
+      </span>`
+    : `<span class="text-[10px] bg-surface-elevated border border-border text-text-secondary px-2 py-0.5 rounded-full font-medium">
+        ${escapeHtml(domain)}
+      </span>`;
+
+  const timeHtml = addedTime
+    ? `<span class="text-[10px] text-text-muted font-mono">${escapeHtml(addedTime)}</span>`
+    : "";
+
+  return `
+    <div class="reading-list-card group p-3.5 rounded-xl border border-border bg-surface hover:bg-surface-elevated/70 hover:border-border-hover transition-all flex items-center justify-between gap-4" data-reading-list-url="${escapeHtml(item.url)}">
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-2 mb-1.5">
+          ${domainBadgeHtml}
+          ${timeHtml}
+        </div>
+        <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" class="reading-list-title text-sm font-semibold text-text-primary hover:text-accent transition-colors truncate block" title="${escapeHtml(item.title || item.url)}">
+          ${escapeHtml(item.title || item.url)}
+        </a>
+        <div class="text-[11px] text-text-muted truncate mt-0.5 font-mono opacity-60">${escapeHtml(item.url)}</div>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <button type="button" class="reading-list-open-btn px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-surface-elevated text-text-secondary hover:text-text-primary text-xs font-semibold border border-border flex items-center gap-1.5 transition-colors cursor-pointer active:scale-95" title="Open in new tab">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          <span>Open</span>
+        </button>
+        <button type="button" class="reading-list-remove-btn w-8 h-8 rounded-lg hover:bg-danger/10 text-text-muted hover:text-danger flex items-center justify-center transition-colors border border-transparent hover:border-danger/20 cursor-pointer active:scale-95" title="Remove from reading list">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        </button>
+      </div>
+    </div>
+  `;
 }
 
 function renderSidebar() {
   const container = document.getElementById("window-list-windows");
   if (!container) return;
 
-  const totalDuration = allVideos.reduce((acc, video) => acc + video.seconds, 0);
+  const totalDuration = allVideos.reduce((accumulator, video) => accumulator + video.seconds, 0);
   const totalTabs = allVideos.length;
 
-  const fp = [
+  syncTopNavState();
+
+  const fingerprint = [
+    String(isReadingListView),
+    String(selectedSession?.id ?? ""),
     String(currentWindowId),
     String(totalTabs),
     String(totalDuration),
-    windowGroups.map((g) => `${g.id}:${g.label}:${g.duration}:${g.tabs.length}`).join("|"),
+    windowGroups.map((group) => `${group.id}:${group.label}:${group.duration}:${group.tabs.length}`).join("|"),
   ].join("\x1f");
 
-  if (fp === lastSidebarFingerprint) return;
-  lastSidebarFingerprint = fp;
+  if (fingerprint === lastSidebarFingerprint) return;
+  lastSidebarFingerprint = fingerprint;
 
   document.getElementById("global-stats-count")!.textContent =
-    `${totalTabs} videos · ${formatTime(totalDuration)}`;
+    `${totalTabs} videos · ${formatDurationWords(totalDuration)}`;
 
+  const liveView = !isReadingListView && selectedSession == null;
+  const isAllActive = currentWindowId === 'all' && liveView;
   let html = `
-    <button type="button" class="sidebar-item sidebar-all-windows-row w-full text-left px-2.5 py-2 rounded-md mb-1 flex items-center justify-between transition-colors ${currentWindowId === 'all' ? 'bg-surface-hover text-text-primary' : 'text-text-muted hover:bg-surface-hover/50 hover:text-text-secondary'}" data-sidebar-type="all">
-      <span class="text-xs font-semibold">All Windows</span>
-      <span class="text-[10px] bg-surface-elevated border border-border px-1.5 rounded-full tabular-nums">${totalTabs}</span>
-    </button>
+    <button type="button" class="sidebar-item window-chip ${isAllActive ? "bg-surface-hover" : ""}" data-sidebar-type="all">All windows · ${totalTabs}</button>
   `;
 
-  windowGroups.forEach(group => {
-    const isActive = currentWindowId === group.id;
+  windowGroups.forEach((group) => {
+    const isActive = currentWindowId === group.id && liveView;
     html += `
-      <button type="button" class="sidebar-item sidebar-window-row w-full text-left px-2.5 py-2 rounded-md mb-1 flex items-center justify-between transition-colors ${isActive ? 'bg-surface-hover text-text-primary' : 'text-text-muted hover:bg-surface-hover/50 hover:text-text-secondary'}" data-sidebar-type="window" data-window-id="${group.id}">
-        <div class="truncate pr-2 min-w-0">
-            <div class="text-xs font-semibold truncate">${group.label}</div>
-            <div class="text-[10px] font-mono opacity-60 tabular-nums">${formatTime(group.duration)}</div>
-        </div>
-        <span class="text-[10px] bg-surface-elevated border border-border px-1.5 rounded-full tabular-nums shrink-0">${group.tabs.length}</span>
-      </button>
+      <button type="button" class="sidebar-item window-chip ${isActive ? "bg-surface-hover" : ""}" data-sidebar-type="window" data-window-id="${group.id}" title="${formatDurationWords(group.duration)}">${escapeHtml(group.label)} · ${group.tabs.length}</button>
     `;
   });
 
   container.innerHTML = html;
 }
 
+function syncTopNavState(): void {
+  const states: [string, boolean][] = [
+    ["nav-desk", !isReadingListView && !isSessionsView && selectedSession == null],
+    ["nav-reading-list", isReadingListView],
+    ["nav-sessions", isSessionsView || selectedSession != null],
+  ];
+  for (const [id, active] of states) {
+    const element = document.getElementById(id);
+    element?.classList.toggle("bg-surface-hover", active);
+    element?.classList.toggle("text-text-primary", active);
+  }
+  document.getElementById("windows-block")?.classList.toggle("hidden", isReadingListView || isSessionsView || selectedSession != null);
+}
+
+function setDeskHero(options: { kicker: string; title: string; value: string; suffix: string }): void {
+  const kicker = document.getElementById("desk-kicker");
+  const value = document.getElementById("desk-time-value");
+  const suffix = document.getElementById("desk-time-suffix");
+  if (kicker) kicker.textContent = options.kicker;
+  if (value) value.textContent = options.value;
+  if (suffix) suffix.textContent = options.suffix;
+}
+
+function liveRemainingSeconds(videos: VideoData[]): number {
+  return videos.reduce((sum, video) => {
+    if (video.isLive) return sum;
+    return sum + Math.max(0, video.seconds - video.currentTime);
+  }, 0);
+}
+
+function pileCardHtml(options: {
+  key: string;
+  title: string;
+  colorIndex: number | "unsorted";
+  count: number;
+  seconds: number;
+  watchedPercent: number | null;
+  next: string | null;
+}): string {
+  const rail = sectionRailVar(options.colorIndex);
+  const unsorted = options.colorIndex === "unsorted";
+  const watched = options.watchedPercent != null && options.watchedPercent >= 1 ? ` · ${Math.round(options.watchedPercent)}%` : "";
+  const stat = options.count === 0 ? "empty" : `${options.count} · ${formatDurationWords(options.seconds)}${watched}`;
+  const next = options.next && options.count > 1 ? `<div class="pile-next">next: ${escapeHtml(options.next)}</div>` : "";
+  return `
+    <button type="button" class="pile${unsorted ? " pile--unsorted" : ""}" data-section-wrapper="${escapeHtml(options.key)}" data-pile-jump="${escapeHtml(options.key)}" style="--section-rail: ${rail}">
+      <div class="pile-line">
+        <span class="pile-dot" aria-hidden="true"></span>
+        <span class="pile-title${unsorted ? " text-text-secondary" : ""}">${escapeHtml(options.title)}</span>
+        <span class="pile-leader" aria-hidden="true"></span>
+        <span class="pile-stat">${stat}</span>
+      </div>
+      ${next}
+    </button>
+  `;
+}
+
+function renderPilesColumn(): void {
+  const list = document.getElementById("piles-list");
+  const block = document.getElementById("piles-block");
+  if (!list || !block) return;
+  block.classList.toggle("hidden", isReadingListView);
+  if (isReadingListView) return;
+
+  const cards: string[] = [];
+  if (selectedSession) {
+    const sections = orderedSections(selectedSession.sections);
+    const tabs = filterSessionTabsForDisplay(selectedSession.tabs ?? []);
+    const { blocks, unsorted } = partitionSessionTabsBySection(tabs, sections);
+    for (const { section, tabs: sectionTabs } of blocks) {
+      const sorted = sortSessionTabsForDisplay(sectionTabs);
+      cards.push(pileCardHtml({
+        key: section.id,
+        title: section.name,
+        colorIndex: section.colorIndex ?? 0,
+        count: sectionTabs.length,
+        seconds: sectionTabs.reduce((sum, tab) => sum + (tab.seconds ?? 0), 0),
+        watchedPercent: null,
+        next: sorted[0]?.title ?? null,
+      }));
+    }
+    if (sections.length > 0) {
+      cards.push(pileCardHtml({
+        key: "__unsorted",
+        title: "Unsorted",
+        colorIndex: "unsorted",
+        count: unsorted.length,
+        seconds: unsorted.reduce((sum, tab) => sum + (tab.seconds ?? 0), 0),
+        watchedPercent: null,
+        next: null,
+      }));
+    }
+  } else {
+    const sections = orderedSections(liveTabSectionsState.sections);
+    const videos = getLiveVideosForCurrentView();
+    const { blocks, unsorted } = partitionLiveVideosBySection(videos, sections, liveTabSectionsState.assignments);
+    for (const { section, videos: sectionVideos } of blocks) {
+      const total = sectionVideos.reduce((sum, video) => sum + video.seconds, 0);
+      const watched = sectionVideos.reduce((sum, video) => sum + (video.isLive ? 0 : Math.min(video.currentTime, video.seconds)), 0);
+      const sorted = sortVideosForDisplay(sectionVideos);
+      cards.push(pileCardHtml({
+        key: section.id,
+        title: section.name,
+        colorIndex: section.colorIndex ?? 0,
+        count: sectionVideos.length,
+        seconds: total,
+        watchedPercent: total > 0 ? (watched / total) * 100 : 0,
+        next: sorted.find((video) => !video.audible)?.title ?? sorted[0]?.title ?? null,
+      }));
+    }
+    if (sections.length > 0) {
+      cards.push(pileCardHtml({
+        key: "__unsorted",
+        title: "Unsorted",
+        colorIndex: "unsorted",
+        count: unsorted.length,
+        seconds: unsorted.reduce((sum, video) => sum + video.seconds, 0),
+        watchedPercent: null,
+        next: null,
+      }));
+    }
+  }
+
+  if (cards.length === 0) {
+    cards.push(`
+      <button type="button" class="pile pile--empty" data-pile-create="1">
+        <span class="text-sm text-text-muted italic">No piles yet. Make one for grammar, podcasts, or a course.</span>
+      </button>
+    `);
+  }
+
+  const html = cards.join("");
+  if (list.innerHTML !== html) list.innerHTML = html;
+}
+
 async function refreshSavedSessionsSidebar() {
   const sessions = await getSavedSessions();
+  if (sessions.length !== savedSessionsCount) {
+    savedSessionsCount = sessions.length;
+    if (isSessionsView) render();
+  }
   const query = normalizeText(sessionSidebarSearch.trim());
   const filtered = query
     ? sessions.filter((session) => normalizeText(session.name).includes(query))
@@ -2068,7 +2285,7 @@ async function refreshSavedSessionsSidebar() {
   container.setAttribute("aria-busy", "false");
 
   const emptyMessage = (text: string) =>
-    `<div class="px-2.5 py-2 min-h-[3.25rem] flex items-center text-[11px] text-text-muted">${text}</div>`;
+    `<div class="px-3 py-2 text-xs text-text-muted">${text}</div>`;
 
   if (filtered.length === 0) {
     container.innerHTML = query
@@ -2085,12 +2302,11 @@ async function refreshSavedSessionsSidebar() {
       const duration = formatTime(sessionTotalSeconds(savedSession.tabs ?? []));
       const ago = formatSavedAgo(savedSession.savedAt);
       return `
-    <button type="button" class="sidebar-item sidebar-session-row sidebar-item-session w-full text-left px-2.5 py-2 rounded-md mb-1 flex items-center gap-2 transition-colors ${active ? "bg-surface-hover text-text-primary" : "text-text-muted hover:bg-surface-hover/50 hover:text-text-secondary"}" data-sidebar-type="session" data-session-id="${savedSession.id}" data-pinned="${savedSession.pinned ? "1" : "0"}">
-      ${savedSession.pinned ? pinIcon : ""}
-      <div class="truncate min-w-0 flex-1">
-        <div class="text-xs font-semibold truncate leading-snug">${escapeHtml(savedSession.name)}</div>
-        <div class="text-[10px] font-mono opacity-60 truncate tabular-nums leading-snug">${tabCount} tabs · ${duration} · ${ago}</div>
-      </div>
+    <button type="button" class="sidebar-item session-row sidebar-item-session ${active ? "bg-surface-hover" : ""}" data-sidebar-type="session" data-session-id="${savedSession.id}" data-pinned="${savedSession.pinned ? "1" : "0"}">
+      ${savedSession.pinned ? pinIcon : `<span class="w-3 shrink-0"></span>`}
+      <span class="font-display text-[17px] font-medium text-text-primary truncate flex-1 min-w-0">${escapeHtml(savedSession.name)}</span>
+      <span class="text-xs text-text-muted tabular-nums whitespace-nowrap">${tabCount} videos · ${duration}</span>
+      <span class="text-xs text-text-muted/70 whitespace-nowrap w-16 text-right">${ago}</span>
     </button>
   `;
     })
@@ -2144,15 +2360,15 @@ function orderLiveGroupEntries(groups: [string, VideoData[]][]): [string, VideoD
   }
   if (sortOption === "duration-desc") {
     return entries.sort((a, b) => {
-      const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
-      const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
+      const durationA = a[1].reduce((accumulator, video) => accumulator + video.seconds, 0);
+      const durationB = b[1].reduce((accumulator, video) => accumulator + video.seconds, 0);
       return durationB - durationA;
     });
   }
   if (sortOption === "duration-asc") {
     return entries.sort((a, b) => {
-      const durationA = a[1].reduce((acc, video) => acc + video.seconds, 0);
-      const durationB = b[1].reduce((acc, video) => acc + video.seconds, 0);
+      const durationA = a[1].reduce((accumulator, video) => accumulator + video.seconds, 0);
+      const durationB = b[1].reduce((accumulator, video) => accumulator + video.seconds, 0);
       return durationA - durationB;
     });
   }
@@ -2198,8 +2414,15 @@ function updateCurrentViewStatsFromState(): void {
   if (!headerStats) return;
   const videosToShow = getLiveVideosForCurrentView();
   const duplicateSummary = summarizeDuplicates(scopeVideoIdCounts);
-  const duration = videosToShow.reduce((acc, video) => acc + video.seconds, 0);
+  const duration = videosToShow.reduce((accumulator, video) => accumulator + video.seconds, 0);
   headerStats.innerText = formatViewStats(videosToShow.length, duration, duplicateSummary);
+  setDeskHero({
+    kicker: "On the desk",
+    title: "",
+    value: formatDurationWords(liveRemainingSeconds(videosToShow)),
+    suffix: "left",
+  });
+  renderPlanner();
 }
 
 function updateTabListAggregateHeadersFromState(): void {
@@ -2243,7 +2466,7 @@ function updateTabListAggregateHeadersFromState(): void {
     const spans = statsEl.querySelectorAll("span");
     if (spans.length >= 3) {
       spans[0]!.textContent = `${groupVideos.length} videos`;
-      spans[2]!.textContent = formatTime(groupVideos.reduce((acc, video) => acc + video.seconds, 0));
+      spans[2]!.textContent = formatTime(groupVideos.reduce((accumulator, video) => accumulator + video.seconds, 0));
     }
   });
 }
@@ -2603,6 +2826,80 @@ function renderMain() {
 
   const viewToolbar = document.getElementById("view-toolbar");
 
+  syncTopNavState();
+  renderPlanner();
+
+  const boardView = !isReadingListView && !isSessionsView;
+  container.classList.toggle("board", boardView);
+  container.classList.toggle("hidden", isSessionsView);
+  container.classList.toggle("overflow-y-auto", !boardView);
+  container.classList.toggle("px-8", !boardView);
+  container.classList.toggle("py-6", !boardView);
+
+  const sessionsPanel = document.getElementById("sessions-panel");
+  sessionsPanel?.classList.toggle("hidden", !isSessionsView);
+  sessionsPanel?.classList.toggle("flex", isSessionsView);
+
+  if (isSessionsView) {
+    if (viewToolbar) viewToolbar.classList.add("hidden");
+    headerTitle.innerText = "sets of tabs kept for later";
+    headerStats.innerText = "Open one to put it on the desk, or add today's tabs to it.";
+    setDeskHero({
+      kicker: "Saved sessions",
+      title: "",
+      value: String(savedSessionsCount),
+      suffix: savedSessionsCount === 1 ? "session" : "sessions",
+    });
+    lastTabListFingerprint = "";
+    return;
+  }
+
+  if (isReadingListView) {
+    if (viewToolbar) viewToolbar.classList.add("hidden");
+    headerTitle.innerText = "Chrome reading list";
+    headerStats.innerText = "Articles and links you saved for later.";
+    setDeskHero({
+      kicker: "Reading list",
+      title: "",
+      value: String(readingListItems.length),
+      suffix: readingListItems.length === 1 ? "unread article" : "unread articles",
+    });
+
+    const fingerprintReadingList = `reading-list:${readingListItems.length}:${readingListItems.map((item) => item.url).join("|")}`;
+    if (fingerprintReadingList === lastTabListFingerprint) {
+      skippedTabListDom = true;
+      return;
+    }
+
+    if (readingListItems.length === 0) {
+      tabListContainerInnerHtmlUpdated = true;
+      setTabListInnerHTML(
+        container,
+        `<div class="flex flex-col items-center justify-center py-16 text-center text-text-muted px-4">
+          <div class="w-12 h-12 rounded-xl bg-surface-elevated border border-border flex items-center justify-center mb-3 text-text-muted">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M6 6h10"/><path d="M6 10h10"/></svg>
+          </div>
+          <p class="text-sm font-semibold text-text-primary">No unread reading list articles</p>
+          <p class="text-xs text-text-muted max-w-sm mt-1 leading-relaxed">Articles and links saved to Chrome's Reading List appear here for study triage and queueing.</p>
+        </div>`
+      );
+      lastTabListFingerprint = fingerprintReadingList;
+      return;
+    }
+
+    const cardsHtml = readingListItems
+      .map((item) => renderReadingListCard(item))
+      .join("");
+
+    tabListContainerInnerHtmlUpdated = true;
+    setTabListInnerHTML(
+      container,
+      `<div class="space-y-2 pb-8 max-w-4xl">${cardsHtml}</div>`
+    );
+    lastTabListFingerprint = fingerprintReadingList;
+    return;
+  }
+
   if (selectedSession) {
     if (viewToolbar) viewToolbar.classList.remove("hidden");
     const session = selectedSession;
@@ -2612,93 +2909,16 @@ function renderMain() {
     const totalSec = tabsToShow.reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
     headerTitle.innerText = session.name;
     headerStats.innerText = formatViewStats(tabsToShow.length, totalSec, duplicateSummary);
+    setDeskHero({ kicker: "Saved session", title: "", value: formatDurationWords(totalSec), suffix: "in total" });
 
     const fpSession = tabListStructureFingerprint();
     if (fpSession === lastTabListFingerprint) return;
 
-    if (tabsToShow.length === 0 && !usesSectionLayoutForSession(session)) {
-      tabListContainerInnerHtmlUpdated = true;
-      setTabListInnerHTML(container, emptyListMessage());
-      lastTabListFingerprint = fpSession;
-    } else if (usesSectionLayoutForSession(session)) {
-      const secs = orderedSections(session.sections);
-      const contentHtml = buildSessionSectionedHtml(tabsToShow, secs);
-      tabListContainerInnerHtmlUpdated = true;
-      setTabListInnerHTML(container, `<div class="space-y-2 pb-8">${contentHtml}</div>`);
-      wireSectionLayoutInteractivity(container);
-      thumbnailCacheBackfill(container);
-      lastTabListFingerprint = fpSession;
-    } else {
-      let contentHtml: string;
-      if (groupingMode === "channel" || groupingMode === "language") {
-        const groups = new Map<string, SavedSessionTab[]>();
-        tabsToShow.forEach((tab) => {
-          let name = "Unknown";
-          if (groupingMode === "channel") {
-            name = tab.channelName ?? "Unknown Channel";
-          } else if (groupingMode === "language") {
-            name = tab.languageName ? tab.languageName.split('(')[0].trim() : (tab.language ? tab.language.toUpperCase() : "Unspecified");
-          }
-          if (!groups.has(name)) groups.set(name, []);
-          groups.get(name)!.push(tab);
-        });
-        let sortedGroups = Array.from(groups.entries());
-        if (sortOption === "channel-asc") {
-          sortedGroups.sort((a, b) => a[0].localeCompare(b[0]));
-        } else if (sortOption === "duration-desc") {
-          sortedGroups.sort((a, b) => {
-            const durationA = a[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
-            const durationB = b[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
-            return durationB - durationA;
-          });
-        } else if (sortOption === "duration-asc") {
-          sortedGroups.sort((a, b) => {
-            const durationA = a[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
-            const durationB = b[1].reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
-            return durationA - durationB;
-          });
-        }
-        contentHtml = sortedGroups
-          .map(([groupName, tabList]) => {
-            const isCollapsed = collapsedGroups.has(groupName);
-            const groupDuration = tabList.reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
-            const sortedTabs = sortSessionTabs(tabList);
-            const gridOrList =
-              layoutMode === "grid"
-                ? renderSessionGrid(sortedTabs)
-                : renderSessionList(sortedTabs);
-            return `
-            <div class="mb-4">
-              <div class="flex items-center gap-3 px-2 py-2 rounded-md hover:bg-surface-hover/30 group/header select-none">
-                <button class="p-1 rounded hover:bg-surface-hover text-text-muted transition-transform duration-200 group-toggle ${isCollapsed ? "-rotate-90" : ""}" data-group="${escapeHtml(groupName)}">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-                </button>
-                <div class="flex-1 font-medium text-sm text-text-primary truncate cursor-pointer group-toggle" data-group="${escapeHtml(groupName)}">${escapeHtml(groupName)}</div>
-                <div class="text-[10px] text-text-muted font-mono flex items-center gap-2">
-                  <span>${tabList.length} videos</span>
-                  <span class="w-px h-3 bg-border"></span>
-                  <span>${formatTime(groupDuration)}</span>
-                </div>
-              </div>
-              <div class="space-y-1 ml-12 border-l border-border pl-2 mt-1 ${isCollapsed ? "hidden" : ""}" data-flat-group-body="${escapeHtml(groupName)}">
-                ${gridOrList}
-              </div>
-            </div>
-          `;
-          })
-          .join("");
-      } else {
-        const sorted = sortSessionTabs(tabsToShow);
-        contentHtml =
-          layoutMode === "grid"
-            ? renderSessionGrid(sorted)
-            : renderSessionList(sorted);
-      }
-      tabListContainerInnerHtmlUpdated = true;
-      setTabListInnerHTML(container, `<div class="space-y-4">${contentHtml}</div>`);
-      thumbnailCacheBackfill(container);
-      lastTabListFingerprint = fpSession;
-    }
+    const secs = orderedSections(session.sections);
+    tabListContainerInnerHtmlUpdated = true;
+    setTabListInnerHTML(container, buildSessionBoardHtml(tabsToShow, secs));
+    thumbnailCacheBackfill(container);
+    lastTabListFingerprint = fpSession;
     return;
   }
 
@@ -2706,7 +2926,7 @@ function renderMain() {
 
   let baseVideos: VideoData[] = [];
   if (currentWindowId === 'all') {
-    headerTitle.innerText = "All Windows";
+    headerTitle.innerText = "All windows";
     baseVideos = allVideos;
   } else {
     const group = windowGroups.find(windowGroup => windowGroup.id === currentWindowId);
@@ -2719,8 +2939,14 @@ function renderMain() {
   const videosToShow = filterVideosForDisplay(baseVideos);
   const duplicateSummary = summarizeDuplicates(scopeVideoIdCounts);
   updateDuplicatesFilterButton(duplicateSummary);
-  const duration = videosToShow.reduce((acc, video) => acc + video.seconds, 0);
+  const duration = videosToShow.reduce((accumulator, video) => accumulator + video.seconds, 0);
   headerStats.innerText = formatViewStats(videosToShow.length, duration, duplicateSummary);
+  setDeskHero({
+    kicker: "On the desk",
+    title: "",
+    value: formatDurationWords(liveRemainingSeconds(videosToShow)),
+    suffix: "left",
+  });
 
   const fpLive = tabListStructureFingerprint();
   if (fpLive === lastTabListFingerprint) {
@@ -2728,131 +2954,435 @@ function renderMain() {
     return;
   }
 
-  if (videosToShow.length === 0 && !usesSectionLayoutForLive()) {
-    tabListContainerInnerHtmlUpdated = true;
-    setTabListInnerHTML(container, emptyListMessage());
-    lastTabListFingerprint = fpLive;
-    return;
+  const secs = orderedSections(liveTabSectionsState.sections);
+  tabListContainerInnerHtmlUpdated = true;
+  setTabListInnerHTML(container, buildLiveBoardHtml(videosToShow, secs, liveTabSectionsState.assignments));
+  thumbnailCacheBackfill(container);
+  lastTabListFingerprint = fpLive;
+}
+
+// ───────────────────────── Board (piles as columns) ─────────────────────────
+
+const BOARD_FULL_CARDS = 3;
+
+function boardStatHtml(count: number, seconds: number): string {
+  if (count === 0) return `<span class="session-stat-pill italic">empty</span><span class="session-stat-pill hidden"></span>`;
+  return `<span class="session-stat-pill">${count} ${count === 1 ? "video" : "videos"}</span><span class="session-stat-pill">${formatDurationWords(seconds)}</span>`;
+}
+
+function boardColumnHeadHtml(options: {
+  key: string;
+  title: string;
+  colorIndex: number | "unsorted";
+  count: number;
+  seconds: number;
+  watchedPercent: number | null;
+  sectionId?: string;
+  canStart: boolean;
+}): string {
+  const rail = options.colorIndex === "unsorted" ? "var(--color-text-primary)" : sectionRailVar(options.colorIndex);
+  const dataSectionAttr = options.sectionId ? ` data-section-id="${escapeHtml(options.sectionId)}"` : "";
+  const subtitle =
+    options.colorIndex === "unsorted"
+      ? `<span>New tabs land here. Drag them onto a pile.</span>`
+      : options.watchedPercent != null && options.watchedPercent >= 1
+        ? `<span>${Math.round(options.watchedPercent)}% watched</span>`
+        : `<span></span>`;
+  const start =
+    options.canStart && options.count > 0
+      ? `<button type="button" class="board-start" data-start-pile="${escapeHtml(options.key)}">▶ Start this pile</button>`
+      : "";
+  return `
+    <div class="board-col-head" style="--section-rail: ${rail}">
+      <h2 class="board-col-title section-title-target${options.colorIndex === "unsorted" ? " text-text-secondary" : ""}"${dataSectionAttr}>${escapeHtml(options.title)}</h2>
+      <span class="board-col-stat">${boardStatHtml(options.count, options.seconds)}</span>
+    </div>
+    <div class="board-col-sub">${subtitle}${start}</div>
+  `;
+}
+
+function boardThumbHtml(videoId: string | null, draggableOff: boolean): string {
+  const thumbQuality = thumbnailQuality === "high" ? "hqdefault.jpg" : "mqdefault.jpg";
+  const { src, cacheKey } = getThumbnailSrc(videoId, thumbQuality);
+  if (!src) return "";
+  const keyAttr = cacheKey ? ` data-thumbnail-key="${cacheKey}"` : "";
+  return `<img src="${src}"${keyAttr} class="manager-card-thumb absolute inset-0 w-full h-full object-cover" loading="lazy" decoding="async" alt=""${draggableOff ? ` draggable="false"` : ""} />`;
+}
+
+function boardVideoCardHtml(video: VideoData, compact: boolean): string {
+  const isSelected = selectedTabIds.has(video.id);
+  const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
+  const playing = Boolean(video.audible) && !video.suspended;
+  const planned = plannedTabIds.has(video.id);
+  const remaining = Math.max(0, video.seconds - video.currentTime);
+  const languageLabel = video.languageName ? video.languageName.split("(")[0].trim() : "";
+  const meta = video.isLive
+    ? `<span class="text-youtube font-semibold">Live</span> · not counted`
+    : video.suspended
+      ? `<span class="text-warning">Suspended tab</span>`
+      : video.currentTime > 0
+        ? `${formatDurationWords(remaining)} left`
+        : formatDurationWords(video.seconds);
+  const classes = [
+    "board-card group tab-card-dnd",
+    compact ? "board-card--compact" : "",
+    playing ? "board-card--playing" : "",
+    planned ? "board-card--planned" : "",
+    isSelected ? "board-card--selected" : "",
+    video.suspended ? "opacity-75" : "",
+  ].filter(Boolean).join(" ");
+  const badges = `
+    ${playing ? `<span class="board-tag">Playing</span>` : planned ? `<span class="board-tag board-tag--plan">In plan</span>` : ""}
+    <span class="manager-card-duration board-duration">${video.isLive ? "LIVE" : formatCompact(video.seconds)}</span>
+    <span class="manager-card-progress-wrap board-progress" style="opacity: ${!video.isLive && video.seconds > 0 && watchedPercent > 0 ? 1 : 0}"><span class="manager-card-progress block h-full bg-accent" style="width: ${watchedPercent}%"></span></span>`;
+  return `
+    <div class="${classes}" data-id="${video.id}" draggable="true">
+      <div class="board-thumb video-click-target cursor-pointer">
+        ${boardThumbHtml(getVideoIdFromUrl(video.url), true)}
+        ${badges}
+      </div>
+      <div class="board-body video-click-target cursor-pointer">
+        <h3 class="manager-card-title board-title" title="${escapeHtml(video.title)}">${escapeHtml(video.title)}</h3>
+        <div class="board-meta">
+          <span class="manager-card-channel truncate">${escapeHtml(video.channelName)}</span>
+          <span class="opacity-60">·</span>
+          <span class="whitespace-nowrap"><span class="manager-card-time-current hidden"></span><span class="manager-card-time-total hidden"></span>${meta}</span>
+          <span class="manager-card-language board-lang ${languageLabel ? "" : "hidden"}">${escapeHtml(languageLabel)}</span>
+          ${windowBadgeHtml(video)}
+          ${duplicateBadgeHtml(video.url)}
+        </div>
+      </div>
+      <div class="board-actions">
+        ${queueCheckboxHtml("selection-toggle", isSelected)}
+        <span class="flex-1"></span>
+        <button type="button" draggable="false" class="queue-action jump-btn" title="Go to tab" aria-label="Go to tab">${QUEUE_ICON_OPEN}</button>
+        <button type="button" draggable="false" class="queue-action queue-action--danger close-btn" title="Close tab" aria-label="Close tab">${QUEUE_ICON_CLOSE}</button>
+      </div>
+    </div>
+  `;
+}
+
+function boardSessionCardHtml(tab: SavedSessionTab, compact: boolean): string {
+  const isSelected = selectedSessionTabUrls.has(tab.url);
+  const title = tab.title ?? "Untitled";
+  const sec = tab.seconds ?? 0;
+  const languageLabel = tab.languageName ? tab.languageName.split("(")[0].trim() : "";
+  const classes = ["board-card group tab-card-dnd", compact ? "board-card--compact" : "", isSelected ? "board-card--selected" : ""].filter(Boolean).join(" ");
+  return `
+    <div class="${classes}" data-session-tab-url="${escapeHtml(tab.url)}" draggable="true">
+      <div class="board-thumb session-video-click-target cursor-pointer">
+        ${boardThumbHtml(getVideoIdFromUrl(tab.url), true)}
+        <span class="board-duration">${formatCompact(sec)}</span>
+      </div>
+      <div class="board-body session-video-click-target cursor-pointer">
+        <h3 class="board-title" title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
+        <div class="board-meta">
+          <span class="truncate">${escapeHtml(tab.channelName ?? "")}</span>
+          ${languageLabel ? `<span class="board-lang">${escapeHtml(languageLabel)}</span>` : ""}
+          ${duplicateBadgeHtml(tab.url)}
+        </div>
+      </div>
+      <div class="board-actions">
+        ${queueCheckboxHtml("session-selection-toggle", isSelected)}
+        <span class="flex-1"></span>
+        <button type="button" draggable="false" class="queue-action session-open-new-tab" title="Open in new tab" aria-label="Open in new tab">${QUEUE_ICON_OPEN}</button>
+        <button type="button" draggable="false" class="queue-action queue-action--danger session-remove-btn" title="Remove from session" aria-label="Remove from session">${QUEUE_ICON_TRASH}</button>
+      </div>
+    </div>
+  `;
+}
+
+function boardColumnHtml(key: string, head: string, cards: string[], options: { wide: boolean; emptyHint: string }): string {
+  const body = cards.length > 0
+    ? `<div class="board-cards${options.wide ? " board-cards--wide" : ""}">${cards.join("")}</div>`
+    : `<div class="board-empty">${options.emptyHint}</div>`;
+  return `
+    <section class="board-col${options.wide ? " board-col--flex" : ""}" data-section-wrapper="${escapeHtml(key)}">
+      ${head}
+      ${body}
+      <div class="board-drop" aria-hidden="true">Drop here</div>
+    </section>
+  `;
+}
+
+function boardNewPileHtml(): string {
+  return `
+    <button type="button" class="board-col board-col--new" data-pile-create="1">
+      <span class="board-col-title text-accent">+ New pile</span>
+      <span class="text-xs text-text-muted">Grammar, podcasts, one course…</span>
+    </button>
+  `;
+}
+
+function buildLiveBoardHtml(videosToShow: VideoData[], sections: SessionSection[], assignments: Record<string, string>): string {
+  const { blocks, unsorted } = partitionLiveVideosBySection(videosToShow, sections, assignments);
+  // The inbox grows into a grid whenever it holds more than a handful; piles stay narrow columns.
+  const wide = sections.length === 0 || unsorted.length > 4;
+  const columns: string[] = [];
+
+  const unsortedSorted = sortVideosForDisplay(unsorted);
+  columns.push(boardColumnHtml(
+    "__unsorted",
+    boardColumnHeadHtml({
+      key: "__unsorted",
+      title: sections.length === 0 ? "On the desk" : "Inbox",
+      colorIndex: "unsorted",
+      count: unsorted.length,
+      seconds: unsorted.reduce((sum, video) => sum + video.seconds, 0),
+      watchedPercent: null,
+      canStart: false,
+    }),
+    unsortedSorted.map((video, index) => boardVideoCardHtml(video, !wide && index >= BOARD_FULL_CARDS)),
+    { wide, emptyHint: sections.length === 0 ? "The desk is clear. Open YouTube videos and they will show up here." : "Nothing new. Every open video is in a pile." }
+  ));
+
+  for (const { section, videos } of blocks) {
+    const total = videos.reduce((sum, video) => sum + video.seconds, 0);
+    const watched = videos.reduce((sum, video) => sum + (video.isLive ? 0 : Math.min(video.currentTime, video.seconds)), 0);
+    const sorted = sortVideosForDisplay(videos);
+    columns.push(boardColumnHtml(
+      section.id,
+      boardColumnHeadHtml({
+        key: section.id,
+        title: section.name,
+        colorIndex: section.colorIndex ?? 0,
+        count: videos.length,
+        seconds: total,
+        watchedPercent: total > 0 ? (watched / total) * 100 : 0,
+        sectionId: section.id,
+        canStart: true,
+      }),
+      sorted.map((video, index) => boardVideoCardHtml(video, index >= BOARD_FULL_CARDS)),
+      { wide: false, emptyHint: "Drop a video here" }
+    ));
   }
 
-  if (usesSectionLayoutForLive()) {
-    const secs = orderedSections(liveTabSectionsState.sections);
-    const contentHtml = buildLiveSectionedHtml(videosToShow, secs, liveTabSectionsState.assignments);
-    tabListContainerInnerHtmlUpdated = true;
-    setTabListInnerHTML(container, `<div class="space-y-2 pb-8">${contentHtml}</div>`);
-    wireSectionLayoutInteractivity(container);
-    thumbnailCacheBackfill(container);
-    lastTabListFingerprint = fpLive;
-    return;
+  columns.push(boardNewPileHtml());
+  return columns.join("");
+}
+
+function buildSessionBoardHtml(tabsToShow: SavedSessionTab[], sections: SessionSection[]): string {
+  const { blocks, unsorted } = partitionSessionTabsBySection(tabsToShow, sections);
+  const wide = sections.length === 0 || unsorted.length > 4;
+  const columns: string[] = [];
+
+  const unsortedSorted = sortSessionTabsForDisplay(unsorted);
+  columns.push(boardColumnHtml(
+    "__unsorted",
+    boardColumnHeadHtml({
+      key: "__unsorted",
+      title: sections.length === 0 ? "In this session" : "Inbox",
+      colorIndex: "unsorted",
+      count: unsorted.length,
+      seconds: unsorted.reduce((sum, tab) => sum + (tab.seconds ?? 0), 0),
+      watchedPercent: null,
+      canStart: false,
+    }),
+    unsortedSorted.map((tab, index) => boardSessionCardHtml(tab, !wide && index >= BOARD_FULL_CARDS)),
+    { wide, emptyHint: sections.length === 0 ? "This session is empty." : "Every video in this session is in a pile." }
+  ));
+
+  for (const { section, tabs } of blocks) {
+    const sorted = sortSessionTabsForDisplay(tabs);
+    columns.push(boardColumnHtml(
+      section.id,
+      boardColumnHeadHtml({
+        key: section.id,
+        title: section.name,
+        colorIndex: section.colorIndex ?? 0,
+        count: tabs.length,
+        seconds: tabs.reduce((sum, tab) => sum + (tab.seconds ?? 0), 0),
+        watchedPercent: null,
+        sectionId: section.id,
+        canStart: false,
+      }),
+      sorted.map((tab, index) => boardSessionCardHtml(tab, index >= BOARD_FULL_CARDS)),
+      { wide: false, emptyHint: "Drop a video here" }
+    ));
   }
 
-  if (groupingMode === 'none') {
-    const sortedVideos = sortVideosForDisplay(videosToShow);
-    if (layoutMode === 'grid') {
-      tabListContainerInnerHtmlUpdated = true;
-      setTabListInnerHTML(container, renderVideoGrid(sortedVideos));
-      thumbnailCacheBackfill(container);
-    } else {
-      tabListContainerInnerHtmlUpdated = true;
-      setTabListInnerHTML(container, renderVideoList(sortedVideos));
-    }
-    lastTabListFingerprint = fpLive;
-  } else {
-    const groups = new Map<string, VideoData[]>();
-    videosToShow.forEach((video) => {
-      const name = videoGroupKey(video);
-      if (!groups.has(name)) groups.set(name, []);
-      groups.get(name)!.push(video);
-    });
+  columns.push(boardNewPileHtml());
+  return columns.join("");
+}
 
-    tabListContainerInnerHtmlUpdated = true;
-    setTabListInnerHTML(
-      container,
-      orderLiveGroupEntries(Array.from(groups.entries())).map(([groupName, videos]) => {
-      const isCollapsed = collapsedGroups.has(groupName);
-      const groupDuration = videos.reduce((acc, video) => acc + video.seconds, 0);
-      const sortedGroupVideos = sortVideosForDisplay(videos);
+// ───────────────────────── Session planner ─────────────────────────
 
-      const allSelected = videos.every(video => selectedTabIds.has(video.id));
-      const someSelected = !allSelected && videos.some(video => selectedTabIds.has(video.id));
+const PLAN_BUDGETS = [20, 45, 90] as const;
+let planBudgetMinutes: number | null = 45;
+let planPileKey = "all";
+let planSelect: CustomSelectHandle | null = null;
+let plannedTabIds = new Set<number>();
+let lastPlanOptionsSig = "";
 
-      return `
-            <div class="mb-4">
-                <div class="flex items-center gap-3 px-2 py-2 rounded-md hover:bg-surface-hover/30 group/header select-none">
-                    <button class="p-1 rounded hover:bg-surface-hover text-text-muted transition-transform duration-200 group-toggle ${isCollapsed ? '-rotate-90' : ''}" data-group="${escapeHtml(groupName)}">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-                    </button>
-                    
-                    <div class="relative flex items-center justify-center w-4 h-4 cursor-pointer group-selection-toggle" data-group="${escapeHtml(groupName)}">
-                      <input type="checkbox" class="peer appearance-none w-3.5 h-3.5 rounded border border-text-muted/40 checked:bg-accent checked:border-accent transition-colors cursor-pointer" ${allSelected ? 'checked' : ''} ${someSelected ? 'indeterminate' : ''}>
-                       <svg class="absolute w-2 h-2 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                       <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 ${someSelected && !allSelected ? 'opacity-100' : ''}">
-                          <div class="w-2 h-0.5 bg-accent"></div>
-                       </div>
-                    </div>
+function planCandidates(): VideoData[] {
+  const videos = getLiveVideosForCurrentView().filter((video) => !video.isLive && !video.excluded && !video.suspended);
+  if (planPileKey === "all") return videos;
+  const sections = orderedSections(liveTabSectionsState.sections);
+  const { blocks, unsorted } = partitionLiveVideosBySection(videos, sections, liveTabSectionsState.assignments);
+  if (planPileKey === "__unsorted") return unsorted;
+  return blocks.find((block) => block.section.id === planPileKey)?.videos ?? [];
+}
 
-                    <div class="flex-1 font-medium text-sm text-text-primary truncate cursor-pointer group-toggle" data-group="${escapeHtml(groupName)}">${escapeHtml(groupName)}</div>
-                    <div class="aggregate-group-stats text-[10px] text-text-muted font-mono flex items-center gap-2" data-group-name="${escapeHtml(groupName)}">
-                        <span>${videos.length} videos</span>
-                        <span class="w-px h-3 bg-border"></span>
-                        <span>${formatTime(groupDuration)}</span>
-                    </div>
-                </div>
-                
-                <div class="space-y-1 ml-12 border-l border-border pl-2 mt-1 ${isCollapsed ? 'hidden' : ''}" data-flat-group-body="${escapeHtml(groupName)}">
-                    ${layoutMode === 'grid' ? renderVideoGrid(sortedGroupVideos) : renderVideoList(sortedGroupVideos)}
-                </div>
-            </div>
-          `;
-      }).join("")
-    );
+/** Started videos first (finish what you began), then the current sort; take what fits the budget. */
+function computePlan(): { ids: number[]; seconds: number } {
+  const candidates = sortVideosForDisplay(planCandidates());
+  const ordered = [
+    ...candidates.filter((video) => video.currentTime > 0),
+    ...candidates.filter((video) => video.currentTime <= 0),
+  ];
+  const budget = planBudgetMinutes == null ? Number.POSITIVE_INFINITY : planBudgetMinutes * 60;
+  const ids: number[] = [];
+  let seconds = 0;
+  for (const video of ordered) {
+    const remaining = Math.max(0, video.seconds - video.currentTime);
+    if (remaining <= 0) continue;
+    if (seconds + remaining > budget && ids.length > 0) continue;
+    if (remaining > budget) continue;
+    ids.push(video.id);
+    seconds += remaining;
+  }
+  return { ids, seconds };
+}
 
-    thumbnailCacheBackfill(container);
-    lastTabListFingerprint = fpLive;
+function syncPlanSelectOptions(): void {
+  if (!planSelect) return;
+  const sections = orderedSections(liveTabSectionsState.sections);
+  const options = [
+    { value: "all", label: "the whole desk" },
+    ...sections.map((section) => ({ value: section.id, label: section.name })),
+    ...(sections.length > 0 ? [{ value: "__unsorted", label: "the inbox" }] : []),
+  ];
+  const sig = options.map((option) => `${option.value}:${option.label}`).join("|");
+  if (sig === lastPlanOptionsSig) return;
+  lastPlanOptionsSig = sig;
+  planSelect.setOptions(options);
+  if (!options.some((option) => option.value === planPileKey)) {
+    planPileKey = "all";
+    planSelect.setValue("all");
   }
 }
 
+function renderPlanner(): void {
+  const planner = document.getElementById("planner");
+  const startButton = document.getElementById("btn-start-plan");
+  const startLabel = document.getElementById("btn-start-plan-label");
+  const summary = document.getElementById("plan-summary");
+  if (!planner || !startButton || !summary) return;
+
+  const live = !isReadingListView && !isSessionsView && selectedSession == null;
+  planner.classList.toggle("hidden", !live);
+  planner.classList.toggle("flex", live);
+  startButton.classList.toggle("hidden", !live);
+  if (!live) return;
+
+  syncPlanSelectOptions();
+  document.querySelectorAll<HTMLButtonElement>(".budget-chip").forEach((chip) => {
+    const value = chip.dataset.budget === "all" ? null : Number(chip.dataset.budget);
+    chip.setAttribute("aria-pressed", String(value === planBudgetMinutes));
+  });
+
+  const plan = computePlan();
+  const previousPlanned = Array.from(plannedTabIds).sort().join(",");
+  plannedTabIds = new Set(plan.ids);
+  const count = plan.ids.length;
+  summary.textContent =
+    count === 0
+      ? "→ nothing fits. Pick a longer budget or another pile."
+      : `→ fits ${count} ${count === 1 ? "video" : "videos"}, ${formatDurationWords(plan.seconds)}`;
+  if (startLabel) startLabel.textContent = count === 0 ? "Start" : `Start ${planBudgetMinutes == null ? "everything" : formatDurationWords(plan.seconds)}`;
+  (startButton as HTMLButtonElement).disabled = count === 0;
+  startButton.classList.toggle("opacity-50", count === 0);
+
+  if (Array.from(plannedTabIds).sort().join(",") !== previousPlanned) {
+    document.querySelectorAll<HTMLElement>("#tab-list .board-card[data-id]").forEach((card) => {
+      const id = parseInt(card.dataset.id || "0", 10);
+      const planned = plannedTabIds.has(id);
+      card.classList.toggle("board-card--planned", planned);
+      const tag = card.querySelector(".board-tag--plan");
+      if (planned && !tag && !card.classList.contains("board-card--playing")) {
+        card.querySelector(".board-thumb")?.insertAdjacentHTML("afterbegin", `<span class="board-tag board-tag--plan">In plan</span>`);
+      } else if (!planned && tag) {
+        tag.remove();
+      }
+    });
+  }
+}
+
+function pileTabIdsForStart(key: string): number[] {
+  const videos = getLiveVideosForCurrentView().filter((video) => !video.isLive && !video.excluded);
+  const sections = orderedSections(liveTabSectionsState.sections);
+  const { blocks, unsorted } = partitionLiveVideosBySection(videos, sections, liveTabSectionsState.assignments);
+  const list = key === "__unsorted" ? unsorted : blocks.find((block) => block.section.id === key)?.videos ?? [];
+  return sortVideosForDisplay(list).map((video) => video.id);
+}
+
+
+function queueThumbHtml(videoId: string | null, draggableOff: boolean): string {
+  const thumbQuality = thumbnailQuality === "high" ? "hqdefault.jpg" : "mqdefault.jpg";
+  const { src, cacheKey } = getThumbnailSrc(videoId, thumbQuality);
+  if (!src) return "";
+  const keyAttr = cacheKey ? ` data-thumbnail-key="${cacheKey}"` : "";
+  return `<img src="${src}"${keyAttr} class="manager-card-thumb w-full h-full object-cover" loading="lazy" decoding="async" alt=""${draggableOff ? ` draggable="false"` : ""} />`;
+}
+
+function queueCheckboxHtml(toggleClass: string, checked: boolean): string {
+  return `
+    <div class="relative flex items-center justify-center w-5 h-5 shrink-0 cursor-pointer ${toggleClass}">
+      <input type="checkbox" draggable="false" class="peer appearance-none w-4 h-4 rounded border border-text-muted/50 checked:bg-accent checked:border-accent transition-colors cursor-pointer" ${checked ? "checked" : ""}>
+      <svg class="absolute w-2.5 h-2.5 text-on-accent opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+    </div>`;
+}
+
+const QUEUE_ICON_OPEN = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`;
+const QUEUE_ICON_CLOSE = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
+const QUEUE_ICON_TRASH = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>`;
+
 function renderVideoList(videos: VideoData[], sectionColorIndex?: number | "unsorted"): string {
   const dnd = tabCardDnDHtml(sectionColorIndex);
+  const imgDragOff = sectionColorIndex !== undefined;
+  let elapsed = 0;
   return videos.map(video => {
     const isSelected = selectedTabIds.has(video.id);
     const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
+    const isNow = video.audible && !video.suspended;
+    const offsetLabel = isNow ? "now" : formatOffset(elapsed);
+    if (!isNow && !video.isLive) elapsed += Math.max(0, video.seconds - video.currentTime);
+    const rowClass = `queue-row group${isNow ? " queue-row--now" : ""}${isSelected ? " queue-row--selected" : ""}${dnd.extraClass}`;
+    const languageLabel = video.languageName ? video.languageName.split("(")[0].trim() : "";
+    const stateLabel = video.suspended
+      ? `<span class="text-warning">Suspended tab</span>`
+      : video.isLive
+        ? `<span class="text-youtube font-semibold">Live</span>`
+        : "";
 
     return `
-      <div class="group relative flex items-center gap-4 p-3 rounded-lg border border-transparent hover:border-border hover:bg-surface-hover/50 transition-[background-color,border-color] ${isSelected ? 'bg-surface-hover border-border' : ''}${dnd.extraClass}" data-id="${video.id}"${dnd.draggableAttr}>
-        <div class="relative flex items-center justify-center w-5 h-5 cursor-pointer selection-toggle">
-          <input type="checkbox" draggable="false" class="peer appearance-none w-4 h-4 rounded border border-text-muted/40 checked:bg-accent checked:border-accent transition-colors cursor-pointer" ${isSelected ? 'checked' : ''}>
-          <svg class="absolute w-2.5 h-2.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-        </div>
-
-        <div class="flex-1 min-w-0 cursor-pointer video-click-target pr-16">
-           <div class="flex items-baseline gap-2 mb-1">
-             <h3 class="manager-card-title text-sm font-medium text-text-primary truncate" title="${video.title}">${video.title}</h3>
-             <span class="manager-card-channel text-[10px] text-text-muted truncate uppercase tracking-tight">${video.channelName}</span>
-             ${video.languageName ? `<span class="manager-card-language text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold ml-1 uppercase shrink-0">${video.languageName.split('(')[0].trim()}</span>` : `<span class="manager-card-language hidden"></span>`}
-             ${windowBadgeHtml(video)}
-             ${duplicateBadgeHtml(video.url)}
-           </div>
-           
-           <div class="flex items-center gap-3 w-full max-w-md bg-surface-elevated/50 py-1 px-2 rounded-md">
-             <div class="manager-card-time text-xs font-mono text-text-secondary whitespace-nowrap">
-                <span class="manager-card-time-current ${watchedPercent > 0 ? "text-text-primary" : "text-text-muted"}">${formatCompact(video.currentTime)}</span>
-                <span class="mx-0.5 opacity-30">/</span>
-                <span class="manager-card-time-total">${formatCompact(video.seconds)}</span>
-             </div>
-             <div class="flex-1 h-1 bg-surface rounded-full overflow-hidden">
-                <div class="manager-card-list-progress h-full bg-accent opacity-80" style="width: ${watchedPercent}%"></div>
-             </div>
-           </div>
-        </div>
-
-        <div class="absolute right-4 opacity-0 group-hover:opacity-100 flex items-center gap-2 transition-opacity bg-surface-elevated/90 backdrop-blur-sm rounded-md p-1 shadow-sm border border-border/50">
-           <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center text-text-muted hover:bg-accent hover:text-white rounded transition-[background-color,color] duration-200 active:scale-[0.96] jump-btn" title="Go to Tab">
-             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
-           </button>
-           <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center text-text-muted hover:bg-accent hover:text-white rounded transition-[background-color,color] duration-200 active:scale-[0.96] close-btn" title="Close Tab">
-             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-           </button>
+      <div class="${rowClass}" data-id="${video.id}"${dnd.draggableAttr}>
+        <div class="queue-offset">${offsetLabel}</div>
+        <div class="queue-body">
+          ${queueCheckboxHtml("selection-toggle", isSelected)}
+          <div class="queue-thumb video-click-target cursor-pointer">
+            ${queueThumbHtml(getVideoIdFromUrl(video.url), imgDragOff)}
+            <div class="manager-card-duration absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-medium text-white tabular-nums">${video.isLive ? "LIVE" : formatCompact(video.seconds)}</div>
+            <div class="manager-card-progress-wrap absolute bottom-0 left-0 right-0 h-[3px] bg-black/30 transition-opacity" style="opacity: ${!video.isLive && video.seconds > 0 && watchedPercent > 0 ? 1 : 0}">
+              <div class="manager-card-progress h-full bg-accent" style="width: ${watchedPercent}%"></div>
+            </div>
+          </div>
+          <div class="flex-1 min-w-0 cursor-pointer video-click-target">
+            <h3 class="manager-card-title queue-title" title="${escapeHtml(video.title)}">${escapeHtml(video.title)}</h3>
+            <div class="queue-meta">
+              <span class="manager-card-channel truncate">${escapeHtml(video.channelName)}</span>
+              <span class="opacity-60">·</span>
+              <span class="manager-card-time whitespace-nowrap"><span class="manager-card-time-current ${watchedPercent > 0 ? "text-text-primary" : "text-text-muted"}">${formatCompact(video.currentTime)}</span> of <span class="manager-card-time-total">${formatCompact(video.seconds)}</span></span>
+              ${stateLabel}
+              <span class="manager-card-language text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0 ${languageLabel ? "" : "hidden"}">${escapeHtml(languageLabel)}</span>
+              ${windowBadgeHtml(video)}
+              ${duplicateBadgeHtml(video.url)}
+            </div>
+          </div>
+          <div class="queue-actions">
+            <button type="button" draggable="false" class="queue-action jump-btn" title="Go to tab" aria-label="Go to tab">${QUEUE_ICON_OPEN}</button>
+            <button type="button" draggable="false" class="queue-action queue-action--danger close-btn" title="Close tab" aria-label="Close tab">${QUEUE_ICON_CLOSE}</button>
+          </div>
         </div>
       </div>
     `;
@@ -2911,13 +3441,13 @@ function renderSessionGrid(tabs: SavedSessionTab[], sectionColorIndex?: number |
           </div>
           <div class="absolute top-2 left-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity ${isSelected ? "opacity-100" : ""} session-selection-toggle flex items-center justify-center w-5 h-5">
             <input type="checkbox" draggable="false" class="peer appearance-none w-4 h-4 rounded border border-white/60 checked:bg-accent checked:border-accent bg-black/40 backdrop-blur-sm transition-colors cursor-pointer" ${isSelected ? "checked" : ""}>
-            <svg class="absolute w-2.5 h-2.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            <svg class="absolute w-2.5 h-2.5 text-on-accent opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
           </div>
           <div class="absolute top-1 right-1 z-10 flex gap-1 opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 transition-opacity duration-200">
             <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center hover:bg-black/60 bg-black/40 text-white rounded-md backdrop-blur-sm transition-[background-color] active:scale-[0.96] session-open-new-tab" title="Open in new tab">
               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
             </button>
-            <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center hover:bg-red-500/80 bg-black/40 text-white rounded-md backdrop-blur-sm transition-[background-color] active:scale-[0.96] session-remove-btn" title="Remove from session">
+            <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center hover:bg-danger/80 bg-black/40 text-white rounded-md backdrop-blur-sm transition-[background-color] active:scale-[0.96] session-remove-btn" title="Remove from session">
               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
             </button>
           </div>
@@ -2940,34 +3470,38 @@ function renderSessionGrid(tabs: SavedSessionTab[], sectionColorIndex?: number |
 
 function renderSessionList(tabs: SavedSessionTab[], sectionColorIndex?: number | "unsorted"): string {
   const dnd = tabCardDnDHtml(sectionColorIndex);
+  const imgDragOff = sectionColorIndex !== undefined;
+  let elapsed = 0;
   return tabs.map((tab) => {
     const title = tab.title ?? "Untitled";
     const channel = tab.channelName ?? "";
     const sec = tab.seconds ?? 0;
     const isSelected = selectedSessionTabUrls.has(tab.url);
     const urlAttr = escapeHtml(tab.url);
+    const offsetLabel = formatOffset(elapsed);
+    elapsed += sec;
+    const languageLabel = tab.languageName ? tab.languageName.split("(")[0].trim() : "";
     return `
-      <div class="group relative flex items-center gap-4 p-3 rounded-lg border border-transparent hover:border-border hover:bg-surface-hover/50 transition-[background-color,border-color] ${isSelected ? "bg-surface-hover border-border" : ""}${dnd.extraClass}" data-session-tab-url="${urlAttr}"${dnd.draggableAttr}>
-        <div class="relative flex items-center justify-center w-5 h-5 shrink-0 cursor-pointer session-selection-toggle">
-          <input type="checkbox" draggable="false" class="peer appearance-none w-4 h-4 rounded border border-text-muted/40 checked:bg-accent checked:border-accent transition-colors cursor-pointer" ${isSelected ? "checked" : ""}>
-          <svg class="absolute w-2.5 h-2.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-        </div>
-        <div class="flex-1 min-w-0 pr-12 session-video-click-target cursor-pointer">
-          <div class="flex items-baseline gap-2 mb-1">
-            <h3 class="text-sm font-medium text-text-primary truncate" title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
-            <span class="text-[10px] text-text-muted truncate uppercase tracking-tight">${escapeHtml(channel)}</span>
-            ${tab.languageName ? `<span class="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold ml-1 uppercase shrink-0">${escapeHtml(tab.languageName.split('(')[0].trim())}</span>` : ''}
-            ${duplicateBadgeHtml(tab.url)}
+      <div class="queue-row group${isSelected ? " queue-row--selected" : ""}${dnd.extraClass}" data-session-tab-url="${urlAttr}"${dnd.draggableAttr}>
+        <div class="queue-offset">${offsetLabel}</div>
+        <div class="queue-body">
+          ${queueCheckboxHtml("session-selection-toggle", isSelected)}
+          <div class="queue-thumb session-video-click-target cursor-pointer">
+            ${queueThumbHtml(getVideoIdFromUrl(tab.url), imgDragOff)}
+            <div class="absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-medium text-white tabular-nums">${formatCompact(sec)}</div>
           </div>
-          <div class="text-xs font-mono text-text-muted tabular-nums">${formatCompact(sec)}</div>
-        </div>
-        <div class="absolute right-4 flex items-center gap-1">
-          <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center rounded hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors active:scale-[0.96] session-open-new-tab" title="Open in new tab">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
-          </button>
-          <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center rounded hover:bg-red-500/20 text-text-muted hover:text-red-500 transition-[background-color,color] active:scale-[0.96] session-remove-btn" title="Remove from session">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
-          </button>
+          <div class="flex-1 min-w-0 session-video-click-target cursor-pointer">
+            <h3 class="queue-title" title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
+            <div class="queue-meta">
+              <span class="truncate">${escapeHtml(channel)}</span>
+              ${languageLabel ? `<span class="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0">${escapeHtml(languageLabel)}</span>` : ""}
+              ${duplicateBadgeHtml(tab.url)}
+            </div>
+          </div>
+          <div class="queue-actions">
+            <button type="button" draggable="false" class="queue-action session-open-new-tab" title="Open in new tab" aria-label="Open in new tab">${QUEUE_ICON_OPEN}</button>
+            <button type="button" draggable="false" class="queue-action queue-action--danger session-remove-btn" title="Remove from session" aria-label="Remove from session">${QUEUE_ICON_TRASH}</button>
+          </div>
         </div>
       </div>
     `;
@@ -3012,7 +3546,7 @@ function renderVideoGrid(videos: VideoData[], sectionColorIndex?: number | "unso
 
                     <div class="absolute top-2 left-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity ${isSelected ? 'opacity-100' : ''} selection-toggle flex items-center justify-center w-5 h-5">
                         <input type="checkbox" draggable="false" class="peer appearance-none w-4 h-4 rounded border border-white/60 checked:bg-accent checked:border-accent bg-black/40 backdrop-blur-sm transition-colors cursor-pointer" ${isSelected ? 'checked' : ''}>
-                        <svg class="absolute w-2.5 h-2.5 text-white opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                        <svg class="absolute w-2.5 h-2.5 text-on-accent opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                     </div>
 
                     <div class="absolute top-1 right-1 z-10 flex gap-1 opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 transition-opacity duration-200">
@@ -3169,10 +3703,10 @@ function currentSectionsForMove(): SessionSection[] {
 }
 
 function moveToSectionPopoverSig(): string {
-  const ctx = selectedSession ? `s:${selectedSession.id}` : "live";
+  const context = selectedSession ? `s:${selectedSession.id}` : "live";
   const sections = currentSectionsForMove();
-  if (sections.length === 0) return `${ctx}\x1f0`;
-  return `${ctx}\x1f${orderedSections(sections).map((s) => `${s.id}:${s.name}:${s.emoji ?? ""}:${s.colorIndex ?? 0}`).join("|")}`;
+  if (sections.length === 0) return `${context}\x1f0`;
+  return `${context}\x1f${orderedSections(sections).map((s) => `${s.id}:${s.name}:${s.emoji ?? ""}:${s.colorIndex ?? 0}`).join("|")}`;
 }
 
 function updateMoveToSectionPopover(): void {
@@ -3184,11 +3718,11 @@ function updateMoveToSectionPopover(): void {
 
   const sections = currentSectionsForMove();
   if (sections.length === 0) {
-    pop.innerHTML = `<div class="px-3 py-2.5 text-[11px] text-text-muted leading-relaxed">Create a section with <span class="text-text-secondary font-medium">New section</span> first.</div>`;
+    pop.innerHTML = `<div class="px-3 py-2.5 text-[11px] text-text-muted leading-relaxed">Create a pile with <span class="text-text-secondary font-medium">New pile</span> first.</div>`;
     return;
   }
   pop.innerHTML = `
-    <div class="menu-panel-header">Move to section</div>
+    <div class="menu-panel-header">Move to pile</div>
     <div class="px-1 pb-1">${renderSectionPickerRows(sections)}</div>
   `;
 }
@@ -3213,12 +3747,17 @@ function updateSelectionUI() {
   const count = document.getElementById("selection-count");
   const closeBtn = document.getElementById("btn-close-selected");
   const moveWrap = document.getElementById("move-to-section-wrap");
+  const stageSelectedBtn = document.getElementById("btn-stage-study-selected");
 
   const inSessionView = selectedSession != null;
   const selectionSize = inSessionView ? selectedSessionTabUrls.size : selectedTabIds.size;
   const hasSections = currentSectionsForMove().length > 0;
 
-  if (selectionSize > 0) {
+  if (stageSelectedBtn) {
+    stageSelectedBtn.classList.toggle("hidden", inSessionView || isReadingListView);
+  }
+
+  if (selectionSize > 0 && !isReadingListView) {
     bar?.classList.remove("hidden");
     bar?.classList.add("flex");
     if (count) count.innerText = `${selectionSize} selected`;
@@ -3284,6 +3823,132 @@ function updateSelectionUI() {
 
     syncFlatGroupHeaderCheckboxes();
     syncNestedGroupHeaderCheckboxes();
+  }
+}
+
+function openStudySessionModal(targetTabIds?: number[]): void {
+  const modal = document.getElementById("study-session-modal");
+  if (!modal) return;
+
+  let queueTabIds: number[] = [];
+  if (targetTabIds && targetTabIds.length > 0) {
+    queueTabIds = targetTabIds;
+  } else if (selectedTabIds.size > 0) {
+    queueTabIds = Array.from(selectedTabIds);
+  } else {
+    let baseVideos: VideoData[] = [];
+    if (currentWindowId === "all") {
+      baseVideos = allVideos;
+    } else {
+      const group = windowGroups.find((windowGroup) => windowGroup.id === currentWindowId);
+      if (group) baseVideos = group.tabs;
+    }
+    const visibleVideos = filterVideosForDisplay(baseVideos);
+    queueTabIds = visibleVideos.map((video) => video.id);
+  }
+
+  if (queueTabIds.length === 0) {
+    showToast("No active YouTube tabs available to stage.");
+    return;
+  }
+
+  const previewContainer = document.getElementById("study-queue-preview");
+  const countBadge = document.getElementById("study-queue-count");
+  if (countBadge) countBadge.textContent = String(queueTabIds.length);
+
+  if (previewContainer) {
+    const queueVideos = queueTabIds
+      .map((tabId) => allVideos.find((video) => video.id === tabId))
+      .filter((video): video is VideoData => Boolean(video));
+
+    if (queueVideos.length === 0) {
+      previewContainer.innerHTML = `<div class="p-2 text-text-muted text-center">No tabs found.</div>`;
+    } else {
+      previewContainer.innerHTML = queueVideos
+        .map(
+          (video, index) => `
+          <div class="flex items-center gap-2 p-1.5 rounded bg-surface-elevated/50 border border-border/40 text-xs text-text-primary" data-queue-tab-id="${video.id}">
+            <span class="w-4 text-center font-mono text-[10px] text-text-muted shrink-0">${index + 1}</span>
+            <span class="truncate flex-1 font-medium">${escapeHtml(video.title)}</span>
+            <span class="text-[10px] font-mono text-text-muted shrink-0 px-1.5 py-0.5 rounded bg-surface border border-border">${formatTime(video.seconds)}</span>
+          </div>
+        `
+        )
+        .join("");
+    }
+  }
+
+  updateSpeedSelectorUI(selectedPlaybackSpeed);
+
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+}
+
+function closeStudySessionModal(): void {
+  const modal = document.getElementById("study-session-modal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+}
+
+function updateSpeedSelectorUI(speed: number): void {
+  selectedPlaybackSpeed = speed;
+  const speedButtons = document.querySelectorAll(".study-speed-btn");
+  speedButtons.forEach((button) => {
+    const buttonSpeed = parseFloat(button.getAttribute("data-speed") || "1");
+    if (Math.abs(buttonSpeed - speed) < 0.01) {
+      button.classList.add("text-accent", "bg-surface-hover");
+      button.classList.remove("text-text-muted");
+    } else {
+      button.classList.remove("text-accent", "bg-surface-hover");
+      button.classList.add("text-text-muted");
+    }
+  });
+}
+
+async function handleLaunchStudyQueue(): Promise<void> {
+  const previewElements = document.querySelectorAll("#study-queue-preview [data-queue-tab-id]");
+  const orderedTabIds = Array.from(previewElements)
+    .map((element) => parseInt(element.getAttribute("data-queue-tab-id") || "", 10))
+    .filter((tabId) => Number.isInteger(tabId) && tabId > 0);
+
+  if (orderedTabIds.length === 0) {
+    showToast("No tabs queued to stage.");
+    return;
+  }
+
+  const stashCheckbox = document.getElementById("study-stash-distractions") as HTMLInputElement | null;
+  const stashDistractionTabs = stashCheckbox?.checked ?? false;
+  const sessionNameInput = document.getElementById("study-session-name-input") as HTMLInputElement | null;
+  const sessionName = sessionNameInput?.value.trim() || "Stashed Backlog";
+
+  try {
+    const response = await browser.runtime.sendMessage({
+      action: "stage-focused-study-queue",
+      payload: {
+        orderedTabIds,
+        stashDistractionTabs,
+        sessionName,
+        playbackSpeed: selectedPlaybackSpeed,
+      },
+    });
+
+    if (response?.success) {
+      closeStudySessionModal();
+      selectedTabIds.clear();
+      updateSelectionUI();
+      showToast(
+        stashDistractionTabs && response.stashedCount > 0
+          ? `Focused queue started. Stashed ${response.stashedCount} distraction tabs.`
+          : `Focused queue started at ${selectedPlaybackSpeed}x speed.`
+      );
+      await fetchTabs();
+      await refreshSavedSessionsSidebar();
+    } else {
+      showToast(response?.errorMessage || "Failed to stage study queue.");
+    }
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : "Error staging study queue.");
   }
 }
 
@@ -3368,17 +4033,133 @@ function setupListeners() {
     }
   });
 
-  document.getElementById("window-list")?.addEventListener("click", async (event) => {
+  document.getElementById("btn-stage-study-selected")?.addEventListener("click", () => {
+    openStudySessionModal(Array.from(selectedTabIds));
+  });
+
+  document.getElementById("btn-stage-study-header")?.addEventListener("click", () => {
+    openStudySessionModal();
+  });
+
+  const planSelectRoot = document.getElementById("plan-pile-select");
+  if (planSelectRoot) {
+    planSelect = mountCustomSelect(planSelectRoot, {
+      options: [{ value: "all", label: "the whole desk" }],
+      value: "all",
+      compact: true,
+      ariaLabel: "Plan from",
+      onChange: (value) => {
+        planPileKey = value;
+        renderPlanner();
+      },
+    });
+  }
+
+  document.getElementById("planner")?.addEventListener("click", (event) => {
+    const chip = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-budget]");
+    if (!chip) return;
+    planBudgetMinutes = chip.dataset.budget === "all" ? null : Number(chip.dataset.budget);
+    renderPlanner();
+  });
+
+  document.getElementById("btn-start-plan")?.addEventListener("click", () => {
+    if (plannedTabIds.size === 0) return;
+    openStudySessionModal(Array.from(plannedTabIds));
+  });
+
+  document.getElementById("tab-list")?.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    const startButton = target.closest<HTMLElement>("[data-start-pile]");
+    if (startButton?.dataset.startPile) {
+      event.stopPropagation();
+      openStudySessionModal(pileTabIdsForStart(startButton.dataset.startPile));
+      return;
+    }
+    if (target.closest("[data-pile-create]")) {
+      event.stopPropagation();
+      openAddSectionModal();
+    }
+  });
+
+  document.getElementById("study-modal-close")?.addEventListener("click", closeStudySessionModal);
+  document.getElementById("study-modal-cancel")?.addEventListener("click", closeStudySessionModal);
+
+  document.getElementById("study-modal-submit")?.addEventListener("click", () => {
+    void handleLaunchStudyQueue();
+  });
+
+  document.getElementById("study-session-modal")?.addEventListener("click", (event) => {
+    if ((event.target as HTMLElement).id === "study-session-modal") {
+      closeStudySessionModal();
+    }
+  });
+
+  document.querySelectorAll(".study-speed-btn").forEach((button) => {
+    button.addEventListener("click", () => {
+      const speed = parseFloat(button.getAttribute("data-speed") || "1");
+      if (!isNaN(speed)) {
+        updateSpeedSelectorUI(speed);
+      }
+    });
+  });
+
+  const stashCheckbox = document.getElementById("study-stash-distractions") as HTMLInputElement | null;
+  const sessionNameWrap = document.getElementById("study-session-name-wrap");
+  stashCheckbox?.addEventListener("change", () => {
+    if (sessionNameWrap) {
+      sessionNameWrap.classList.toggle("hidden", !stashCheckbox.checked);
+    }
+  });
+
+  document.getElementById("piles-list")?.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("[data-pile-create]")) {
+      openAddSectionModal();
+      return;
+    }
+    const pile = target.closest<HTMLElement>("[data-pile-jump]");
+    const key = pile?.dataset.pileJump;
+    if (!key) return;
+    const wrapper = Array.from(document.querySelectorAll<HTMLElement>("#tab-list [data-section-wrapper]")).find(
+      (element) => element.getAttribute("data-section-wrapper") === key
+    );
+    wrapper?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  document.body.addEventListener("click", async (event) => {
     const item = (event.target as HTMLElement).closest(".sidebar-item");
     if (!item) return;
     const type = item.getAttribute("data-sidebar-type");
+    if (type === "sessions") {
+      isSessionsView = true;
+      isReadingListView = false;
+      selectedSession = null;
+      selectedSessionTabUrls.clear();
+      selectedTabIds.clear();
+      updateSelectionUI();
+      refreshSavedSessionsSidebar();
+      render();
+      return;
+    }
+    isSessionsView = false;
     if (type === "all") {
+      isReadingListView = false;
       selectedSession = null;
       selectedSessionTabUrls.clear();
       currentWindowId = "all";
       refreshSavedSessionsSidebar();
       render();
+    } else if (type === "reading-list") {
+      isReadingListView = true;
+      selectedSession = null;
+      selectedSessionTabUrls.clear();
+      currentWindowId = "all";
+      selectedTabIds.clear();
+      updateSelectionUI();
+      refreshSavedSessionsSidebar();
+      render();
     } else if (type === "window") {
+      isReadingListView = false;
       selectedSession = null;
       selectedSessionTabUrls.clear();
       const id = item.getAttribute("data-window-id");
@@ -3388,6 +4169,7 @@ function setupListeners() {
         render();
       }
     } else if (type === "session") {
+      isReadingListView = false;
       const id = item.getAttribute("data-session-id");
       if (!id) return;
       const sessions = await getSavedSessions();
@@ -3401,7 +4183,7 @@ function setupListeners() {
     }
   });
 
-  document.getElementById("window-list")?.addEventListener("contextmenu", (event) => {
+  document.body.addEventListener("contextmenu", (event) => {
     const item = (event.target as HTMLElement).closest(".sidebar-item");
     if (!item) return;
     event.preventDefault();
@@ -3435,6 +4217,30 @@ function setupListeners() {
 
   document.getElementById("tab-list")?.addEventListener("click", async (event) => {
     const target = event.target as HTMLElement;
+
+    const readingCard = target.closest(".reading-list-card") as HTMLElement | null;
+    if (readingCard) {
+      const url = readingCard.getAttribute("data-reading-list-url");
+      if (url) {
+        if (target.closest(".reading-list-remove-btn")) {
+          event.stopPropagation();
+          const removed = await removeReadingListItem(url);
+          if (removed) {
+            showToast("Removed from Reading List");
+            await loadReadingList();
+            render();
+          } else {
+            showToast("Failed to remove item from Reading List");
+          }
+          return;
+        }
+        if (target.closest(".reading-list-open-btn")) {
+          event.stopPropagation();
+          await browser.tabs.create({ url, active: true });
+          return;
+        }
+      }
+    }
 
     if (target.closest(".section-collapse-toggle")) {
       const btn = target.closest(".section-collapse-toggle") as HTMLElement;
@@ -3536,7 +4342,7 @@ function setupListeners() {
       allVideos = allVideos.filter((video) => video.id !== id);
       for (const group of windowGroups) {
         group.tabs = group.tabs.filter((video) => video.id !== id);
-        group.duration = group.tabs.reduce((acc, video) => acc + video.seconds, 0);
+        group.duration = group.tabs.reduce((accumulator, video) => accumulator + video.seconds, 0);
       }
       windowGroups = windowGroups.filter((group) => group.tabs.length > 0);
       lastTabListFingerprint = tabListStructureFingerprint();
@@ -3687,7 +4493,9 @@ function setupListeners() {
     clearSectionDropHighlight();
   });
 
-  document.getElementById("tab-list")?.addEventListener("dragover", (e) => {
+  const dropRoots = [document.getElementById("tab-list"), document.getElementById("piles-list")];
+
+  dropRoots.forEach((root) => root?.addEventListener("dragover", (e) => {
     if (!e.dataTransfer?.types.includes(TAB_MANAGER_DRAG_MIME)) return;
     const zone = (e.target as HTMLElement).closest("[data-section-wrapper]");
     setSectionDropHighlight(zone as HTMLElement | null);
@@ -3695,9 +4503,9 @@ function setupListeners() {
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
     }
-  });
+  }));
 
-  document.getElementById("tab-list")?.addEventListener("drop", async (e) => {
+  dropRoots.forEach((root) => root?.addEventListener("drop", async (e) => {
     if (!e.dataTransfer?.types.includes(TAB_MANAGER_DRAG_MIME)) return;
     const zone = (e.target as HTMLElement).closest("[data-section-wrapper]");
     e.preventDefault();
@@ -3728,7 +4536,7 @@ function setupListeners() {
       if (curNorm === tgtNorm) return;
       await moveLiveVideosToSection([payload.tabId], targetSectionId);
     }
-  });
+  }));
 
   const searchInput = document.getElementById("search-input") as HTMLInputElement | null;
   const searchClearBtn = document.getElementById("search-clear-btn") as HTMLButtonElement | null;
@@ -3867,9 +4675,9 @@ function setupListeners() {
       if (selectedSession?.id === context.sessionId) await reloadSelectedSessionFromStorage();
       showToast(merged ? `Added tabs to "${merged.name}"` : "Could not update session.");
       render();
-    } catch (err) {
-      console.error("Add to session failed:", err);
-      showToast(err instanceof Error ? err.message : "Could not add tabs.");
+    } catch (error) {
+      console.error("Add to session failed:", error);
+      showToast(error instanceof Error ? error.message : "Could not add tabs.");
     }
   });
 
@@ -3885,9 +4693,9 @@ function setupListeners() {
       lastSavedSessionsFingerprint = "";
       await refreshSavedSessionsSidebar();
       showToast(copy ? `Duplicated as "${copy.name}"` : "Could not duplicate session.");
-    } catch (err) {
-      console.error("Duplicate session failed:", err);
-      showToast(err instanceof Error ? err.message : "Could not duplicate session.");
+    } catch (error) {
+      console.error("Duplicate session failed:", error);
+      showToast(error instanceof Error ? error.message : "Could not duplicate session.");
     }
   });
 
@@ -3917,8 +4725,8 @@ function setupListeners() {
       await refreshSavedSessionsSidebar();
       showToast(`Renamed to "${nextName}"`);
       render();
-    } catch (err) {
-      console.error("Rename session failed:", err);
+    } catch (error) {
+      console.error("Rename session failed:", error);
       showToast("Could not rename session.");
     }
   });
@@ -3976,7 +4784,7 @@ function setupListeners() {
     if (!menu || !items) return;
     const sections = currentSectionsForMove();
     if (sections.length === 0) {
-      items.innerHTML = `<div class="px-3 py-2.5 text-[11px] text-text-muted leading-relaxed">Add a section with <span class="text-text-secondary font-medium">New section</span> first.</div>`;
+      items.innerHTML = `<div class="px-3 py-2.5 text-[11px] text-text-muted leading-relaxed">Create a pile with <span class="text-text-secondary font-medium">New pile</span> first.</div>`;
     } else {
       items.innerHTML = renderSectionPickerRows(sections);
     }
@@ -4066,59 +4874,59 @@ function setupListeners() {
     document.getElementById("move-to-section-popover")?.classList.toggle("hidden");
   });
 
-  document.getElementById("move-to-section-popover")?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const btn = (e.target as HTMLElement).closest("[data-ctx-section-id], [data-move-section-id]") as HTMLElement | null;
-    if (!btn) return;
-    const raw = btn.getAttribute("data-ctx-section-id") ?? btn.getAttribute("data-move-section-id");
+  document.getElementById("move-to-section-popover")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const button = (event.target as HTMLElement).closest("[data-ctx-section-id], [data-move-section-id]") as HTMLElement | null;
+    if (!button) return;
+    const raw = button.getAttribute("data-ctx-section-id") ?? button.getAttribute("data-move-section-id");
     void moveSelectionToSection(raw === "" || raw === null ? null : raw);
     document.getElementById("move-to-section-popover")?.classList.add("hidden");
   });
 
-  document.getElementById("move-to-section-wrap")?.addEventListener("click", (e) => e.stopPropagation());
+  document.getElementById("move-to-section-wrap")?.addEventListener("click", (event) => event.stopPropagation());
 
-  document.getElementById("tab-section-context-items")?.addEventListener("click", async (e) => {
-    const btn = (e.target as HTMLElement).closest("[data-ctx-section-id]") as HTMLElement | null;
-    if (!btn || !tabSectionContextTarget) return;
-    const raw = btn.getAttribute("data-ctx-section-id");
+  document.getElementById("tab-section-context-items")?.addEventListener("click", async (event) => {
+    const button = (event.target as HTMLElement).closest("[data-ctx-section-id]") as HTMLElement | null;
+    if (!button || !tabSectionContextTarget) return;
+    const raw = button.getAttribute("data-ctx-section-id");
     const sectionId = raw === "" || raw === null ? null : raw;
-    const t = tabSectionContextTarget;
+    const currentTarget = tabSectionContextTarget;
     document.getElementById("tab-section-context-menu")?.classList.add("hidden");
     tabSectionContextTarget = null;
-    if (t.mode === "session") {
-      await moveSessionTabsToSection([t.url], sectionId);
+    if (currentTarget.mode === "session") {
+      await moveSessionTabsToSection([currentTarget.url], sectionId);
     } else {
-      await moveLiveVideosToSection([t.tabId], sectionId);
+      await moveLiveVideosToSection([currentTarget.tabId], sectionId);
     }
   });
 
   document.getElementById("section-ctx-rename")?.addEventListener("click", async () => {
-    const ctx = sectionHeaderContextTarget;
+    const targetContext = sectionHeaderContextTarget;
     document.getElementById("section-header-context-menu")?.classList.add("hidden");
-    if (!ctx) return;
+    if (!targetContext) return;
     const sections = currentSectionsForMove();
-    const sec = sections.find((s) => s.id === ctx.sectionId);
-    if (!sec) return;
-    const name = await showNameSessionModal(sec.name, "Rename section");
+    const section = sections.find((s) => s.id === targetContext.sectionId);
+    if (!section) return;
+    const name = await showNameSessionModal(section.name, "Rename section");
     if (name === null) return;
-    await renameSectionById(ctx.sectionId, name);
+    await renameSectionById(targetContext.sectionId, name);
     sectionHeaderContextTarget = null;
   });
 
   document.getElementById("section-ctx-delete")?.addEventListener("click", async () => {
-    const ctx = sectionHeaderContextTarget;
+    const targetContext = sectionHeaderContextTarget;
     document.getElementById("section-header-context-menu")?.classList.add("hidden");
-    if (!ctx) return;
+    if (!targetContext) return;
     sectionHeaderContextTarget = null;
     const sections = currentSectionsForMove();
-    const sec = sections.find((s) => s.id === ctx.sectionId);
+    const section = sections.find((s) => s.id === targetContext.sectionId);
     const confirmed = await showConfirm({
-      title: "Delete section",
-      message: `Delete “${sec?.name ?? "section"}”? Videos move to Unsorted.`,
+      title: "Delete pile",
+      message: `Delete “${section?.name ?? "section"}”? Videos move to Unsorted.`,
       confirmLabel: "Delete",
       confirmDanger: true,
     });
-    if (confirmed) await deleteSectionById(ctx.sectionId);
+    if (confirmed) await deleteSectionById(targetContext.sectionId);
   });
 
   document.getElementById("tab-list")?.addEventListener("contextmenu", (event) => {
@@ -4232,8 +5040,8 @@ function setupListeners() {
       anchor.click();
       URL.revokeObjectURL(url);
       showToast("Sessions exported.");
-    } catch (err) {
-      console.error("Export failed:", err);
+    } catch (error) {
+      console.error("Export failed:", error);
       showToast("Could not export sessions.");
     }
   });
@@ -4269,9 +5077,9 @@ function setupListeners() {
       lastSavedSessionsFingerprint = "";
       await refreshSavedSessionsSidebar();
       showToast(`Imported ${count} session${count === 1 ? "" : "s"}.`);
-    } catch (err) {
-      console.error("Import failed:", err);
-      showToast(err instanceof Error ? err.message : "Could not import sessions.");
+    } catch (error) {
+      console.error("Import failed:", error);
+      showToast(error instanceof Error ? error.message : "Could not import sessions.");
     }
   });
 
@@ -4321,7 +5129,17 @@ function render() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  const appearanceControl = document.getElementById("appearance-control");
+  if (appearanceControl) {
+    appearanceControl.innerHTML = THEME_CONTROL_HTML;
+    mountThemeControl(appearanceControl);
+  }
   setupListeners();
+  const urlParameters = new URLSearchParams(window.location.search);
+  if (urlParameters.get("view") === "reading-list") {
+    isReadingListView = true;
+  }
+  void loadReadingList();
   void refreshSavedSessionsSidebar().then(() => fetchTabs());
 
   browser.tabs.onRemoved.addListener(scheduleFetchTabsFromEvents);

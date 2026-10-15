@@ -6,8 +6,10 @@
  */
 import {
   detectLanguageFromPlayerResponse,
+  languageTextFromPlayerResponse,
   type DetectedLanguage,
 } from "../utils/captionLanguage";
+import { resolveVideoLanguage, type VideoChannel } from "../utils/channelLanguage";
 import { registerBridgeListener } from "../utils/webmcpBridge";
 
 const DEBOUNCE_MS = 150;
@@ -97,10 +99,15 @@ function readPlayerResponseFromPage(): PlayerResponseShape | null {
 }
 
 /** undefined = player response not readable yet. null language = read, no captions. */
-function extractLanguageFromDom(): DetectedLanguage | undefined {
+async function extractLanguageFromDom(): Promise<DetectedLanguage | undefined> {
   const playerResponse = readPlayerResponseFromPage();
   if (!playerResponse) return undefined;
-  return detectLanguageFromPlayerResponse(playerResponse);
+  return resolveVideoLanguage(
+    detectLanguageFromPlayerResponse(playerResponse),
+    languageTextFromPlayerResponse(playerResponse),
+    { channelName: playerResponse.videoDetails?.author, videoId: playerResponse.videoDetails?.videoId },
+    document.documentElement.lang
+  );
 }
 
 function parseDurationFromTimeText(text: string): number {
@@ -111,7 +118,7 @@ function parseDurationFromTimeText(text: string): number {
   return 0;
 }
 
-function readMetadataFromDom(): CachedMetadataPayload {
+async function readMetadataFromDom(): Promise<CachedMetadataPayload> {
   const videoId = getVideoIdFromLocation();
 
   const videoEl = document.querySelector("video");
@@ -152,7 +159,7 @@ function readMetadataFromDom(): CachedMetadataPayload {
     isLive = true;
   }
 
-  const detected = extractLanguageFromDom();
+  const detected = await extractLanguageFromDom();
   const language = detected?.language;
   const languageName = detected?.languageName;
   const volume = videoEl ? videoEl.volume : 1;
@@ -187,10 +194,12 @@ function scheduleRead(context: { setTimeout: (fn: () => void, ms: number) => unk
   debounceTimer = context.setTimeout(() => {
     debounceTimer = null;
     if (!isWatchOrShorts()) return;
-    lastMetadata = readMetadataFromDom();
     lastReadTime = Date.now();
     perf.totalReads++;
     perf.mutationsSinceLastRead = 0;
+    void readMetadataFromDom().then((metadata) => {
+      lastMetadata = metadata;
+    });
   }, DEBOUNCE_MS) as unknown as ReturnType<typeof setTimeout>;
 }
 
@@ -241,6 +250,13 @@ export default defineContentScript({
       "get-open-tabs-catalog": () => browser.runtime.sendMessage({ action: "get-open-tabs-catalog" }),
       "stage-focused-study-queue": (payload) =>
         browser.runtime.sendMessage({ action: "stage-focused-study-queue", payload }),
+      "refine-language": (payload) => {
+        const { detected, text, channelName, videoId } = payload as VideoChannel & {
+          detected: DetectedLanguage;
+          text: string;
+        };
+        return resolveVideoLanguage(detected, text, { channelName, videoId }, document.documentElement.lang);
+      },
     });
 
     if (!isWatchOrShorts()) return;
@@ -275,7 +291,9 @@ export default defineContentScript({
     context.addEventListener(document, "durationchange", () => scheduleRead(context), true);
     context.addEventListener(document, "loadedmetadata", () => scheduleRead(context), true);
 
-    lastMetadata = readMetadataFromDom();
+    void readMetadataFromDom().then((metadata) => {
+      lastMetadata = metadata;
+    });
     perf.totalReads++;
     scheduleRead(context);
 
@@ -290,15 +308,19 @@ export default defineContentScript({
         sendResponse: (r: unknown) => void
       ) => {
         if (message?.action === "get-metadata") {
-          if (isWatchOrShorts()) {
-            const currentId = getVideoIdFromLocation();
-            const refreshLanguage = message.refreshLanguage === true;
-            if (currentId !== lastMetadata.videoId || refreshLanguage) {
-              lastMetadata = readMetadataFromDom();
-            }
+          const currentId = getVideoIdFromLocation();
+          const needsRead =
+            isWatchOrShorts() &&
+            (currentId !== lastMetadata.videoId || message.refreshLanguage === true);
+          if (!needsRead) {
+            sendResponse(lastMetadata);
+            return;
           }
-          sendResponse(lastMetadata);
-          return;
+          void readMetadataFromDom().then((metadata) => {
+            lastMetadata = metadata;
+            sendResponse(metadata);
+          });
+          return true;
         }
         if (message?.action === "get-playback-state") {
           sendResponse(getPlaybackState());

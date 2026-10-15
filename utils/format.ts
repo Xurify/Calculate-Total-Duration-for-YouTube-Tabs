@@ -16,6 +16,26 @@ export function formatCompact(totalSeconds: number): string {
   return formatTime(totalSeconds);
 }
 
+/** "2 h 14 min", "14 min", "45 s" — for headlines, not tables. */
+export function formatDurationWords(totalSeconds: number): string {
+  const total = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (hours > 0) return minutes > 0 ? `${hours} h ${minutes} min` : `${hours} h`;
+  if (minutes > 0) return `${minutes} min`;
+  return `${total} s`;
+}
+
+/** Queue offset label: "now" for zero, else "+10 min" / "+1 h 33". */
+export function formatOffset(totalSeconds: number): string {
+  const total = Math.max(0, Math.floor(totalSeconds));
+  if (total < 60) return "next";
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (hours > 0) return `+${hours} h ${minutes.toString().padStart(2, "0")}`;
+  return `+${minutes} min`;
+}
+
 export function parseTimeParam(url: string): number {
   try {
     const urlObj = new URL(url);

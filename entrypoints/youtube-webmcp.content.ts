@@ -7,6 +7,12 @@ import {
   registerWebMcpTool,
   type WebMcpToolDefinition,
 } from "../utils/webmcp";
+import {
+  detectLanguageFromPlayerResponse,
+  languageTextFromPlayerResponse,
+  normalizeLanguageCode,
+  type DetectedLanguage,
+} from "../utils/captionLanguage";
 import { sendBridgeRequest } from "../utils/webmcpBridge";
 
 interface PlayerCaptionTrack {
@@ -29,6 +35,7 @@ interface PlayerResponseData {
     author?: string;
     isLive?: boolean;
     lengthSeconds?: string;
+    shortDescription?: string;
   };
   captions?: {
     playerCaptionsTracklistRenderer?: PlayerResponseCaptionContainer;
@@ -48,16 +55,17 @@ function showHarvesterToast(messageText: string) {
     position: "fixed",
     bottom: "24px",
     right: "24px",
-    backgroundColor: "#0f172a",
-    color: "#f8fafc",
+    backgroundColor: "#231f1b",
+    color: "#efe7da",
     padding: "12px 18px",
-    borderRadius: "10px",
-    boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.3)",
+    borderRadius: "12px",
+    boxShadow: "0 14px 36px -20px rgba(0, 0, 0, 0.7)",
     fontSize: "14px",
     fontWeight: "500",
     fontFamily: "system-ui, -apple-system, sans-serif",
     zIndex: "999999",
-    border: "1px solid rgba(255, 255, 255, 0.12)",
+    border: "1px solid rgba(239, 231, 218, 0.14)",
+    borderLeft: "4px solid #e3aa50",
     transition: "opacity 0.25s ease-in-out, transform 0.25s ease-in-out",
     opacity: "0",
     transform: "translateY(8px)",
@@ -254,6 +262,97 @@ async function fetchTranscriptSegments(
   return segments;
 }
 
+function readYtcfg(key: string): unknown {
+  const ytcfg = (window as unknown as { ytcfg?: { get?: (name: string) => unknown } }).ytcfg;
+  try {
+    return ytcfg?.get?.(key);
+  } catch {
+    return undefined;
+  }
+}
+
+function protobufVarint(value: number): number[] {
+  const bytes: number[] = [];
+  while (value > 127) {
+    bytes.push((value & 127) | 128);
+    value >>>= 7;
+  }
+  bytes.push(value);
+  return bytes;
+}
+
+function protobufBytesField(fieldNumber: number, bytes: number[]): number[] {
+  return [...protobufVarint((fieldNumber << 3) | 2), ...protobufVarint(bytes.length), ...bytes];
+}
+
+/**
+ * Rebuilds the params the "Show transcript" button sends to get_panel:
+ * field 149 { 1: videoId, 3: 1, 6: caption vssId such as ".et" or "a.et" }.
+ * Captured from YouTube's own request in October 2026.
+ */
+function buildTranscriptPanelParams(videoId: string, vssId?: string): string {
+  const encoder = new TextEncoder();
+  let inner = [...protobufBytesField(1, [...encoder.encode(videoId)]), 0x18, 1];
+  if (vssId) inner = [...inner, ...protobufBytesField(6, [...encoder.encode(vssId)])];
+  return btoa(String.fromCharCode(...protobufBytesField(149, inner)));
+}
+
+function collectTranscriptSegmentModels(node: unknown, found: Array<{ simpleText?: string; timestamp?: string }>) {
+  if (!node || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const child of node) collectTranscriptSegmentModels(child, found);
+    return;
+  }
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    if (key === "transcriptSegmentViewModel" && value && typeof value === "object") {
+      found.push(value as { simpleText?: string; timestamp?: string });
+    } else {
+      collectTranscriptSegmentModels(value, found);
+    }
+  }
+}
+
+/** Same request the "Show transcript" panel makes, so the text is the track itself, never a translation. */
+async function fetchPanelTranscript(videoId: string, vssId?: string): Promise<TranscriptSegment[]> {
+  const context = readYtcfg("INNERTUBE_CONTEXT");
+  if (!context) return [];
+
+  try {
+    const response = await fetch("/youtubei/v1/get_panel?prettyPrint=false", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Youtube-Client-Name": String(readYtcfg("INNERTUBE_CONTEXT_CLIENT_NAME") ?? "1"),
+        "X-Youtube-Client-Version": String(readYtcfg("INNERTUBE_CLIENT_VERSION") ?? ""),
+      },
+      body: JSON.stringify({
+        context,
+        panelId: "PAmodern_transcript_view",
+        params: buildTranscriptPanelParams(videoId, vssId),
+      }),
+    });
+    if (!response.ok) return [];
+
+    const models: Array<{ simpleText?: string; timestamp?: string }> = [];
+    collectTranscriptSegmentModels(await response.json(), models);
+    const segments = models
+      .map((model) => ({
+        startSeconds: parseDurationText(model.timestamp ?? "0"),
+        durationSeconds: 0,
+        text: (model.simpleText ?? "").trim(),
+      }))
+      .filter((segment) => segment.text);
+    segments.forEach((segment, index) => {
+      const next = segments[index + 1];
+      if (next) segment.durationSeconds = Math.max(0, next.startSeconds - segment.startSeconds);
+    });
+    return segments;
+  } catch {
+    return [];
+  }
+}
+
 export default defineContentScript({
   matches: ["*://*.youtube.com/*"],
   world: "MAIN",
@@ -275,7 +374,7 @@ export default defineContentScript({
       annotations: {
         readOnlyHint: true,
       },
-      execute: () => {
+      execute: async () => {
         const videoElement = document.querySelector("video");
         const videoId = getVideoIdFromCurrentLocation();
         const playerResponse = getPlayerResponseFromWindow(videoId);
@@ -316,7 +415,22 @@ export default defineContentScript({
 
         const captionTracks =
           playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
-        const primaryTrack = captionTracks[0];
+        let detected = detectLanguageFromPlayerResponse(playerResponse);
+        if (!detected.language || detected.weak) {
+          // browser.i18n lives in the isolated world, so the YouTube content script runs CLD for us.
+          detected = await sendBridgeRequest<
+            { detected: DetectedLanguage; text: string; channelName: string; videoId: string | null },
+            DetectedLanguage
+          >(
+            "refine-language",
+            {
+              detected,
+              text: languageTextFromPlayerResponse(playerResponse),
+              channelName: playerResponse?.videoDetails?.author || channelName,
+              videoId,
+            }
+          ).catch(() => detected);
+        }
 
         return {
           videoId,
@@ -326,8 +440,8 @@ export default defineContentScript({
           currentTimeSeconds,
           remainingSeconds: isLive ? 0 : remainingSeconds,
           isLive,
-          language: primaryTrack?.languageCode ?? null,
-          languageName: primaryTrack?.name?.simpleText ?? null,
+          language: detected.language,
+          languageName: detected.languageName,
           availableLanguages: captionTracks.map((track) => ({
             code: track.languageCode,
             name: track.name?.simpleText ?? track.languageCode,
@@ -348,7 +462,7 @@ export default defineContentScript({
     > = {
       name: "get_video_transcript",
       description:
-        "Extracts timestamped transcript segments for the current YouTube video. Useful for language study, generating cloze review cards, and active recall exercises.",
+        "Extracts timestamped transcript segments for the current YouTube video in its original language, from the same source as YouTube's \"Show transcript\" panel (never auto-translated). Useful for language study, generating cloze review cards, and active recall exercises.",
       inputSchema: {
         type: "object",
         properties: {
@@ -385,65 +499,58 @@ export default defineContentScript({
           };
         }
 
-        let selectedTrack = captionTracks[0];
-        if (inputArguments.targetLanguageCode) {
-          const requestedCode = inputArguments.targetLanguageCode.toLowerCase();
-          const matchedTrack = captionTracks.find(
-            (track) => track.languageCode.toLowerCase() === requestedCode
+        const requestedCode = inputArguments.targetLanguageCode
+          ? normalizeLanguageCode(inputArguments.targetLanguageCode)
+          : null;
+        const requestedTrack = requestedCode
+          ? captionTracks.find((track) => normalizeLanguageCode(track.languageCode) === requestedCode)
+          : undefined;
+        const spokenCode = detectLanguageFromPlayerResponse(playerResponse).language;
+
+        const spokenTracks = spokenCode
+          ? captionTracks.filter(
+              (track) => normalizeLanguageCode(track.languageCode) === normalizeLanguageCode(spokenCode)
+            )
+          : [];
+        const selectedTrack: PlayerCaptionTrack | undefined =
+          requestedTrack ??
+          spokenTracks.find((track) => track.kind !== "asr") ??
+          spokenTracks[0] ??
+          captionTracks.find((track) => track.kind !== "asr") ??
+          captionTracks[0];
+        let segmentsToFilter: TranscriptSegment[] = [];
+        let source: "transcript-panel" | "caption-track" | "transcript-dom" = "transcript-panel";
+
+        if (videoId && selectedTrack) {
+          segmentsToFilter = await fetchPanelTranscript(videoId, selectedTrack.vssId);
+        }
+
+        if (segmentsToFilter.length === 0 && selectedTrack) {
+          source = "caption-track";
+          segmentsToFilter = await fetchTranscriptSegments(selectedTrack.baseUrl);
+        }
+
+        if (segmentsToFilter.length === 0) {
+          source = "transcript-dom";
+          const domSegmentElements = document.querySelectorAll(
+            "ytd-transcript-segment-renderer, transcript-segment-view-model"
           );
-          if (matchedTrack) {
-            selectedTrack = matchedTrack;
-          }
-        } else {
-          const manualTrack = captionTracks.find((track) => track.kind !== "asr");
-          if (manualTrack) {
-            selectedTrack = manualTrack;
-          }
-        }
-
-        const rawSegments = await fetchTranscriptSegments(selectedTrack.baseUrl);
-        let segmentsToFilter = rawSegments;
-
-        if (segmentsToFilter.length === 0) {
-          const domSegmentElements = document.querySelectorAll("ytd-transcript-segment-renderer");
-          if (domSegmentElements.length > 0) {
-            const domSegments: TranscriptSegment[] = [];
-            domSegmentElements.forEach((element) => {
-              const timestampText = element.querySelector(".segment-timestamp")?.textContent?.trim() || "";
-              const segmentText = element.querySelector(".segment-text")?.textContent?.trim() || "";
-              const startSeconds = parseDurationText(timestampText);
-              if (segmentText) {
-                domSegments.push({
-                  startSeconds,
-                  durationSeconds: 0,
-                  text: segmentText,
-                });
-              }
-            });
-            if (domSegments.length > 0) {
-              segmentsToFilter = domSegments;
+          const domSegments: TranscriptSegment[] = [];
+          domSegmentElements.forEach((element) => {
+            const timestampText =
+              element.querySelector(".segment-timestamp, .ytwTranscriptSegmentViewModelTimestamp")
+                ?.textContent?.trim() || "";
+            const segmentText =
+              element.querySelector(".segment-text, .ytAttributedStringHost")?.textContent?.trim() || "";
+            if (segmentText) {
+              domSegments.push({
+                startSeconds: parseDurationText(timestampText),
+                durationSeconds: 0,
+                text: segmentText,
+              });
             }
-          }
-        }
-
-        if (segmentsToFilter.length === 0) {
-          const liveCaptionSegments = document.querySelectorAll(".ytp-caption-segment");
-          if (liveCaptionSegments.length > 0) {
-            const captionText = Array.from(liveCaptionSegments)
-              .map((element) => element.textContent?.trim() || "")
-              .join(" ")
-              .trim();
-            if (captionText) {
-              const videoElement = document.querySelector("video");
-              segmentsToFilter = [
-                {
-                  startSeconds: videoElement ? videoElement.currentTime : 0,
-                  durationSeconds: 0,
-                  text: captionText,
-                },
-              ];
-            }
-          }
+          });
+          segmentsToFilter = domSegments;
         }
 
         const filteredSegments = segmentsToFilter.filter((segment) => {
@@ -477,9 +584,10 @@ export default defineContentScript({
         return {
           videoId,
           available: true,
-          languageCode: selectedTrack.languageCode,
-          languageName: selectedTrack.name?.simpleText ?? selectedTrack.languageCode,
-          isAutoGenerated: selectedTrack.kind === "asr",
+          languageCode: selectedTrack?.languageCode ?? null,
+          languageName: selectedTrack?.name?.simpleText ?? selectedTrack?.languageCode ?? null,
+          isAutoGenerated: selectedTrack?.kind === "asr",
+          source,
           segmentsCount: filteredSegments.length,
           segments: filteredSegments,
           fullText,

@@ -9,10 +9,10 @@
   <body class="font-sans bg-surface text-text-primary m-0 p-0 overflow-hidden flex flex-col h-full">
 
     <header class="shrink-0 h-14 px-8 flex items-center gap-5 border-b border-border bg-surface z-20">
-      <a href="#" id="brand" class="flex items-center gap-2.5 no-underline text-text-primary shrink-0" title="Study Harvester">
+      <button type="button" id="brand" class="brand sidebar-item" data-sidebar-type="all" title="Back to the desk">
         <img src="/icon/icon.svg" alt="" width="28" height="28" class="w-7 h-7 rounded-[7px]" />
         <h1 class="font-display text-[21px] font-medium tracking-tight m-0 leading-none">Study Harvester</h1>
-      </a>
+      </button>
       <span class="w-px h-6 bg-border shrink-0" aria-hidden="true"></span>
       <nav id="window-list" class="nav-tabs" aria-label="Views">
         <button type="button" id="nav-desk" class="sidebar-item nav-pill" data-sidebar-type="all">Desk</button>
@@ -137,8 +137,8 @@
             <span class="flex-1"></span>
             <span id="global-stats-count" class="text-xs text-text-muted tabular-nums whitespace-nowrap"></span>
           </div>
-          <div id="saved-sessions-sidebar" class="session-grid min-h-[3rem]" aria-busy="true"></div>
-          <p class="text-xs text-text-muted m-0">Click a card to put that session on the desk. Pinned sessions stay at the top.</p>
+          <div id="saved-sessions-sidebar" class="session-grid shrink-0" aria-busy="true"></div>
+          <p class="text-xs text-text-muted m-0 shrink-0 pb-4">Click a card to put that session on the desk. Pinned sessions stay at the top.</p>
         </section>
 
       </section>

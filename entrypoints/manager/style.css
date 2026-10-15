@@ -32,15 +32,19 @@ body {
 
 @layer components {
   .nav-tabs {
-    @apply flex items-center gap-0.5 p-0.5 rounded-full border border-border bg-surface-elevated;
+    @apply flex items-center gap-0.5 h-9 p-0.5 rounded-full border border-border bg-surface-elevated;
   }
 
   .nav-pill {
-    @apply px-3 py-1 rounded-full text-[13px] font-medium text-text-secondary border-0 bg-transparent cursor-pointer transition-colors hover:text-text-primary inline-flex items-center gap-1.5 whitespace-nowrap;
+    @apply h-8 px-3 rounded-full text-[13px] font-medium leading-none text-text-secondary border-0 bg-transparent cursor-pointer transition-colors hover:text-text-primary inline-flex items-center gap-1.5 whitespace-nowrap;
   }
 
   .nav-badge {
-    @apply text-[11px] tabular-nums text-text-muted;
+    @apply inline-flex items-center justify-center min-w-[1.125rem] h-[1.125rem] px-1 rounded-full bg-surface text-[11px] font-semibold leading-none tabular-nums text-text-muted;
+  }
+
+  .brand {
+    @apply flex items-center gap-2.5 h-9 px-1 -ml-1 rounded-[10px] border-0 bg-transparent text-text-primary cursor-pointer transition-colors hover:bg-surface-hover/60 shrink-0;
   }
 
   .nav-pill.bg-surface-hover {
@@ -160,7 +164,8 @@ body {
   }
 
   .facet-head {
-    @apply px-2.5 pt-1 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted;
+    /* Starts on the name column: row padding + dot + gap. */
+    @apply pl-7 pr-2.5 pt-1 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted;
   }
 
   .facet {

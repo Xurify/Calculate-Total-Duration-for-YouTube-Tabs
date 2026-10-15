@@ -210,8 +210,9 @@ body {
   }
 
   .time-bar-label {
-    @apply absolute inset-y-0 left-2.5 right-2 flex items-center gap-1.5 text-[12px] font-semibold whitespace-nowrap overflow-hidden;
-    color: #1a1714;
+    @apply absolute top-1/2 -translate-y-1/2 left-2 max-w-[calc(100%-1rem)] inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[12px] font-semibold whitespace-nowrap overflow-hidden;
+    color: #fffaf0;
+    background: rgba(26, 23, 20, 0.58);
   }
 
   .time-bar-time {
@@ -221,6 +222,63 @@ body {
   .queue-row--planned .queue-offset::after {
     content: "·";
     @apply ml-1 text-accent;
+  }
+
+  .scope-switch {
+    @apply flex flex-wrap gap-1 p-1 rounded-lg bg-surface border border-border mb-1;
+  }
+
+  .scope-chip {
+    @apply px-2.5 py-1 rounded-md text-xs font-medium text-text-secondary border-0 bg-transparent cursor-pointer transition-colors hover:text-text-primary;
+  }
+
+  .scope-chip--active {
+    @apply bg-surface-elevated text-text-primary font-semibold shadow-sm;
+  }
+
+  .facet--muted .facet-name {
+    @apply italic text-text-muted font-normal;
+  }
+
+  .is-dragging .facet-group--piles .facet[data-section-wrapper] {
+    @apply py-3;
+    outline: 1px dashed color-mix(in srgb, var(--color-accent) 45%, transparent);
+    outline-offset: -2px;
+  }
+
+  .is-dragging .facet-group--piles .facet-head::after {
+    content: " · drop to move";
+    @apply text-accent normal-case tracking-normal;
+  }
+
+  .time-bar-rest {
+    @apply flex flex-wrap items-center gap-x-3 gap-y-1 text-xs;
+  }
+
+  .time-bar-rest-item {
+    @apply inline-flex items-center gap-1.5 border-0 bg-transparent p-0 text-xs text-text-secondary cursor-pointer hover:text-text-primary;
+  }
+
+  .time-bar-seg--detecting {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      transparent 0 6px,
+      color-mix(in srgb, var(--color-surface) 55%, transparent) 6px 12px
+    ) !important;
+    background-color: var(--color-border-hover) !important;
+  }
+
+  .queue-row--focused {
+    box-shadow: inset 3px 0 0 0 var(--color-accent);
+    background: color-mix(in srgb, var(--color-surface-hover) 55%, transparent);
+  }
+
+  .language-option {
+    @apply flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer text-sm text-text-primary hover:bg-surface-hover/60;
+  }
+
+  .language-option input {
+    @apply accent-accent;
   }
 
   .budget-chip {

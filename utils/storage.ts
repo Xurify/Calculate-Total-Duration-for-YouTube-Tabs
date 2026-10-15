@@ -63,7 +63,7 @@ const DEFAULT_PREFS: UserPrefs = {
   thumbnailQuality: "high",
   layoutMode: "list",
   groupingMode: "none",
-  sortOption: "duration-desc",
+  sortOption: "started-first",
 };
 
 const PREFS_STORAGE_KEYS = [

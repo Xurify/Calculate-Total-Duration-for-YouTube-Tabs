@@ -239,6 +239,7 @@ function applyCachedMetadataToVideo(video: VideoData, cached: CachedMetadata): v
   video.isLive = cached.isLive || false;
   video.language = cached.language;
   video.languageName = cached.languageName;
+  video.chapters = cached.chapters;
 }
 
 const THUMBNAIL_CACHE_MAX = 60;
@@ -345,6 +346,7 @@ async function fetchTabs(skipInitialRender = false) {
       video.videoId = oldVideo.videoId;
       video.audible = oldVideo.audible;
       video.paused = oldVideo.paused;
+      video.chapters = oldVideo.chapters;
     } else {
       const cached = lookupCachedMetadata(metadataRecord, url);
       if (cached) applyCachedMetadataToVideo(video, cached);
@@ -3790,6 +3792,29 @@ function renderVideoList(videos: VideoData[], sectionColorIndex?: number | "unso
       : video.isLive
         ? `<span class="text-youtube font-semibold">Live</span>`
         : "";
+    const chaptersHtml =
+      video.chapters && video.chapters.length > 0
+        ? `
+          <div class="video-chapters-container mt-2 pt-2 border-t border-border/40">
+            <button type="button" class="video-chapters-toggle text-[11px] font-semibold text-accent hover:text-accent-hover flex items-center gap-1.5 transition-colors cursor-pointer py-0.5">
+              <span class="chapter-toggle-arrow text-[9px] transition-transform">▶</span>
+              <span>📑 ${video.chapters.length} Chapters</span>
+            </button>
+            <div class="video-chapters-list hidden mt-1.5 space-y-1 pl-2.5 border-l-2 border-accent/30 text-xs">
+              ${video.chapters
+                .map(
+                  (chapter) => `
+                <div class="video-chapter-item flex items-center justify-between py-1 px-1.5 rounded hover:bg-surface-hover/70 cursor-pointer group/chapter transition-colors" data-video-id="${video.id}" data-time="${chapter.startSeconds}">
+                  <span class="truncate mr-3 font-medium text-text-secondary group-hover/chapter:text-accent transition-colors">${escapeHtml(chapter.title)}</span>
+                  <span class="tabular-nums text-[11px] text-text-muted shrink-0">${formatCompact(chapter.startSeconds)}${chapter.durationSeconds ? ` · ${formatDurationWords(chapter.durationSeconds)}` : ""}</span>
+                </div>
+              `
+                )
+                .join("")}
+            </div>
+          </div>
+        `
+        : "";
 
     return `
       <div class="${rowClass}" data-id="${video.id}"${dnd.draggableAttr}>
@@ -3815,6 +3840,7 @@ function renderVideoList(videos: VideoData[], sectionColorIndex?: number | "unso
               ${windowBadgeHtml(video)}
               ${duplicateBadgeHtml(video.url)}
             </div>
+            ${chaptersHtml}
           </div>
           <div class="queue-actions">
             <button type="button" draggable="false" class="queue-action jump-btn" title="Go to tab" aria-label="Go to tab">${QUEUE_ICON_OPEN}</button>
@@ -4006,6 +4032,30 @@ function renderVideoGrid(videos: VideoData[], sectionColorIndex?: number | "unso
                           ${video.languageName ? `<span class="manager-card-language bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0">${video.languageName.split('(')[0].trim()}</span>` : `<span class="manager-card-language hidden"></span>`}
                         </div>
                     </div>
+                    ${
+                      video.chapters && video.chapters.length > 0
+                        ? `
+                          <div class="video-chapters-container mt-1.5 pt-1.5 border-t border-border/40">
+                            <button type="button" class="video-chapters-toggle text-[10px] font-semibold text-accent hover:text-accent-hover flex items-center gap-1 transition-colors cursor-pointer py-0.5">
+                              <span class="chapter-toggle-arrow text-[8px] transition-transform">▶</span>
+                              <span>📑 ${video.chapters.length} Chapters</span>
+                            </button>
+                            <div class="video-chapters-list hidden mt-1 space-y-0.5 pl-2 border-l-2 border-accent/30 text-[11px] max-h-36 overflow-y-auto custom-scrollbar">
+                              ${video.chapters
+                                .map(
+                                  (chapter) => `
+                                <div class="video-chapter-item flex items-center justify-between py-0.5 px-1 rounded hover:bg-surface-hover/70 cursor-pointer group/chapter transition-colors" data-video-id="${video.id}" data-time="${chapter.startSeconds}">
+                                  <span class="truncate mr-1 font-medium text-text-secondary group-hover/chapter:text-accent transition-colors text-[10px]">${escapeHtml(chapter.title)}</span>
+                                  <span class="tabular-nums text-[10px] text-text-muted shrink-0">${formatCompact(chapter.startSeconds)}</span>
+                                </div>
+                              `
+                                )
+                                .join("")}
+                            </div>
+                          </div>
+                        `
+                        : ""
+                    }
                 </div>
             </div>
         `;
@@ -4837,6 +4887,40 @@ function setupListeners() {
 
     const row = target.closest("[data-id]") as HTMLElement | null;
     const id = row ? parseInt(row.dataset.id || "0", 10) : 0;
+
+    const chapterItem = target.closest(".video-chapter-item") as HTMLElement | null;
+    if (chapterItem) {
+      event.stopPropagation();
+      const videoId = parseInt(chapterItem.dataset.videoId || "", 10);
+      const startSeconds = parseInt(chapterItem.dataset.time || "0", 10);
+      const video = allVideos.find((candidate) => candidate.id === videoId);
+      if (video) {
+        const rawUrl = video.url.split("&t=")[0].split("?t=")[0];
+        const separator = rawUrl.includes("?") ? "&" : "?";
+        const targetUrl = `${rawUrl}${separator}t=${startSeconds}`;
+        await browser.tabs.update(video.id, { url: targetUrl, active: true });
+        if (video.windowId !== undefined) {
+          await browser.windows.update(video.windowId, { focused: true });
+        }
+      }
+      return;
+    }
+
+    const chapterToggle = target.closest(".video-chapters-toggle") as HTMLElement | null;
+    if (chapterToggle) {
+      event.stopPropagation();
+      const container = chapterToggle.closest(".video-chapters-container");
+      const list = container?.querySelector(".video-chapters-list");
+      if (list) {
+        list.classList.toggle("hidden");
+        const isExpanded = !list.classList.contains("hidden");
+        const arrow = chapterToggle.querySelector(".chapter-toggle-arrow");
+        if (arrow) {
+          arrow.textContent = isExpanded ? "▼" : "▶";
+        }
+      }
+      return;
+    }
 
     if (target.closest(".selection-toggle")) {
       event.stopPropagation();

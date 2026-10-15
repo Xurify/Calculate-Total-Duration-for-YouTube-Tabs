@@ -251,7 +251,7 @@
                 <div id="restore-target-window" class="custom-select custom-select--block mt-1"></div>
               </div>
               <label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer"><input type="checkbox" id="restore-missing-only" class="accent-accent rounded" /> Open only tabs not already open</label>
-              <label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer"><input type="checkbox" id="restore-by-sections" class="accent-accent rounded" /> One window per section (when sections exist)</label>
+              <label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer"><input type="checkbox" id="restore-by-sections" class="accent-accent rounded" /> One window per pile (when piles exist)</label>
             </div>
             <div class="flex justify-end gap-2">
                 <button type="button" id="restore-session-cancel" class="px-4 py-2 text-sm font-medium rounded-md border border-border bg-surface-hover text-text-primary hover:bg-surface transition-colors cursor-pointer active:scale-[0.96]">Cancel</button>
@@ -290,8 +290,8 @@
         <div class="add-section-panel w-full max-w-lg rounded-2xl border border-border/80 bg-surface-elevated/95 p-6 shadow-2xl animate-in zoom-in-95 duration-200">
           <div class="flex items-start justify-between gap-4 mb-5">
             <div>
-              <h3 id="add-section-title" class="font-display text-xl font-semibold text-text-primary tracking-tight text-balance">Organize with sections</h3>
-              <p class="text-[13px] text-text-muted mt-1 leading-relaxed">Group videos like playlists—work, podcasts, or anything you need. Sections stay with this session.</p>
+              <h3 id="add-section-title" class="font-display text-xl font-medium text-text-primary tracking-tight text-balance">New pile</h3>
+              <p class="text-[13px] text-text-muted mt-1 leading-relaxed">A pile is a small stack of videos that belong together: grammar, podcasts, one course. Piles stay with this desk or session.</p>
             </div>
             <button type="button" id="add-section-close" class="shrink-0 w-9 h-9 flex items-center justify-center rounded-lg hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors border-0 bg-transparent cursor-pointer active:scale-[0.96]" aria-label="Close">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -314,7 +314,7 @@
 
     <!-- Video / tab context: move to section -->
     <div id="tab-section-context-menu" role="menu" aria-label="Move to section" class="menu-panel menu-panel-animate custom-scrollbar hidden fixed z-[90] max-h-72 min-w-[220px] overflow-y-auto">
-      <div class="menu-panel-header">Move to section</div>
+      <div class="menu-panel-header">Move to pile</div>
       <div id="tab-section-context-items" class="px-1 pb-1"></div>
     </div>
 
@@ -327,7 +327,7 @@
       <div class="ctx-menu-divider" role="separator"></div>
       <button type="button" id="section-ctx-delete" role="menuitem" class="ctx-menu-item ctx-menu-item--danger">
         <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-        Delete section
+        Delete pile
       </button>
     </div>
 
@@ -378,9 +378,9 @@
               <span class="w-6 h-6 rounded bg-accent/20 text-accent flex items-center justify-center text-xs">
                 <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
               </span>
-              Stage Focused Study Session
+              Start study session
             </h3>
-            <p class="text-xs text-text-muted mt-0.5">Focus selected videos and eliminate tab hoarding.</p>
+            <p class="text-xs text-text-muted mt-0.5">Play the chosen videos in order and put everything else away.</p>
           </div>
           <button type="button" id="study-modal-close" class="w-7 h-7 rounded-full flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors">
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>
@@ -389,7 +389,7 @@
 
         <div class="p-5 overflow-y-auto custom-scrollbar space-y-4 text-xs">
           <div>
-            <label class="block font-semibold text-text-secondary uppercase tracking-wider text-[10px] mb-2">Planned Queue (<span id="study-queue-count">0</span> videos)</label>
+            <label class="block font-semibold text-text-secondary uppercase tracking-wider text-[10px] mb-2">Queue (<span id="study-queue-count">0</span> videos)</label>
             <div id="study-queue-preview" class="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar p-1 rounded-md bg-surface border border-border">
               <!-- Populated dynamically with selected video titles -->
             </div>
@@ -416,7 +416,7 @@
             </label>
 
             <div id="study-session-name-wrap">
-              <label for="study-session-name-input" class="block font-semibold text-text-secondary uppercase tracking-wider text-[10px] mb-1.5">Stashed Session Name</label>
+              <label for="study-session-name-input" class="block font-semibold text-text-secondary uppercase tracking-wider text-[10px] mb-1.5">Name for the put-away tabs</label>
               <input type="text" id="study-session-name-input" value="Stashed Backlog" class="w-full px-3 py-1.5 text-xs border border-border rounded-md bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent" />
             </div>
           </div>
@@ -426,7 +426,7 @@
           <button type="button" id="study-modal-cancel" class="px-3.5 py-1.5 text-xs font-medium rounded-md border border-border bg-surface hover:bg-surface-hover text-text-primary transition-colors cursor-pointer">Cancel</button>
           <button type="button" id="study-modal-submit" class="px-4 py-1.5 text-xs font-bold rounded-md bg-accent text-on-accent hover:bg-accent-hover transition-colors shadow-sm cursor-pointer flex items-center gap-1.5 active:scale-[0.96]">
             <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            Launch Study Queue
+            Start
           </button>
         </div>
       </div>

@@ -1,6 +1,6 @@
 {
   "name": "calculate-total-duration-for-youtube",
-  "description": "Calculate the total duration of all your open YouTube tabs.",
+  "description": "Turn open YouTube tabs into a study desk: see the time left, sort videos into piles, and start focused sessions.",
   "private": true,
   "version": "1.0.0",
   "type": "module",

@@ -1733,7 +1733,7 @@ function buildSessionSectionedHtml(tabsToShow: SavedSessionTab[], sections: Sess
     const header = renderSectionHeaderHtml({
       title: "Unsorted",
       emoji: "✦",
-      subtitle: "Videos not assigned to a section yet",
+      subtitle: "Videos not in any pile yet",
       collapseKey: ck,
       countLabel: `${unsorted.length} videos`,
       durationLabel: formatTime(dur),
@@ -1854,7 +1854,7 @@ function buildLiveSectionedHtml(videosToShow: VideoData[], sections: SessionSect
     const header = renderSectionHeaderHtml({
       title: "Unsorted",
       emoji: "✦",
-      subtitle: "Videos not assigned to a section yet",
+      subtitle: "Videos not in any pile yet",
       collapseKey: ck,
       countLabel: `${unsorted.length} videos`,
       durationLabel: formatTime(dur),
@@ -3465,11 +3465,11 @@ function updateMoveToSectionPopover(): void {
 
   const sections = currentSectionsForMove();
   if (sections.length === 0) {
-    pop.innerHTML = `<div class="px-3 py-2.5 text-[11px] text-text-muted leading-relaxed">Create a section with <span class="text-text-secondary font-medium">New section</span> first.</div>`;
+    pop.innerHTML = `<div class="px-3 py-2.5 text-[11px] text-text-muted leading-relaxed">Create a pile with <span class="text-text-secondary font-medium">New pile</span> first.</div>`;
     return;
   }
   pop.innerHTML = `
-    <div class="menu-panel-header">Move to section</div>
+    <div class="menu-panel-header">Move to pile</div>
     <div class="px-1 pb-1">${renderSectionPickerRows(sections)}</div>
   `;
 }
@@ -4479,7 +4479,7 @@ function setupListeners() {
     if (!menu || !items) return;
     const sections = currentSectionsForMove();
     if (sections.length === 0) {
-      items.innerHTML = `<div class="px-3 py-2.5 text-[11px] text-text-muted leading-relaxed">Add a section with <span class="text-text-secondary font-medium">New section</span> first.</div>`;
+      items.innerHTML = `<div class="px-3 py-2.5 text-[11px] text-text-muted leading-relaxed">Create a pile with <span class="text-text-secondary font-medium">New pile</span> first.</div>`;
     } else {
       items.innerHTML = renderSectionPickerRows(sections);
     }
@@ -4616,7 +4616,7 @@ function setupListeners() {
     const sections = currentSectionsForMove();
     const section = sections.find((s) => s.id === targetContext.sectionId);
     const confirmed = await showConfirm({
-      title: "Delete section",
+      title: "Delete pile",
       message: `Delete “${section?.name ?? "section"}”? Videos move to Unsorted.`,
       confirmLabel: "Delete",
       confirmDanger: true,

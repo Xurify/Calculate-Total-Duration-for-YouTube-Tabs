@@ -3,8 +3,8 @@ import { defineConfig } from "wxt";
 export default defineConfig({
   manifestVersion: 3,
   manifest: {
-    name: "Calculate Total Duration for YouTube Tabs",
-    description: "Calculate the total duration of all your open YouTube tabs.",
+    name: "Study Harvester",
+    description: "Turn open YouTube tabs into a study desk: see the time left, sort videos into piles, and start focused sessions.",
     permissions: ["tabs", "scripting", "storage", "readingList"],
     host_permissions: [
       "*://*.youtube.com/*",

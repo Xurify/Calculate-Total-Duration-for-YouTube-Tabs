@@ -832,7 +832,7 @@ function renderNow(): void {
               </div>
             </div>
             <div class="mt-3 pt-3 pb-0 border-t border-border/50 text-center">
-              <div class="text-[10px] text-text-muted font-medium opacity-40 uppercase tracking-tighter">Calculate Total Duration for YouTube Tabs v${VERSION_NUMBER}</div>
+              <div class="text-[11px] text-text-muted"><span class="font-display">Study Harvester</span> · v${VERSION_NUMBER}</div>
             </div>
           </div>
           <div id="popup-confirm-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-scrim backdrop-blur-sm" aria-modal="true" role="dialog">

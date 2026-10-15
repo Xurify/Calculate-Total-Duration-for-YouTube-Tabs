@@ -3265,9 +3265,25 @@ function facetIsActive(row: FacetRow): boolean {
   }
 }
 
+const FACET_ICONS: Record<string, string> = {
+  all: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>`,
+  continue: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m10 8 5 4-5 4z" fill="currentColor"/></svg>`,
+  channel: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>`,
+  unsorted: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 3" aria-hidden="true"><circle cx="12" cy="12" r="5"/></svg>`,
+  add: `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`,
+};
+
+function facetIconHtml(row: FacetRow): string {
+  if (row.kind === "language" || (row.kind === "pile" && row.value !== "__unsorted")) {
+    return `<span class="facet-icon"><span class="facet-dot" style="background: ${row.color ?? "var(--color-border-hover)"}"></span></span>`;
+  }
+  const icon = row.kind === "pile" ? FACET_ICONS.unsorted : FACET_ICONS[row.kind] ?? "";
+  return `<span class="facet-icon">${icon}</span>`;
+}
+
 function facetButtonHtml(row: FacetRow, extraAttrs = ""): string {
   const active = facetIsActive(row);
-  const dot = row.color ? `<span class="facet-dot" style="background: ${row.color}"></span>` : `<span class="facet-dot facet-dot--none"></span>`;
+  const dot = facetIconHtml(row);
   const time = row.count > 0 && row.seconds > 0 ? formatDurationWords(row.seconds) : "";
   return `
     <button type="button" class="facet${active ? " facet--active" : ""}${row.muted ? " facet--muted" : ""}" data-facet-kind="${row.kind}" data-facet-value="${escapeHtml(row.value)}"${extraAttrs} aria-pressed="${active}" title="${escapeHtml(row.label)}">
@@ -3308,7 +3324,7 @@ function renderFacetRail(): void {
   rail.classList.toggle("hidden", !live && !session);
   if (!live && !session) return;
 
-  const newPile = `<button type="button" class="facet facet--add" data-pile-create="1"><span class="facet-dot facet-dot--none"></span><span class="facet-name">New pile…</span></button>`;
+  const newPile = `<button type="button" class="facet facet--add" data-pile-create="1"><span class="facet-icon">${FACET_ICONS.add}</span><span class="facet-name">New pile…</span></button>`;
   let html = "";
   if (live) {
     const base = filterVideosForDisplay(currentLiveBaseVideos(), { ignoreFacet: true });

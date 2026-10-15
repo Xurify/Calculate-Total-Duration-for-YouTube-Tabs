@@ -164,12 +164,25 @@ body {
   }
 
   .facet-head {
-    /* Starts on the name column: row padding + dot + gap. */
-    @apply pl-7 pr-2.5 pt-1 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted;
+    /* Starts on the name column: row padding (8) + icon (14) + gap (6). */
+    @apply pl-7 pr-2 pt-1 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted;
   }
 
   .facet {
-    @apply w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md border-0 bg-transparent text-left cursor-pointer transition-colors text-[13px] text-text-secondary hover:bg-surface-hover/60 hover:text-text-primary;
+    @apply w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md border-0 bg-transparent text-left cursor-pointer transition-colors text-[13px] text-text-secondary hover:bg-surface-hover/60 hover:text-text-primary;
+  }
+
+  .facet-icon {
+    @apply w-3.5 h-3.5 flex items-center justify-center shrink-0 text-text-muted;
+  }
+
+  .facet--active .facet-icon,
+  .facet:hover .facet-icon {
+    @apply text-text-primary;
+  }
+
+  .facet--add .facet-icon {
+    @apply text-accent;
   }
 
   .facet--active {
@@ -181,7 +194,7 @@ body {
   }
 
   .facet-dot {
-    @apply w-2.5 h-2.5 rounded-full shrink-0;
+    @apply w-2 h-2 rounded-full shrink-0;
   }
 
   .facet-dot--none {

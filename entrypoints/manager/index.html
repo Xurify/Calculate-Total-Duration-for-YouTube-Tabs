@@ -8,21 +8,21 @@
   </head>
   <body class="font-sans bg-surface text-text-primary m-0 p-0 overflow-hidden flex flex-col h-full">
 
-    <header class="shrink-0 h-14 px-10 flex items-center gap-6 border-b border-border bg-surface z-20">
-      <h1 class="font-display text-[22px] font-medium tracking-tight m-0 leading-none">Study Harvester</h1>
-      <nav id="window-list" class="flex items-center gap-1 ml-2" aria-label="Views">
+    <header class="shrink-0 h-14 px-8 flex items-center gap-5 border-b border-border bg-surface z-20">
+      <a href="#" id="brand" class="flex items-center gap-2.5 no-underline text-text-primary shrink-0" title="Study Harvester">
+        <img src="/icon/icon.svg" alt="" width="28" height="28" class="w-7 h-7 rounded-[7px]" />
+        <h1 class="font-display text-[21px] font-medium tracking-tight m-0 leading-none">Study Harvester</h1>
+      </a>
+      <span class="w-px h-6 bg-border shrink-0" aria-hidden="true"></span>
+      <nav id="window-list" class="nav-tabs" aria-label="Views">
         <button type="button" id="nav-desk" class="sidebar-item nav-pill" data-sidebar-type="all">Desk</button>
-        <button type="button" id="nav-reading-list" class="sidebar-item nav-pill" data-sidebar-type="reading-list">
-          Reading list <span id="reading-list-badge" class="tabular-nums text-text-muted">0</span>
-        </button>
         <button type="button" id="nav-sessions" class="sidebar-item nav-pill" data-sidebar-type="sessions">Saved sessions</button>
-        <span class="inline-flex items-center gap-1 ml-2 px-2 py-1 rounded-full text-[10px] font-semibold bg-success/12 text-success border border-success/30" title="WebMCP standard active on YouTube, Mandala, and Clozemaster">
-          <span class="w-1.5 h-1.5 rounded-full bg-success"></span>
-          WebMCP
-        </span>
+        <button type="button" id="nav-reading-list" class="sidebar-item nav-pill" data-sidebar-type="reading-list">
+          Reading list <span id="reading-list-badge" class="nav-badge">0</span>
+        </button>
       </nav>
       <div class="flex-1"></div>
-      <div class="relative group w-80">
+      <div class="relative group w-72">
         <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-text-muted group-focus-within:text-accent transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
         </div>
@@ -32,7 +32,11 @@
         </button>
       </div>
       <div class="flex items-center gap-1">
-        <button type="button" id="btn-save-session" class="icon-btn" title="Save current tabs as a session" aria-label="Save session">
+        <span class="hidden lg:inline-flex items-center gap-1.5 mr-2 text-[11px] font-medium text-text-muted" title="WebMCP tools are live on YouTube, Mandala and Clozemaster pages">
+          <span class="w-1.5 h-1.5 rounded-full bg-success"></span>
+          WebMCP
+        </span>
+        <button type="button" id="btn-save-session" class="icon-btn" title="Save today's tabs as a session" aria-label="Save session">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
         </button>
         <button type="button" id="btn-refresh" class="icon-btn" title="Refresh" aria-label="Refresh">
@@ -127,13 +131,14 @@
 
         <div id="tab-list" class="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-8 py-5"></div>
 
-        <section id="sessions-panel" class="hidden flex-col gap-4 px-8 py-6 max-w-3xl">
+        <section id="sessions-panel" class="hidden flex-col gap-5 px-8 py-6 overflow-y-auto custom-scrollbar min-h-0">
           <div class="flex items-center gap-3">
-            <input type="search" id="session-sidebar-search" class="flex-1 h-9 px-3 text-sm border border-border rounded-[10px] bg-surface-elevated text-text-primary placeholder:text-text-muted focus:outline-none" placeholder="Filter sessions…" />
-            <span id="global-stats-count" class="text-xs text-text-muted tabular-nums whitespace-nowrap">0 videos · 0 min</span>
+            <input type="search" id="session-sidebar-search" class="w-80 max-w-full h-9 px-3 text-sm border border-border rounded-[10px] bg-surface-elevated text-text-primary placeholder:text-text-muted focus:outline-none" placeholder="Filter sessions…" />
+            <span class="flex-1"></span>
+            <span id="global-stats-count" class="text-xs text-text-muted tabular-nums whitespace-nowrap"></span>
           </div>
-          <div id="saved-sessions-sidebar" class="queue-card flex flex-col min-h-[3rem]" aria-busy="true"></div>
-          <p class="text-xs text-text-muted m-0">Click a session to put it on the desk. Right-click for rename, pin, duplicate or delete.</p>
+          <div id="saved-sessions-sidebar" class="session-grid min-h-[3rem]" aria-busy="true"></div>
+          <p class="text-xs text-text-muted m-0">Click a card to put that session on the desk. Pinned sessions stay at the top.</p>
         </section>
 
       </section>

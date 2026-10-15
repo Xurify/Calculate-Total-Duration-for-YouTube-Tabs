@@ -31,8 +31,20 @@ body {
 }
 
 @layer components {
+  .nav-tabs {
+    @apply flex items-center gap-0.5 p-0.5 rounded-full border border-border bg-surface-elevated;
+  }
+
   .nav-pill {
-    @apply px-3 py-1.5 rounded-full text-[13px] font-medium text-text-secondary border-0 bg-transparent cursor-pointer transition-colors hover:text-text-primary inline-flex items-center gap-1.5;
+    @apply px-3 py-1 rounded-full text-[13px] font-medium text-text-secondary border-0 bg-transparent cursor-pointer transition-colors hover:text-text-primary inline-flex items-center gap-1.5 whitespace-nowrap;
+  }
+
+  .nav-badge {
+    @apply text-[11px] tabular-nums text-text-muted;
+  }
+
+  .nav-pill.bg-surface-hover {
+    @apply bg-surface-hover text-text-primary font-semibold;
   }
 
   .icon-btn {
@@ -285,6 +297,66 @@ body {
 
   .language-option input {
     @apply accent-accent;
+  }
+
+  .session-grid {
+    @apply grid gap-4;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  }
+
+  .session-card {
+    @apply flex flex-col gap-2.5 p-5 rounded-2xl border border-border bg-surface-elevated cursor-pointer transition-[border-color,box-shadow] text-left;
+    box-shadow: 0 10px 30px -26px var(--shadow-ink);
+  }
+
+  .session-card:hover,
+  .session-card:focus-visible {
+    border-color: var(--color-border-hover);
+  }
+
+  .session-card--active {
+    @apply border-accent;
+  }
+
+  .session-card-head {
+    @apply flex items-start gap-2;
+  }
+
+  .session-card-title {
+    @apply font-display text-[21px] font-medium leading-tight text-text-primary m-0 flex-1 min-w-0 truncate;
+  }
+
+  .session-card-title--auto {
+    @apply italic;
+  }
+
+  .session-card-sub {
+    @apply text-xs text-text-secondary flex flex-wrap gap-x-1.5 -mt-1;
+  }
+
+  .session-lang-bar {
+    @apply flex w-full h-2.5 rounded-full overflow-hidden mt-1;
+  }
+
+  .session-lang-seg {
+    @apply h-full min-w-[4px];
+    box-shadow: inset -1px 0 0 0 var(--color-surface-elevated);
+  }
+
+  .session-lang-seg:last-child {
+    box-shadow: none;
+  }
+
+  .session-langs {
+    @apply flex flex-wrap gap-x-3 gap-y-1 text-xs text-text-secondary;
+  }
+
+  .session-lang {
+    @apply inline-flex items-center gap-1.5;
+  }
+
+  .session-card-actions {
+    @apply flex items-center gap-2 pt-2 mt-auto border-t border-border/60;
   }
 
   .budget-chip {

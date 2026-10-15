@@ -2114,8 +2114,9 @@ function renderSidebar() {
   if (fingerprint === lastSidebarFingerprint) return;
   lastSidebarFingerprint = fingerprint;
 
-  document.getElementById("global-stats-count")!.textContent =
-    `${totalTabs} videos · ${formatDurationWords(totalDuration)}`;
+  if (!isSessionsView) {
+    document.getElementById("global-stats-count")!.textContent = `${totalTabs} videos · ${formatDurationWords(totalDuration)}`;
+  }
 
   const liveView = !isReadingListView && selectedSession == null;
   const isAllActive = currentWindowId === 'all' && liveView;
@@ -2271,6 +2272,7 @@ async function refreshSavedSessionsSidebar() {
     savedSessionsCount = sessions.length;
     if (isSessionsView) render();
   }
+  renderSessionsTotals(sessions);
   const query = normalizeText(sessionSidebarSearch.trim());
   const filtered = query
     ? sessions.filter((session) => normalizeText(session.name).includes(query))
@@ -2294,27 +2296,95 @@ async function refreshSavedSessionsSidebar() {
   if (filtered.length === 0) {
     container.innerHTML = query
       ? emptyMessage(`No sessions match "${escapeHtml(query)}"`)
-      : emptyMessage("No saved sessions");
+      : emptyMessage("Nothing saved yet. The save button in the top bar keeps today's tabs as a session.");
     return;
   }
   const isSelected = (sessionId: string) => selectedSession?.id === sessionId;
-  const pinIcon = `<svg class="shrink-0 w-3 h-3 text-accent" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>`;
-  container.innerHTML = filtered
-    .map((savedSession) => {
-      const active = isSelected(savedSession.id);
-      const tabCount = savedSession.tabs?.length ?? 0;
-      const duration = formatTime(sessionTotalSeconds(savedSession.tabs ?? []));
-      const ago = formatSavedAgo(savedSession.savedAt);
-      return `
-    <button type="button" class="sidebar-item session-row sidebar-item-session ${active ? "bg-surface-hover" : ""}" data-sidebar-type="session" data-session-id="${savedSession.id}" data-pinned="${savedSession.pinned ? "1" : "0"}">
-      ${savedSession.pinned ? pinIcon : `<span class="w-3 shrink-0"></span>`}
-      <span class="font-display text-[17px] font-medium text-text-primary truncate flex-1 min-w-0">${escapeHtml(savedSession.name)}</span>
-      <span class="text-xs text-text-muted tabular-nums whitespace-nowrap">${tabCount} videos · ${duration}</span>
-      <span class="text-xs text-text-muted/70 whitespace-nowrap w-16 text-right">${ago}</span>
-    </button>
-  `;
-    })
+  container.innerHTML = filtered.map((savedSession) => sessionCardHtml(savedSession, isSelected(savedSession.id))).join("");
+}
+
+function renderSessionsTotals(sessions: SavedSession[]): void {
+  const stats = document.getElementById("global-stats-count");
+  if (!stats || !isSessionsView) return;
+  const totalVideos = sessions.reduce((sum, session) => sum + (session.tabs?.length ?? 0), 0);
+  const totalSeconds = sessions.reduce((sum, session) => sum + sessionTotalSeconds(session.tabs ?? []), 0);
+  stats.textContent = `${sessions.length} ${sessions.length === 1 ? "session" : "sessions"} · ${totalVideos} videos · ${formatDurationWords(totalSeconds)} kept`;
+}
+
+const AUTO_SESSION_NAME = /^Session \d{1,2}\/\d{1,2}\/\d{2,4}, \d{1,2}:\d{2} (?:AM|PM)\s*(?:\((.+)\))?$/;
+
+/** Auto-named sessions ("Session 10/15/26, 7:27 AM") read as what they hold instead of when they were saved. */
+function sessionDisplayName(session: SavedSession): { title: string; custom: boolean } {
+  const match = session.name.match(AUTO_SESSION_NAME);
+  if (!match) return { title: session.name, custom: true };
+  if (match[1]) return { title: match[1].trim(), custom: true };
+  const languages = Array.from(tally(session.tabs ?? [], sessionTabLanguageLabel, (tab) => tab.seconds ?? 0).entries())
+    .filter(([label]) => label !== UNKNOWN_LANGUAGE && label !== DETECTING_LANGUAGE)
+    .sort((a, b) => b[1].seconds - a[1].seconds)
+    .map(([label]) => label);
+  if (languages.length === 0) return { title: "Mixed desk", custom: false };
+  if (languages.length === 1) return { title: `${languages[0]} desk`, custom: false };
+  return { title: `${languages[0]} & ${languages[1]} desk`, custom: false };
+}
+
+function sessionSavedLabel(savedAt: number): string {
+  const date = new Date(savedAt);
+  const day = date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  const time = date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${day}, ${time}`;
+}
+
+function sessionLanguageBarHtml(tabs: SavedSessionTab[]): string {
+  const languages = tally(tabs, sessionTabLanguageLabel, (tab) => tab.seconds ?? 0);
+  assignLanguageColors(languages);
+  const entries = Array.from(languages.entries())
+    .filter(([, entry]) => entry.seconds > 0)
+    .sort((a, b) => b[1].seconds - a[1].seconds || a[0].localeCompare(b[0]));
+  const total = entries.reduce((sum, [, entry]) => sum + entry.seconds, 0);
+  if (total <= 0) return `<div class="session-langs text-text-muted">No durations yet</div>`;
+  const bar = entries
+    .map(([label, entry]) => `<span class="session-lang-seg" style="flex: ${Math.max(1, Math.round(entry.seconds))} 1 0px; background: ${languageColor(label)}" title="${escapeHtml(label)}: ${entry.count} videos, ${formatDurationWords(entry.seconds)}"></span>`)
     .join("");
+  const shown = entries.slice(0, 3);
+  const more = entries.length - shown.length;
+  const legend = shown
+    .map(([label, entry]) => `<span class="session-lang"><span class="facet-dot" style="background: ${languageColor(label)}"></span>${escapeHtml(label)} <span class="text-text-muted tabular-nums">${formatDurationWords(entry.seconds)}</span></span>`)
+    .join("");
+  return `
+    <div class="session-lang-bar" aria-hidden="true">${bar}</div>
+    <div class="session-langs">${legend}${more > 0 ? `<span class="text-text-muted">+${more} more</span>` : ""}</div>`;
+}
+
+function sessionCardHtml(session: SavedSession, active: boolean): string {
+  const tabs = session.tabs ?? [];
+  const { title, custom } = sessionDisplayName(session);
+  const pileCount = orderedSections(session.sections).length;
+  const pinIcon = `<svg class="shrink-0 w-3.5 h-3.5 text-accent" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>`;
+  return `
+    <article class="session-card sidebar-item${active ? " session-card--active" : ""}" data-sidebar-type="session" data-session-id="${escapeHtml(session.id)}" data-pinned="${session.pinned ? "1" : "0"}" tabindex="0" role="button" aria-label="Open ${escapeHtml(title)} on the desk">
+      <div class="session-card-head">
+        <h3 class="session-card-title${custom ? "" : " session-card-title--auto"}" title="${escapeHtml(session.name)}">${escapeHtml(title)}</h3>
+        ${session.pinned ? pinIcon : ""}
+      </div>
+      <div class="session-card-sub">
+        <span class="tabular-nums">${tabs.length} videos · ${formatDurationWords(sessionTotalSeconds(tabs))}</span>
+        ${pileCount > 0 ? `<span>· ${pileCount} ${pileCount === 1 ? "pile" : "piles"}</span>` : ""}
+        <span class="text-text-muted/80">· saved ${escapeHtml(sessionSavedLabel(session.savedAt))}</span>
+      </div>
+      ${sessionLanguageBarHtml(tabs)}
+      <div class="session-card-actions">
+        <button type="button" class="chip h-8" data-session-action="restore" title="Open these tabs in a window">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+          Open tabs
+        </button>
+        <button type="button" class="chip h-8" data-session-action="add" title="Add today's open tabs to this session">+ Today's tabs</button>
+        <span class="flex-1"></span>
+        <button type="button" class="queue-action" data-session-action="more" title="Rename, pin, duplicate, delete" aria-label="More actions">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+        </button>
+      </div>
+    </article>
+  `;
 }
 
 function sortVideos(videos: VideoData[]): VideoData[] {
@@ -4487,6 +4557,32 @@ function setupListeners() {
       (element) => element.getAttribute("data-section-wrapper") === key
     );
     wrapper?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  document.getElementById("saved-sessions-sidebar")?.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLElement>("[data-session-action]");
+    if (!button) return;
+    const card = button.closest<HTMLElement>("[data-session-id]");
+    const sessionId = card?.dataset.sessionId;
+    if (!card || !sessionId) return;
+    event.stopPropagation();
+    sidebarContextTarget = { type: "session", sessionId };
+    const action = button.dataset.sessionAction;
+    if (action === "restore") {
+      document.getElementById("ctx-open-tabs")?.click();
+    } else if (action === "add") {
+      document.getElementById("ctx-add-to-session")?.click();
+    } else if (action === "more") {
+      const rect = button.getBoundingClientRect();
+      card.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: rect.left, clientY: rect.bottom + 4 }));
+    }
+  });
+  document.getElementById("saved-sessions-sidebar")?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const card = (event.target as HTMLElement).closest<HTMLElement>(".session-card");
+    if (!card || event.target !== card) return;
+    event.preventDefault();
+    card.click();
   });
 
   document.body.addEventListener("click", async (event) => {

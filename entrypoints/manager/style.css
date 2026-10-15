@@ -304,6 +304,14 @@ body {
     background-color: var(--color-border-hover) !important;
   }
 
+  .queue-skeleton {
+    @apply h-[4.75rem] border-b border-border/60 last:border-b-0;
+    background: linear-gradient(90deg, transparent 0 5.25rem, color-mix(in srgb, var(--color-surface-hover) 60%, transparent) 5.25rem 11.25rem, transparent 11.25rem 12rem, color-mix(in srgb, var(--color-surface-hover) 45%, transparent) 12rem 50%, transparent 50%);
+    background-size: 100% 3.5rem;
+    background-repeat: no-repeat;
+    background-position: 0 0.6rem;
+  }
+
   .queue-row--focused {
     box-shadow: inset 3px 0 0 0 var(--color-accent);
     background: color-mix(in srgb, var(--color-surface-hover) 55%, transparent);

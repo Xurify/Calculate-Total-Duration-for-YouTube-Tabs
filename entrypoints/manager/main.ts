@@ -3046,6 +3046,7 @@ function renderMain() {
   renderPlanner();
   applyRowFocus();
   lastTabListFingerprint = fpLive;
+  saveDeskSnapshot();
 }
 
 // ───────────────────────── Facets: the desk organises itself ─────────────────────────
@@ -3348,6 +3349,35 @@ function renderFacetRail(): void {
   if (html !== lastFacetRailHtml) {
     lastFacetRailHtml = html;
     rail.innerHTML = html;
+  }
+}
+
+/** What public/desk-init.js paints on the next load, before any tab is read. Only the plain desk, unfiltered. */
+function saveDeskSnapshot(): void {
+  if (hasAnyFacet() || currentWindowId !== "all" || searchQuery) return;
+  const html = (id: string) => document.getElementById(id)?.innerHTML ?? "";
+  const text = (id: string) => document.getElementById(id)?.textContent ?? "";
+  const visible = (id: string) => !document.getElementById(id)?.classList.contains("hidden");
+  try {
+    localStorage.setItem(
+      "desk-snapshot",
+      JSON.stringify({
+        v: 1,
+        rail: html("facet-rail"),
+        timeBar: visible("time-bar") ? html("time-bar") : "",
+        timeBarRest: visible("time-bar-rest") ? html("time-bar-rest") : "",
+        kicker: text("desk-kicker"),
+        title: text("current-view-title"),
+        timeValue: text("desk-time-value"),
+        timeSuffix: text("desk-time-suffix"),
+        stats: text("current-view-stats"),
+        planSummary: text("plan-summary"),
+        planLabel: text("btn-start-plan-label"),
+        plannerVisible: visible("planner"),
+      })
+    );
+  } catch {
+    // Storage may be full or blocked; the next load just starts empty.
   }
 }
 

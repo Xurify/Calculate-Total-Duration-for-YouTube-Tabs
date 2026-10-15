@@ -1,3 +1,4 @@
+import { LANGUAGE_DETECTION_VERSION } from "./captionLanguage";
 import { getVideoIdFromUrl } from "./format";
 
 export interface VideoData {
@@ -35,6 +36,7 @@ export interface CachedMetadata {
   videoId?: string | null;
   language?: string | null;
   languageName?: string | null;
+  languageVersion?: number;
   audible?: boolean;
   paused?: boolean;
   volume?: number;
@@ -61,7 +63,7 @@ const DEFAULT_PREFS: UserPrefs = {
   thumbnailQuality: "high",
   layoutMode: "list",
   groupingMode: "none",
-  sortOption: "duration-desc",
+  sortOption: "started-first",
 };
 
 const PREFS_STORAGE_KEYS = [
@@ -105,8 +107,20 @@ export async function loadPrefsAndMetadataCache(): Promise<{
   const data = await browser.storage.local.get([...PREFS_STORAGE_KEYS, "metadataCache"]);
   return {
     prefs: parsePrefs(data),
-    metadataCache: (data.metadataCache as Record<string, CachedMetadata>) || {},
+    metadataCache: forgetOutdatedLanguages((data.metadataCache as Record<string, CachedMetadata>) || {}),
   };
+}
+
+/** An undefined language makes the Desk and background sync detect it again. */
+function forgetOutdatedLanguages(cache: Record<string, CachedMetadata>): Record<string, CachedMetadata> {
+  for (const entry of Object.values(cache)) {
+    if (entry.language !== undefined && entry.languageVersion !== LANGUAGE_DETECTION_VERSION) {
+      delete entry.language;
+      delete entry.languageName;
+      delete entry.languageVersion;
+    }
+  }
+  return cache;
 }
 
 /** Merge partial prefs via background-owned store. */
@@ -118,7 +132,7 @@ export async function savePrefs(updates: Partial<UserPrefs>): Promise<void> {
 export async function loadMetadataCache(): Promise<Record<string, CachedMetadata>> {
   if (!browser.storage?.local) return {};
   const data = await browser.storage.local.get("metadataCache");
-  return (data.metadataCache as Record<string, CachedMetadata>) || {};
+  return forgetOutdatedLanguages((data.metadataCache as Record<string, CachedMetadata>) || {});
 }
 
 /** Resolve cache entry by normalized URL or matching videoId. */
@@ -158,6 +172,7 @@ export function toDurableMetadata(metadata: Omit<CachedMetadata, "timestamp">): 
     videoId: metadata.videoId,
     language: metadata.language,
     languageName: metadata.languageName,
+    languageVersion: metadata.language === undefined ? undefined : LANGUAGE_DETECTION_VERSION,
     volume: metadata.volume,
     muted: metadata.muted,
     paused: metadata.paused,

@@ -60,6 +60,9 @@ export interface PlayerResponseForLanguage {
   };
 }
 
+/** Bump when detection changes so languages cached by older logic are detected again. */
+export const LANGUAGE_DETECTION_VERSION = 2;
+
 const NO_LANGUAGE: DetectedLanguage = { language: null, languageName: null };
 
 /** Normalize BCP-47 codes for comparison (`en-US` → `en`). */

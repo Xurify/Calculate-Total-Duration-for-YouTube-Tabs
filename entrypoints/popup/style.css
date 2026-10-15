@@ -23,6 +23,20 @@
   .np-card--playing {
     @apply border-accent/40;
   }
+
+  .popup-lang-bar {
+    @apply flex w-full h-5 rounded-md overflow-hidden gap-px mt-0.5;
+  }
+
+  .popup-lang-seg {
+    @apply relative h-full min-w-[3px] overflow-hidden;
+  }
+
+  .popup-lang-label {
+    @apply absolute inset-y-0 left-1.5 flex items-center text-[10px] font-semibold whitespace-nowrap;
+    color: #fffaf0;
+    text-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
+  }
 }
 
 html,

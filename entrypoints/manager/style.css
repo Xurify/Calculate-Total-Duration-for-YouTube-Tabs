@@ -31,8 +31,24 @@ body {
 }
 
 @layer components {
+  .nav-tabs {
+    @apply flex items-center gap-0.5 h-9 p-0.5 rounded-full border border-border bg-surface-elevated;
+  }
+
   .nav-pill {
-    @apply px-3 py-1.5 rounded-full text-[13px] font-medium text-text-secondary border-0 bg-transparent cursor-pointer transition-colors hover:text-text-primary inline-flex items-center gap-1.5;
+    @apply h-8 px-3 rounded-full text-[13px] font-medium leading-none text-text-secondary border-0 bg-transparent cursor-pointer transition-colors hover:text-text-primary inline-flex items-center gap-1.5 whitespace-nowrap;
+  }
+
+  .nav-badge {
+    @apply inline-flex items-center justify-center min-w-[1.125rem] h-[1.125rem] px-1 rounded-full bg-surface text-[11px] font-semibold leading-none tabular-nums text-text-muted;
+  }
+
+  .brand {
+    @apply flex items-center gap-2.5 h-9 px-1 -ml-1 rounded-[10px] border-0 bg-transparent text-text-primary cursor-pointer transition-colors hover:bg-surface-hover/60 shrink-0;
+  }
+
+  .nav-pill.bg-surface-hover {
+    @apply bg-surface-hover text-text-primary font-semibold;
   }
 
   .icon-btn {
@@ -143,187 +159,268 @@ body {
     @apply font-display text-lg font-medium text-text-primary truncate flex-1 min-w-0 m-0;
   }
 
-  .board {
-    @apply flex items-start gap-5 overflow-x-auto overflow-y-hidden px-8 pt-5 pb-6;
-    scrollbar-width: thin;
+  .facet-group {
+    @apply flex flex-col gap-px;
   }
 
-  .board-col {
-    @apply w-[300px] shrink-0 flex flex-col gap-2.5 max-h-full min-h-[12rem] rounded-xl;
+  .facet-head {
+    /* Starts on the name column: row padding (8) + icon (14) + gap (6). */
+    @apply pl-7 pr-2 pt-1 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted;
   }
 
-  .board-col--flex {
-    @apply w-auto flex-1 min-w-[300px];
+  .facet {
+    @apply w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md border-0 bg-transparent text-left cursor-pointer transition-colors text-[13px] text-text-secondary hover:bg-surface-hover/60 hover:text-text-primary;
   }
 
-  .board-col--new {
-    @apply w-[220px] items-start text-left gap-2 border-0 bg-transparent cursor-pointer pt-0;
+  .facet-icon {
+    @apply w-3.5 h-3.5 flex items-center justify-center shrink-0 text-text-muted;
   }
 
-  .board-col--new .board-col-title {
-    @apply border-b-2 border-transparent pb-2;
+  .facet--active .facet-icon,
+  .facet:hover .facet-icon {
+    @apply text-text-primary;
   }
 
-  .board-col-head {
-    @apply flex items-baseline gap-2 px-0.5 pb-2 border-b-2;
-    border-color: var(--section-rail, var(--color-border));
+  .facet--add .facet-icon {
+    @apply text-accent;
   }
 
-  .board-col-title {
-    @apply font-display text-[22px] font-medium text-text-primary truncate flex-1 min-w-0 m-0 cursor-default;
+  .facet--active {
+    @apply bg-surface-hover text-text-primary;
   }
 
-  .board-col-stat {
-    @apply flex gap-1.5 shrink-0 text-xs text-text-muted tabular-nums;
+  .facet--add {
+    @apply text-accent hover:text-accent-hover;
   }
 
-  .board-col-sub {
-    @apply flex items-center gap-2 px-0.5 text-xs text-text-muted min-h-[1rem];
+  .facet-dot {
+    @apply w-2 h-2 rounded-full shrink-0;
   }
 
-  .board-col-sub > span {
-    @apply flex-1 min-w-0 truncate;
+  .facet-dot--none {
+    @apply bg-transparent;
   }
 
-  .board-start {
-    @apply shrink-0 text-xs font-semibold text-accent hover:text-accent-hover border-0 bg-transparent p-0 cursor-pointer;
+  .facet-name {
+    @apply flex-1 min-w-0 truncate font-medium;
   }
 
-  .board-cards {
-    @apply flex flex-col gap-2.5 min-h-0 overflow-y-auto pr-0.5;
-    scrollbar-width: thin;
-    scrollbar-color: var(--color-border) transparent;
+  .facet--active .facet-name {
+    @apply font-semibold;
   }
 
-  .board-cards--wide {
-    @apply grid gap-3 pb-2 content-start items-start;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    grid-auto-rows: max-content;
+  .facet-count {
+    @apply text-xs text-text-muted tabular-nums whitespace-nowrap;
   }
 
-  .board-card {
-    @apply relative flex flex-col shrink-0 rounded-xl border border-border bg-surface-elevated overflow-hidden transition-[border-color,box-shadow] cursor-grab;
+  .facet.section-drop-target--active {
+    outline: 2px solid color-mix(in srgb, var(--color-accent) 65%, transparent);
+    outline-offset: -2px;
+    background: color-mix(in srgb, var(--color-accent) 8%, transparent);
   }
 
-  .board-card:hover {
+  .time-bar {
+    @apply flex w-full h-9 rounded-lg overflow-hidden;
+  }
+
+  .time-bar-seg {
+    @apply relative h-full border-0 p-0 cursor-pointer overflow-hidden transition-[opacity,filter] min-w-[6px] text-left;
+    /* Hairline between segments, drawn inside so widths still add up to the bar. */
+    box-shadow: inset -1px 0 0 0 var(--color-surface-elevated);
+  }
+
+  .time-bar-seg:last-child {
+    box-shadow: none;
+  }
+
+  .time-bar-seg:hover {
+    filter: brightness(1.08);
+  }
+
+  .time-bar-seg--dim {
+    opacity: 0.35;
+  }
+
+  .time-bar-seg--active .time-bar-label {
+    box-shadow: 0 0 0 1.5px var(--color-accent);
+  }
+
+  .time-bar-label {
+    @apply absolute top-1/2 -translate-y-1/2 left-2 max-w-[calc(100%-1rem)] inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[12px] font-semibold whitespace-nowrap overflow-hidden;
+    color: #fffaf0;
+    background: rgba(26, 23, 20, 0.58);
+  }
+
+  .time-bar-time {
+    @apply font-normal opacity-80 tabular-nums;
+  }
+
+  .queue-row--planned .queue-offset::after {
+    content: "·";
+    @apply ml-1 text-accent;
+  }
+
+  .scope-switch {
+    @apply flex flex-wrap gap-1 p-1 rounded-lg bg-surface border border-border mb-1;
+  }
+
+  .scope-chip {
+    @apply px-2.5 py-1 rounded-md text-xs font-medium text-text-secondary border-0 bg-transparent cursor-pointer transition-colors hover:text-text-primary;
+  }
+
+  .scope-chip--active {
+    @apply bg-surface-elevated text-text-primary font-semibold shadow-sm;
+  }
+
+  .facet--muted .facet-name {
+    @apply italic text-text-muted font-normal;
+  }
+
+  .is-dragging .facet-group--piles .facet[data-section-wrapper] {
+    @apply py-3;
+    outline: 1px dashed color-mix(in srgb, var(--color-accent) 45%, transparent);
+    outline-offset: -2px;
+  }
+
+  .is-dragging .facet-group--piles .facet-head::after {
+    content: " · drop to move";
+    @apply text-accent normal-case tracking-normal;
+  }
+
+  .time-bar-rest {
+    @apply flex flex-wrap items-center gap-x-3 gap-y-1 text-xs;
+  }
+
+  .time-bar-rest-item {
+    @apply inline-flex items-center gap-1.5 border-0 bg-transparent p-0 text-xs text-text-secondary cursor-pointer hover:text-text-primary;
+  }
+
+  .time-bar-seg--detecting {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      transparent 0 6px,
+      color-mix(in srgb, var(--color-surface) 55%, transparent) 6px 12px
+    ) !important;
+    background-color: var(--color-border-hover) !important;
+  }
+
+  /* First paint: either the snapshot (inert until real data lands) or a full skeleton. */
+  .desk-snapshot #tab-list,
+  .desk-snapshot #facet-rail,
+  .desk-snapshot #time-bar,
+  .desk-snapshot #time-bar-rest,
+  .desk-snapshot #planner {
+    pointer-events: none;
+  }
+
+  #time-bar-skeleton {
+    display: none;
+  }
+
+  .desk-loading #time-bar-skeleton {
+    display: flex;
+    background: color-mix(in srgb, var(--color-surface-hover) 70%, transparent);
+  }
+
+  .desk-loading #view-toolbar > * {
+    visibility: hidden;
+  }
+
+  .facet-skeleton {
+    @apply h-[30px] my-px ml-7 rounded-md;
+    background: color-mix(in srgb, var(--color-surface-hover) 70%, transparent);
+    background-clip: content-box;
+    padding: 7px 0;
+  }
+
+  .card-skeleton {
+    @apply rounded-lg overflow-hidden;
+    aspect-ratio: 16 / 13;
+    background:
+      linear-gradient(color-mix(in srgb, var(--color-surface-hover) 80%, transparent), color-mix(in srgb, var(--color-surface-hover) 80%, transparent)) top / 100% 62% no-repeat,
+      linear-gradient(color-mix(in srgb, var(--color-surface-hover) 55%, transparent), color-mix(in srgb, var(--color-surface-hover) 55%, transparent)) 0 72% / 85% 9% no-repeat,
+      linear-gradient(color-mix(in srgb, var(--color-surface-hover) 45%, transparent), color-mix(in srgb, var(--color-surface-hover) 45%, transparent)) 0 90% / 45% 7% no-repeat;
+  }
+
+  .queue-skeleton {
+    @apply h-[4.75rem] border-b border-border/60 last:border-b-0;
+    background: linear-gradient(90deg, transparent 0 5.25rem, color-mix(in srgb, var(--color-surface-hover) 60%, transparent) 5.25rem 11.25rem, transparent 11.25rem 12rem, color-mix(in srgb, var(--color-surface-hover) 45%, transparent) 12rem 50%, transparent 50%);
+    background-size: 100% 3.5rem;
+    background-repeat: no-repeat;
+    background-position: 0 0.6rem;
+  }
+
+  .queue-row--focused {
+    box-shadow: inset 3px 0 0 0 var(--color-accent);
+    background: color-mix(in srgb, var(--color-surface-hover) 55%, transparent);
+  }
+
+  .language-option {
+    @apply flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer text-sm text-text-primary hover:bg-surface-hover/60;
+  }
+
+  .language-option input {
+    @apply accent-accent;
+  }
+
+  .session-grid {
+    @apply grid gap-4;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  }
+
+  .session-card {
+    @apply flex flex-col gap-2.5 p-5 rounded-2xl border border-border bg-surface-elevated cursor-pointer transition-[border-color,box-shadow] text-left;
+    box-shadow: 0 10px 30px -26px var(--shadow-ink);
+  }
+
+  .session-card:hover,
+  .session-card:focus-visible {
     border-color: var(--color-border-hover);
   }
 
-  .board-card--selected {
-    @apply border-accent;
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 15%, transparent);
-  }
-
-  .board-card--playing {
+  .session-card--active {
     @apply border-accent;
   }
 
-  .board-card--planned:not(.board-card--playing) .board-thumb::after {
-    content: "";
-    @apply absolute inset-0 pointer-events-none;
-    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--color-accent) 45%, transparent);
+  .session-card-head {
+    @apply flex items-start gap-2;
   }
 
-  .board-thumb {
-    @apply relative w-full aspect-video shrink-0 bg-surface-hover overflow-hidden;
+  .session-card-title {
+    @apply font-display text-[21px] font-medium leading-tight text-text-primary m-0 flex-1 min-w-0 truncate;
   }
 
-  .board-tag {
-    @apply absolute top-2 left-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-[0.08em] bg-accent text-on-accent;
+  .session-card-title--auto {
+    @apply italic;
   }
 
-  .board-tag--plan {
-    @apply bg-surface-elevated text-accent border border-accent/40;
+  .session-card-sub {
+    @apply text-xs text-text-secondary flex flex-wrap gap-x-1.5 -mt-1;
   }
 
-  .board-duration {
-    @apply absolute bottom-2 right-2 px-1.5 py-0.5 rounded text-[11px] font-medium bg-black/80 text-white tabular-nums;
+  .session-lang-bar {
+    @apply flex w-full h-2.5 rounded-full overflow-hidden mt-1;
   }
 
-  .board-progress {
-    @apply absolute bottom-0 left-0 right-0 h-[3px] bg-black/30 transition-opacity;
+  .session-lang-seg {
+    @apply h-full min-w-[4px];
+    box-shadow: inset -1px 0 0 0 var(--color-surface-elevated);
   }
 
-  .board-body {
-    @apply flex flex-col gap-0.5 px-3 pt-2.5 pb-3 min-w-0;
+  .session-lang-seg:last-child {
+    box-shadow: none;
   }
 
-  .board-title {
-    @apply text-sm font-medium text-text-primary leading-snug line-clamp-2 m-0;
+  .session-langs {
+    @apply flex flex-wrap gap-x-3 gap-y-1 text-xs text-text-secondary;
   }
 
-  .board-meta {
-    @apply text-xs text-text-muted flex items-center gap-1.5 min-w-0 truncate;
+  .session-lang {
+    @apply inline-flex items-center gap-1.5;
   }
 
-  .board-lang {
-    @apply text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0;
-  }
-
-  .board-actions {
-    @apply absolute top-1.5 right-1.5 left-1.5 z-20 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity;
-  }
-
-  .board-card--selected .board-actions {
-    @apply opacity-100;
-  }
-
-  .board-actions .queue-action {
-    @apply bg-black/45 text-white hover:bg-black/70 hover:text-white;
-  }
-
-  .board-card--compact {
-    @apply flex-row items-center gap-2.5 pr-2;
-  }
-
-  .board-card--compact .board-thumb {
-    @apply w-[88px] shrink-0 rounded-md m-2 mr-0;
-  }
-
-  .board-card--compact .board-duration {
-    @apply bottom-1 right-1 px-1 py-px text-[10px];
-  }
-
-  .board-card--compact .board-tag {
-    @apply top-1 left-1 px-1 py-px text-[9px];
-  }
-
-  .board-card--compact .board-body {
-    @apply px-0 py-2;
-  }
-
-  .board-card--compact .board-title {
-    @apply text-[13px] line-clamp-1;
-  }
-
-  .board-card--compact .board-actions {
-    @apply static opacity-100 flex-col items-center gap-0.5 shrink-0 w-auto;
-  }
-
-  .board-card--compact .board-actions > span,
-  .board-card--compact .board-actions .queue-action {
-    @apply hidden;
-  }
-
-  .board-card--compact .board-actions > div {
-    @apply w-4 h-4;
-  }
-
-  .board-empty {
-    @apply mx-0.5 py-7 px-4 rounded-xl border border-dashed border-border text-center text-xs italic text-text-muted;
-  }
-
-  .board-drop {
-    @apply hidden mx-0.5 py-3 rounded-xl border border-dashed border-accent/60 text-center text-xs font-semibold text-accent;
-  }
-
-  .board-col.section-drop-target--active {
-    outline: none;
-    background: transparent;
-  }
-
-  .board-col.section-drop-target--active .board-drop {
-    @apply block;
+  .session-card-actions {
+    @apply flex items-center gap-2 pt-2 mt-auto border-t border-border/60;
   }
 
   .budget-chip {

@@ -184,6 +184,8 @@ function markVideoAsLive(video: VideoData): void {
 function applyCachedDurableMetadataToVideo(video: VideoData, cached: CachedMetadata): void {
   video.title = cached.title || video.title;
   video.channelName = cached.channelName || "";
+  video.language = cached.language;
+  video.languageName = cached.languageName;
   video.isLive = cached.isLive || false;
   if (video.isLive) {
     markVideoAsLive(video);
@@ -987,6 +989,7 @@ function setupApp() {
             <span id="stat-video-count">0 videos</span>
             <span><span id="stat-watched">0 min</span> watched · <span id="stat-watched-pct">0%</span></span>
           </div>
+          <div id="popup-lang-bar" class="popup-lang-bar hidden" role="img" aria-label="Time left by language"></div>
           <span id="stat-total" class="hidden"></span>
         </div>
       </header>
@@ -1372,6 +1375,7 @@ function updateHeaderStats(
   if (overallProgress) {
     overallProgress.style.width = `${percent}%`;
   }
+  renderPopupLanguageBar();
 
   const btnTab = document.getElementById("sort-order");
   const btnLen = document.getElementById("sort-duration");
@@ -1386,6 +1390,52 @@ function updateHeaderStats(
     const badgeElement = document.getElementById("popup-reading-count");
     if (badgeElement) badgeElement.textContent = String(items.length);
   });
+}
+
+const POPUP_LANGUAGE_PALETTE = [
+  "var(--section-coral)",
+  "var(--section-amber)",
+  "var(--section-lime)",
+  "var(--section-teal)",
+  "var(--section-sky)",
+  "var(--section-indigo)",
+  "var(--section-violet)",
+  "var(--section-rose)",
+];
+
+function popupLanguageLabel(video: VideoData): string | null {
+  const stripped = video.languageName ? video.languageName.split("(")[0].trim() : "";
+  if (stripped) return stripped;
+  if (video.language) return video.language.toUpperCase();
+  return null;
+}
+
+/** One proportional strip of the time left, split by language, so the popup matches the desk. */
+function renderPopupLanguageBar(): void {
+  const bar = document.getElementById("popup-lang-bar");
+  if (!bar) return;
+  const totals = new Map<string, number>();
+  for (const video of videoData) {
+    if (video.excluded || video.isLive || video.seconds <= 0) continue;
+    const label = popupLanguageLabel(video) ?? "Unknown";
+    totals.set(label, (totals.get(label) ?? 0) + Math.max(0, video.seconds - video.currentTime));
+  }
+  const entries = Array.from(totals.entries()).filter(([, seconds]) => seconds > 0).sort((a, b) => b[1] - a[1]);
+  const total = entries.reduce((sum, [, seconds]) => sum + seconds, 0);
+  if (entries.length < 2 || total <= 0) {
+    bar.classList.add("hidden");
+    bar.innerHTML = "";
+    return;
+  }
+  bar.classList.remove("hidden");
+  bar.innerHTML = entries
+    .map(([label, seconds], index) => {
+      const share = (seconds / total) * 100;
+      const color = label === "Unknown" ? "var(--color-border-hover)" : POPUP_LANGUAGE_PALETTE[index % POPUP_LANGUAGE_PALETTE.length];
+      const text = share >= 18 ? `<span class="popup-lang-label">${label}</span>` : "";
+      return `<span class="popup-lang-seg" style="width: ${share.toFixed(1)}%; background: ${color}" title="${label}: ${formatDurationWords(seconds)}">${text}</span>`;
+    })
+    .join("");
 }
 
 function updateVideoListItem(item: HTMLElement, video: VideoData): void {
@@ -1423,6 +1473,13 @@ function updateVideoListItem(item: HTMLElement, video: VideoData): void {
   const titleEl = item.querySelector(".meta-title") as HTMLElement;
   titleEl.innerText = video.title;
   titleEl.title = video.title;
+
+  const langEl = item.querySelector(".meta-lang") as HTMLElement | null;
+  if (langEl) {
+    const label = popupLanguageLabel(video);
+    langEl.textContent = label ?? "";
+    langEl.classList.toggle("hidden", label == null);
+  }
 
   const progressTrack = item.querySelector(".meta-progress-track") as HTMLElement | null;
   if (progressTrack) progressTrack.classList.toggle("hidden", isNowPlaying);
@@ -1524,7 +1581,10 @@ function updateVideoList(videos: VideoData[]) {
               <span class="meta-now-badge hidden self-start text-[9px] font-semibold uppercase tracking-[0.1em] text-accent leading-none">Playing</span>
               <div class="meta-title text-[13px] font-medium text-text-primary truncate leading-snug"></div>
               <div class="meta-channel text-[11px] text-text-muted truncate"></div>
-              <div class="meta-time text-[10px] text-text-muted tabular-nums"></div>
+              <div class="flex items-center gap-1.5 min-w-0">
+                <span class="meta-lang hidden text-[9px] font-bold uppercase tracking-wide px-1.5 py-px rounded-full bg-accent/10 text-accent shrink-0"></span>
+                <div class="meta-time text-[10px] text-text-muted tabular-nums truncate"></div>
+              </div>
             </div>
             <span class="meta-offset text-[11px] text-text-muted tabular-nums shrink-0 whitespace-nowrap"></span>
             <div class="meta-controls absolute right-1 top-1/2 -translate-y-1/2 flex gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity bg-surface-elevated rounded-lg p-0.5 shadow-lg ring-1 ring-border"></div>

@@ -67,7 +67,7 @@ body {
 
   .queue-row {
     @apply grid border-b border-border/60 last:border-b-0 transition-colors;
-    grid-template-columns: 4.5rem minmax(0, 1fr);
+    grid-template-columns: 5.25rem minmax(0, 1fr);
   }
 
   .queue-row:hover {
@@ -79,7 +79,7 @@ body {
   }
 
   .queue-offset {
-    @apply font-display text-[15px] text-text-muted pl-[18px] pt-3.5 tabular-nums select-none;
+    @apply font-display text-[15px] text-text-muted pl-[18px] self-center tabular-nums select-none;
   }
 
   .queue-row--now .queue-offset {
@@ -98,16 +98,12 @@ body {
     @apply relative shrink-0 w-24 aspect-video rounded-md overflow-hidden bg-surface-hover;
   }
 
-  .queue-row--now .queue-thumb {
-    @apply w-[8.5rem];
-  }
-
   .queue-title {
     @apply text-[15px] font-medium text-text-primary leading-snug truncate;
   }
 
   .queue-row--now .queue-title {
-    @apply font-display text-xl font-medium whitespace-normal line-clamp-2;
+    @apply font-display text-lg font-medium;
   }
 
   .queue-meta {
@@ -127,7 +123,16 @@ body {
   }
 
   .queue-section-head {
-    @apply flex items-center gap-2.5 px-4 pt-4 pb-2 select-none;
+    @apply grid items-center pt-4 pb-2 pr-3 select-none;
+    grid-template-columns: 5.25rem minmax(0, 1fr);
+  }
+
+  .queue-section-head .section-collapse-toggle {
+    @apply justify-self-start ml-[12px];
+  }
+
+  .queue-section-line {
+    @apply flex items-center gap-2.5 min-w-0;
   }
 
   .queue-section-dot {
@@ -371,7 +376,7 @@ body {
 }
 
 .section-empty-hint {
-  margin: 0 1rem 1rem 3rem;
+  margin: 0 1rem 1rem 5.25rem;
   padding: 0.25rem 0 0.75rem;
   font-size: 13px;
   font-style: italic;

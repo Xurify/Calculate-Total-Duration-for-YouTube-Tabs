@@ -1588,14 +1588,16 @@ function renderSectionHeaderHtml(options: {
   const dataSectionAttr = options.sectionId ? ` data-section-id="${escapeHtml(options.sectionId)}"` : "";
   return `
     <div class="queue-section-head" style="--section-rail: ${rail}">
-      <button type="button" class="section-collapse-toggle p-1 -ml-1 rounded-md hover:bg-surface-hover/60 text-text-muted transition-transform duration-200 ${isCollapsed ? "-rotate-90" : ""}" data-section-collapse="${escapeHtml(options.collapseKey)}" aria-expanded="${isCollapsed ? "false" : "true"}" aria-label="Collapse section">
+      <button type="button" class="section-collapse-toggle p-1 rounded-md hover:bg-surface-hover/60 text-text-muted transition-transform duration-200 ${isCollapsed ? "-rotate-90" : ""}" data-section-collapse="${escapeHtml(options.collapseKey)}" aria-expanded="${isCollapsed ? "false" : "true"}" aria-label="Collapse section">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
       </button>
-      <span class="queue-section-dot" style="background: ${rail}" aria-hidden="true"></span>
-      <h3 class="queue-section-title cursor-default section-title-target"${dataSectionAttr}>${escapeHtml(options.title)}</h3>
-      ${options.countLabel.startsWith("0 ")
-        ? `<span class="session-stat-pill italic">empty</span>`
-        : `<span class="session-stat-pill">${escapeHtml(options.countLabel)}</span><span class="session-stat-pill">${escapeHtml(options.durationLabel)}</span>`}
+      <div class="queue-section-line">
+        <span class="queue-section-dot" style="background: ${rail}" aria-hidden="true"></span>
+        <h3 class="queue-section-title cursor-default section-title-target"${dataSectionAttr}>${escapeHtml(options.title)}</h3>
+        ${options.countLabel.startsWith("0 ")
+          ? `<span class="session-stat-pill italic">empty</span>`
+          : `<span class="session-stat-pill">${escapeHtml(options.countLabel)}</span><span class="session-stat-pill">${escapeHtml(options.durationLabel)}</span>`}
+      </div>
     </div>
   `;
 }

@@ -190,11 +190,17 @@ body {
   }
 
   .time-bar {
-    @apply flex w-full h-9 rounded-lg overflow-hidden gap-px;
+    @apply flex w-full h-9 rounded-lg overflow-hidden;
   }
 
   .time-bar-seg {
-    @apply relative h-full border-0 p-0 cursor-pointer overflow-hidden transition-[opacity,filter] min-w-[3px] text-left;
+    @apply relative h-full border-0 p-0 cursor-pointer overflow-hidden transition-[opacity,filter] min-w-[6px] text-left;
+    /* Hairline between segments, drawn inside so widths still add up to the bar. */
+    box-shadow: inset -1px 0 0 0 var(--color-surface-elevated);
+  }
+
+  .time-bar-seg:last-child {
+    box-shadow: none;
   }
 
   .time-bar-seg:hover {
@@ -205,8 +211,8 @@ body {
     opacity: 0.35;
   }
 
-  .time-bar-seg--active {
-    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--color-text-primary) 70%, transparent);
+  .time-bar-seg--active .time-bar-label {
+    box-shadow: 0 0 0 1.5px var(--color-accent);
   }
 
   .time-bar-label {

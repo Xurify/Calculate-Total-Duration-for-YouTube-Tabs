@@ -23,7 +23,7 @@ import {
 } from "../utils/captionLanguage";
 import { resolveVideoLanguage } from "../utils/channelLanguage";
 import { getVideoIdFromUrl, isYoutubeWatchOrShortsUrl } from "../utils/format";
-import { queryReadingList, removeReadingListItem } from "../utils/readingList";
+import { queryReadingList, removeReadingListItemById } from "../utils/readingList";
 import {
   buildApprovalRequest,
   ensureReadGrant,
@@ -201,22 +201,32 @@ export default defineBackground(() => {
       return true;
     }
 
-    if (message.action === "shelve-and-clear-reading-item" && message.url) {
-      const url = message.url as string;
-      void requestApproval(
-        buildApprovalRequest(sender, {
-          title: "Remove a Reading List item?",
-          summary: "This page wants to remove this item from Chrome's Reading List.",
-          items: [url],
-          confirmLabel: "Remove item",
-          destructive: true,
-        })
-      )
-        .then((approved) => {
+    if (message.action === "shelve-and-clear-reading-item") {
+      const readingItemId = typeof message.id === "string" ? message.id.trim() : "";
+      const notOnListMessage =
+        "That id is not on the reading list. Call get_reading_list_catalog and pass an id from it.";
+      void queryReadingList(false)
+        .then(async (items) => {
+          const item = items.find((candidate) => candidate.id === readingItemId);
+          if (!item) {
+            sendResponse({ success: false, errorMessage: notOnListMessage });
+            return;
+          }
+          const approved = await requestApproval(
+            buildApprovalRequest(sender, {
+              title: "Remove a Reading List item?",
+              summary: "This page wants to remove this item from Chrome's Reading List.",
+              items: [item.title ? `${item.title} — ${item.url}` : item.url],
+              confirmLabel: "Remove item",
+              destructive: true,
+            })
+          );
           if (!approved) throw new Error("The user declined to remove this Reading List item.");
-          return removeReadingListItem(url);
+          const removed = await removeReadingListItemById(readingItemId);
+          sendResponse(
+            removed ? { success: true, id: readingItemId } : { success: false, errorMessage: notOnListMessage }
+          );
         })
-        .then((success) => sendResponse({ success, removedUrl: url }))
         .catch((error) =>
           sendResponse({
             success: false,

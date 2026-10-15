@@ -1,6 +1,64 @@
 import { LANGUAGE_DETECTION_VERSION } from "./captionLanguage";
 import { getVideoIdFromUrl } from "./format";
 
+export interface VideoChapter {
+  title: string;
+  startSeconds: number;
+  durationSeconds?: number;
+}
+
+export interface StagedClozeCard {
+  id: string;
+  sentence: string;
+  targetWord: string;
+  translation: string;
+  hint?: string;
+  videoId: string | null;
+  videoTitle: string;
+  timestampSeconds: number;
+  createdAt: number;
+}
+
+export interface CachedMandalaPillar {
+  index: number;
+  title: string;
+  actionCount: number;
+}
+
+export interface CachedMandalaShelfLink {
+  id: string;
+  pillarIndex: number;
+  title: string;
+  url: string;
+  kind?: string;
+}
+
+export interface CachedMandalaSummary {
+  activeChartId: string;
+  activeChartTitle: string;
+  pillars: CachedMandalaPillar[];
+  shelfLinks: CachedMandalaShelfLink[];
+  lastUpdatedAt: number;
+}
+
+export interface PendingMandalaTimeLog {
+  id: string;
+  actionId?: string;
+  minutes: number;
+  linkId?: string;
+  videoTitle: string;
+  timestamp: number;
+}
+
+export interface PendingMandalaShelfLink {
+  id: string;
+  pillarIndex: number;
+  url: string;
+  title: string;
+  kind?: string;
+  timestamp: number;
+}
+
 export interface VideoData {
   id: number;
   title: string;
@@ -21,6 +79,7 @@ export interface VideoData {
   paused?: boolean;
   volume?: number;
   muted?: boolean;
+  chapters?: VideoChapter[];
 }
 
 export const MAX_CACHE_AGE_MS = 48 * 60 * 60 * 1000;
@@ -41,6 +100,7 @@ export interface CachedMetadata {
   paused?: boolean;
   volume?: number;
   muted?: boolean;
+  chapters?: VideoChapter[];
 }
 
 export function isCacheEntryUsable(cached: CachedMetadata | undefined): cached is CachedMetadata {
@@ -176,6 +236,7 @@ export function toDurableMetadata(metadata: Omit<CachedMetadata, "timestamp">): 
     volume: metadata.volume,
     muted: metadata.muted,
     paused: metadata.paused,
+    chapters: metadata.chapters,
   };
 }
 
@@ -297,6 +358,7 @@ export interface SavedSessionTab {
   sectionId?: string | null;
   language?: string;
   languageName?: string;
+  chapters?: VideoChapter[];
 }
 
 /** Max saved sessions before oldest unpinned entries are trimmed. */
@@ -335,42 +397,43 @@ function mergeSessionTabsInline(existing: SavedSessionTab[], incoming: SavedSess
 }
 
 function mergeSessionSectionsInline(existing: SessionSection[], incoming: SessionSection[]): SessionSection[] {
-  const byId = new Map(existing.map((s) => [s.id, s]));
+  const byId = new Map(existing.map((section) => [section.id, section]));
   const merged = [...existing];
-  for (const sec of incoming) {
-    if (!byId.has(sec.id)) {
-      merged.push(sec);
-      byId.set(sec.id, sec);
+  for (const section of incoming) {
+    if (!byId.has(section.id)) {
+      merged.push(section);
+      byId.set(section.id, section);
     }
   }
-  return merged.sort((a, b) => a.order - b.order);
+  return merged.sort((firstSection, secondSection) => firstSection.order - secondSection.order);
 }
 
-function mapSavedTab(t: SavedSessionTab): SavedSessionTab {
-  const url = normalizeYoutubeUrl(t?.url ?? "");
+function mapSavedTab(savedTab: SavedSessionTab): SavedSessionTab {
+  const url = normalizeYoutubeUrl(savedTab?.url ?? "");
   return {
     url,
-    title: t?.title,
-    channelName: t?.channelName,
-    seconds: t?.seconds,
-    sectionId: typeof t?.sectionId === "string" && t.sectionId.length > 0 ? t.sectionId : undefined,
-    language: t?.language,
-    languageName: t?.languageName,
+    title: savedTab?.title,
+    channelName: savedTab?.channelName,
+    seconds: savedTab?.seconds,
+    sectionId: typeof savedTab?.sectionId === "string" && savedTab.sectionId.length > 0 ? savedTab.sectionId : undefined,
+    language: savedTab?.language,
+    languageName: savedTab?.languageName,
+    chapters: savedTab?.chapters,
   };
 }
 
 function trimSessionsForRetention(sessions: SavedSession[]): SavedSession[] {
   if (sessions.length <= MAX_SAVED_SESSIONS) return sessions;
-  const pinned = sessions.filter((s) => s.pinned);
+  const pinned = sessions.filter((session) => session.pinned);
   const unpinned = sessions
-    .filter((s) => !s.pinned)
-    .sort((a, b) => b.savedAt - a.savedAt);
+    .filter((session) => !session.pinned)
+    .sort((firstSession, secondSession) => secondSession.savedAt - firstSession.savedAt);
   const slots = Math.max(0, MAX_SAVED_SESSIONS - pinned.length);
   const keptUnpinned = unpinned.slice(0, slots);
-  return [...pinned, ...keptUnpinned].sort((a, b) => {
-    if (a.pinned && !b.pinned) return -1;
-    if (!a.pinned && b.pinned) return 1;
-    return b.savedAt - a.savedAt;
+  return [...pinned, ...keptUnpinned].sort((firstSession, secondSession) => {
+    if (firstSession.pinned && !secondSession.pinned) return -1;
+    if (!firstSession.pinned && secondSession.pinned) return 1;
+    return secondSession.savedAt - firstSession.savedAt;
   });
 }
 
@@ -381,16 +444,16 @@ async function persistSavedSessions(sessions: SavedSession[]): Promise<void> {
     try {
       await browser.storage.local.set({ [SAVED_SESSIONS_KEY]: trimmed });
       return;
-    } catch (err) {
-      const unpinned = trimmed.filter((s) => !s.pinned);
+    } catch (error) {
+      const unpinned = trimmed.filter((session) => !session.pinned);
       if (unpinned.length === 0) {
         throw new Error(
-          err instanceof Error ? err.message : "Storage quota exceeded. Unpin or delete sessions to free space."
+          error instanceof Error ? error.message : "Storage quota exceeded. Unpin or delete sessions to free space."
         );
       }
       const removeCount = Math.max(1, Math.ceil(unpinned.length * 0.2));
-      const removeIds = new Set(unpinned.slice(-removeCount).map((s) => s.id));
-      trimmed = trimmed.filter((s) => !removeIds.has(s.id));
+      const removeIds = new Set(unpinned.slice(-removeCount).map((session) => session.id));
+      trimmed = trimmed.filter((session) => !removeIds.has(session.id));
     }
   }
   throw new Error("Could not save sessions: storage quota exceeded.");
@@ -448,25 +511,27 @@ export async function getSavedSessions(): Promise<SavedSession[]> {
   const data = await browser.storage.local.get(SAVED_SESSIONS_KEY);
   const raw = data[SAVED_SESSIONS_KEY] as SavedSession[] | undefined;
   if (!Array.isArray(raw)) return [];
-  const normalized = raw.map((s) => {
-    const sectionsRaw = Array.isArray(s.sections) ? s.sections : [];
-    const sections = sectionsRaw.map((sec, i) => normalizeSessionSection(sec, i)).sort((a, b) => a.order - b.order);
-    const tabs = Array.isArray(s.tabs)
-      ? s.tabs.map((t) => mapSavedTab(t))
+  const normalized = raw.map((rawSession) => {
+    const sectionsRaw = Array.isArray(rawSession.sections) ? rawSession.sections : [];
+    const sections = sectionsRaw
+      .map((section, sectionIndex) => normalizeSessionSection(section, sectionIndex))
+      .sort((firstSection, secondSection) => firstSection.order - secondSection.order);
+    const tabs = Array.isArray(rawSession.tabs)
+      ? rawSession.tabs.map((savedTab) => mapSavedTab(savedTab))
       : [];
     return {
-      id: s.id,
-      name: s.name ?? "Untitled",
-      savedAt: typeof s.savedAt === "number" ? s.savedAt : Date.now(),
+      id: rawSession.id,
+      name: rawSession.name ?? "Untitled",
+      savedAt: typeof rawSession.savedAt === "number" ? rawSession.savedAt : Date.now(),
       tabs,
-      pinned: Boolean(s.pinned),
+      pinned: Boolean(rawSession.pinned),
       sections,
     };
   });
-  return normalized.sort((a, b) => {
-    if (a.pinned && !b.pinned) return -1;
-    if (!a.pinned && b.pinned) return 1;
-    return b.savedAt - a.savedAt;
+  return normalized.sort((firstSession, secondSession) => {
+    if (firstSession.pinned && !secondSession.pinned) return -1;
+    if (!firstSession.pinned && secondSession.pinned) return 1;
+    return secondSession.savedAt - firstSession.savedAt;
   });
 }
 
@@ -478,7 +543,9 @@ export async function saveSession(
   const tabList = Array.isArray(tabs) ? tabs : [];
   const sectionList = Array.isArray(sections) ? sections : [];
   const sessions = await getSavedSessions();
-  const normalizedSections = sectionList.map((sec, i) => normalizeSessionSection(sec, i)).sort((a, b) => a.order - b.order);
+  const normalizedSections = sectionList
+    .map((section, sectionIndex) => normalizeSessionSection(section, sectionIndex))
+    .sort((firstSection, secondSection) => firstSection.order - secondSection.order);
   const session: SavedSession = {
     id: crypto.randomUUID(),
     name,
@@ -499,13 +566,15 @@ export async function replaceSession(
   sections?: SessionSection[]
 ): Promise<SavedSession | null> {
   const sessions = await getSavedSessions();
-  const session = sessions.find((s) => s.id === id);
+  const session = sessions.find((candidateSession) => candidateSession.id === id);
   if (!session) return null;
   const sectionList = Array.isArray(sections) ? sections : [];
   session.name = name.trim() || session.name;
   session.savedAt = Date.now();
   session.tabs = tabs.map(mapSavedTab);
-  session.sections = sectionList.map((sec, i) => normalizeSessionSection(sec, i)).sort((a, b) => a.order - b.order);
+  session.sections = sectionList
+    .map((section, sectionIndex) => normalizeSessionSection(section, sectionIndex))
+    .sort((firstSection, secondSection) => firstSection.order - secondSection.order);
   await persistSavedSessions(sessions);
   return session;
 }
@@ -516,7 +585,7 @@ export async function mergeIntoSession(
   sections?: SessionSection[]
 ): Promise<SavedSession | null> {
   const sessions = await getSavedSessions();
-  const session = sessions.find((s) => s.id === id);
+  const session = sessions.find((candidateSession) => candidateSession.id === id);
   if (!session) return null;
   session.tabs = mergeSessionTabsInline(session.tabs ?? [], tabs);
   if (sections && sections.length > 0) {
@@ -529,7 +598,7 @@ export async function mergeIntoSession(
 
 export async function duplicateSession(id: string, newName?: string): Promise<SavedSession | null> {
   const sessions = await getSavedSessions();
-  const source = sessions.find((s) => s.id === id);
+  const source = sessions.find((candidateSession) => candidateSession.id === id);
   if (!source) return null;
   const copy: SavedSession = {
     id: crypto.randomUUID(),
@@ -537,7 +606,7 @@ export async function duplicateSession(id: string, newName?: string): Promise<Sa
     savedAt: Date.now(),
     tabs: (source.tabs ?? []).map(mapSavedTab),
     pinned: false,
-    sections: (source.sections ?? []).map((sec, i) => normalizeSessionSection(sec, i)),
+    sections: (source.sections ?? []).map((section, sectionIndex) => normalizeSessionSection(section, sectionIndex)),
   };
   sessions.unshift(copy);
   await persistSavedSessions(sessions);
@@ -568,16 +637,16 @@ export async function importSessionsJson(
   if (!Array.isArray(root.sessions)) throw new Error("Export must contain a sessions array.");
 
   const imported: SavedSession[] = root.sessions.map((raw) => {
-    const s = raw as SavedSession;
-    const sectionsRaw = Array.isArray(s.sections) ? s.sections : [];
-    const sections = sectionsRaw.map((sec, i) => normalizeSessionSection(sec, i));
-    const tabs = Array.isArray(s.tabs) ? s.tabs.map(mapSavedTab) : [];
+    const importedSession = raw as SavedSession;
+    const sectionsRaw = Array.isArray(importedSession.sections) ? importedSession.sections : [];
+    const sections = sectionsRaw.map((section, sectionIndex) => normalizeSessionSection(section, sectionIndex));
+    const tabs = Array.isArray(importedSession.tabs) ? importedSession.tabs.map(mapSavedTab) : [];
     return {
       id: crypto.randomUUID(),
-      name: typeof s.name === "string" && s.name.trim() ? s.name.trim() : "Imported session",
-      savedAt: typeof s.savedAt === "number" ? s.savedAt : Date.now(),
+      name: typeof importedSession.name === "string" && importedSession.name.trim() ? importedSession.name.trim() : "Imported session",
+      savedAt: typeof importedSession.savedAt === "number" ? importedSession.savedAt : Date.now(),
       tabs,
-      pinned: Boolean(s.pinned),
+      pinned: Boolean(importedSession.pinned),
       sections,
     };
   });
@@ -595,7 +664,7 @@ export async function importSessionsJson(
 export async function setSessionPinned(id: string, pinned: boolean): Promise<void> {
   if (!browser.storage?.local) return;
   const sessions = await getSavedSessions();
-  const session = sessions.find((s) => s.id === id);
+  const session = sessions.find((candidateSession) => candidateSession.id === id);
   if (!session) return;
   session.pinned = pinned;
   await persistSavedSessions(sessions);
@@ -606,7 +675,7 @@ export async function renameSession(id: string, name: string): Promise<void> {
   const trimmed = name.trim();
   const nextName = trimmed.length > 0 ? trimmed : "Untitled";
   const sessions = await getSavedSessions();
-  const session = sessions.find((s) => s.id === id);
+  const session = sessions.find((candidateSession) => candidateSession.id === id);
   if (!session) return;
   session.name = nextName;
   session.savedAt = Date.now();
@@ -615,14 +684,14 @@ export async function renameSession(id: string, name: string): Promise<void> {
 
 export async function deleteSession(id: string): Promise<void> {
   if (!browser.storage?.local) return;
-  const sessions = (await getSavedSessions()).filter((s) => s.id !== id);
+  const sessions = (await getSavedSessions()).filter((candidateSession) => candidateSession.id !== id);
   await persistSavedSessions(sessions);
 }
 
 export async function updateSessionTabs(sessionId: string, tabs: SavedSessionTab[]): Promise<void> {
   if (!browser.storage?.local) return;
   const sessions = await getSavedSessions();
-  const session = sessions.find((s) => s.id === sessionId);
+  const session = sessions.find((candidateSession) => candidateSession.id === sessionId);
   if (!session) return;
   session.tabs = tabs.map(mapSavedTab);
   session.savedAt = Date.now();
@@ -632,13 +701,15 @@ export async function updateSessionTabs(sessionId: string, tabs: SavedSessionTab
 export async function updateSessionSections(sessionId: string, sections: SessionSection[]): Promise<void> {
   if (!browser.storage?.local) return;
   const sessions = await getSavedSessions();
-  const session = sessions.find((s) => s.id === sessionId);
+  const session = sessions.find((candidateSession) => candidateSession.id === sessionId);
   if (!session) return;
-  session.sections = sections.map((sec, i) => normalizeSessionSection(sec, i)).sort((a, b) => a.order - b.order);
-  const validIds = new Set(session.sections.map((sec) => sec.id));
+  session.sections = sections
+    .map((section, sectionIndex) => normalizeSessionSection(section, sectionIndex))
+    .sort((firstSection, secondSection) => firstSection.order - secondSection.order);
+  const validIds = new Set(session.sections.map((section) => section.id));
   session.tabs = session.tabs.map((tab) => {
-    const sid = tab.sectionId;
-    if (typeof sid === "string" && validIds.has(sid)) return tab;
+    const sectionIdentifier = tab.sectionId;
+    if (typeof sectionIdentifier === "string" && validIds.has(sectionIdentifier)) return tab;
     return mapSavedTab({
       url: tab.url,
       title: tab.title,
@@ -651,3 +722,41 @@ export async function updateSessionSections(sessionId: string, sections: Session
   session.savedAt = Date.now();
   await persistSavedSessions(sessions);
 }
+
+export const STAGED_CLOZE_CARDS_KEY = "stagedClozeCards";
+export const CACHED_MANDALA_SUMMARY_KEY = "cachedMandalaSummary";
+export const PENDING_MANDALA_LOGS_KEY = "pendingMandalaTimeLogs";
+export const PENDING_MANDALA_SHELF_LINKS_KEY = "pendingMandalaShelfLinks";
+
+export async function loadStagedClozeCards(): Promise<StagedClozeCard[]> {
+  if (!browser.storage?.local) return [];
+  const storedData = await browser.storage.local.get(STAGED_CLOZE_CARDS_KEY);
+  const cards = storedData[STAGED_CLOZE_CARDS_KEY] as StagedClozeCard[] | undefined;
+  return Array.isArray(cards) ? cards : [];
+}
+
+export async function saveStagedClozeCard(card: StagedClozeCard): Promise<void> {
+  if (!browser.storage?.local) return;
+  const existingCards = await loadStagedClozeCards();
+  const updatedCards = [card, ...existingCards.filter((existingCard) => existingCard.id !== card.id)].slice(0, 500);
+  await browser.storage.local.set({ [STAGED_CLOZE_CARDS_KEY]: updatedCards });
+}
+
+export async function clearStagedClozeCards(): Promise<void> {
+  if (!browser.storage?.local) return;
+  await browser.storage.local.set({ [STAGED_CLOZE_CARDS_KEY]: [] });
+}
+
+export async function loadCachedMandalaSummary(): Promise<CachedMandalaSummary | null> {
+  if (!browser.storage?.local) return null;
+  const storedData = await browser.storage.local.get(CACHED_MANDALA_SUMMARY_KEY);
+  const summary = storedData[CACHED_MANDALA_SUMMARY_KEY] as CachedMandalaSummary | undefined;
+  if (!summary || typeof summary !== "object") return null;
+  return summary;
+}
+
+export async function saveCachedMandalaSummary(summary: CachedMandalaSummary): Promise<void> {
+  if (!browser.storage?.local) return;
+  await browser.storage.local.set({ [CACHED_MANDALA_SUMMARY_KEY]: summary });
+}
+

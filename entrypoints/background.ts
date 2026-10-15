@@ -2,9 +2,18 @@ import {
   loadPrefsAndMetadataCache,
   normalizeYoutubeUrl,
   saveSession,
+  loadCachedMandalaSummary,
+  saveStagedClozeCard,
+  loadStagedClozeCards,
+  clearStagedClozeCards,
+  PENDING_MANDALA_LOGS_KEY,
+  PENDING_MANDALA_SHELF_LINKS_KEY,
   type CachedMetadata,
   type SavedSessionTab,
   type UserPrefs,
+  type StagedClozeCard,
+  type PendingMandalaTimeLog,
+  type PendingMandalaShelfLink,
 } from "../utils/storage";
 import { applyMetadataBatchToCache, normalizeMetadataBatch } from "../utils/store";
 import {
@@ -171,8 +180,261 @@ export default defineBackground(() => {
         );
       return true;
     }
+
+    if (message.action === "check-mandala-status") {
+      void handleCheckMandalaStatus(message.url as string)
+        .then((result) => sendResponse(result))
+        .catch((error) =>
+          sendResponse({
+            connected: false,
+            cached: false,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        );
+      return true;
+    }
+
+    if (message.action === "save-mandala-shelf-link") {
+      void handleSaveMandalaShelfLink(
+        message.payload as {
+          pillarIndex: number;
+          url: string;
+          title: string;
+          kind?: string;
+        }
+      )
+        .then((result) => sendResponse(result))
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        );
+      return true;
+    }
+
+    if (message.action === "log-mandala-time") {
+      void handleLogMandalaTime(
+        message.payload as {
+          actionId?: string;
+          minutes: number;
+          linkId?: string;
+          videoTitle: string;
+        }
+      )
+        .then((result) => sendResponse(result))
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        );
+      return true;
+    }
+
+    if (message.action === "stage-cloze-card") {
+      const card = message.card as StagedClozeCard;
+      void saveStagedClozeCard(card)
+        .then(() => {
+          void broadcastToClozemasterTabs({ action: "new-cloze-card", card });
+          sendResponse({ success: true, cardId: card.id });
+        })
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        );
+      return true;
+    }
+
+    if (message.action === "get-staged-cloze-cards") {
+      void loadStagedClozeCards()
+        .then((cards) => sendResponse({ success: true, cards }))
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        );
+      return true;
+    }
+
+    if (message.action === "clear-staged-cloze-cards") {
+      void clearStagedClozeCards()
+        .then(() => sendResponse({ success: true }))
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        );
+      return true;
+    }
   });
 });
+
+async function findMandalaTab() {
+  const allTabs = await browser.tabs.query({});
+  return allTabs.find((candidateTab) => {
+    if (!candidateTab.url) return false;
+    try {
+      const urlObject = new URL(candidateTab.url);
+      return (
+        urlObject.hostname === "mandalamethod.vercel.app" ||
+        urlObject.hostname === "localhost" ||
+        urlObject.hostname === "127.0.0.1"
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
+async function broadcastToClozemasterTabs(messagePayload: unknown): Promise<void> {
+  const allTabs = await browser.tabs.query({});
+  const clozemasterTabs = allTabs.filter((candidateTab) => {
+    if (!candidateTab.url || candidateTab.id === undefined) return false;
+    try {
+      const urlObject = new URL(candidateTab.url);
+      return urlObject.hostname.includes("clozemaster.com");
+    } catch {
+      return false;
+    }
+  });
+  for (const clozemasterTab of clozemasterTabs) {
+    if (clozemasterTab.id !== undefined) {
+      void browser.tabs.sendMessage(clozemasterTab.id, messagePayload).catch(() => {});
+    }
+  }
+}
+
+async function handleCheckMandalaStatus(rawUrl: string) {
+  const mandalaTab = await findMandalaTab();
+  if (mandalaTab && mandalaTab.id !== undefined) {
+    try {
+      const tabResponse = await browser.tabs.sendMessage(mandalaTab.id, {
+        action: "query-mandala-shelves",
+        url: rawUrl,
+      });
+      if (tabResponse && typeof tabResponse === "object") {
+        return tabResponse;
+      }
+    } catch {
+      // Tab may still be initializing; fall back to cache
+    }
+  }
+
+  const cachedSummary = await loadCachedMandalaSummary();
+  if (!cachedSummary) {
+    return {
+      connected: false,
+      cached: false,
+      pillars: [],
+    };
+  }
+
+  const normalizedTargetUrl = normalizeYoutubeUrl(rawUrl);
+  const targetVideoId = getVideoIdFromUrl(normalizedTargetUrl);
+
+  const matchedLink = cachedSummary.shelfLinks.find((link) => {
+    const linkNormalized = normalizeYoutubeUrl(link.url);
+    if (linkNormalized === normalizedTargetUrl) return true;
+    const linkVideoId = getVideoIdFromUrl(linkNormalized);
+    return Boolean(targetVideoId && linkVideoId && targetVideoId === linkVideoId);
+  });
+
+  const matchedPillar = matchedLink
+    ? cachedSummary.pillars.find((pillar) => pillar.index === matchedLink.pillarIndex)
+    : undefined;
+
+  return {
+    connected: false,
+    cached: true,
+    activeChartTitle: cachedSummary.activeChartTitle,
+    matchedShelfItem: matchedLink
+      ? {
+          pillarIndex: matchedLink.pillarIndex,
+          pillarTitle: matchedPillar?.title || `Pillar ${matchedLink.pillarIndex + 1}`,
+          linkId: matchedLink.id,
+          toolTitle: matchedLink.title,
+        }
+      : undefined,
+    pillars: cachedSummary.pillars,
+  };
+}
+
+async function handleSaveMandalaShelfLink(payload: {
+  pillarIndex: number;
+  url: string;
+  title: string;
+  kind?: string;
+}) {
+  const mandalaTab = await findMandalaTab();
+  if (mandalaTab && mandalaTab.id !== undefined) {
+    try {
+      const tabResponse = await browser.tabs.sendMessage(mandalaTab.id, {
+        action: "add-shelf-link",
+        ...payload,
+      });
+      return { success: true, queued: false, tabResponse };
+    } catch {
+      // Tab communication failed; fall through to queued write
+    }
+  }
+
+  const pendingData = await browser.storage.local.get(PENDING_MANDALA_SHELF_LINKS_KEY);
+  const existingQueue = (pendingData[PENDING_MANDALA_SHELF_LINKS_KEY] as PendingMandalaShelfLink[]) || [];
+  const newEntry: PendingMandalaShelfLink = {
+    id: crypto.randomUUID(),
+    pillarIndex: payload.pillarIndex,
+    url: payload.url,
+    title: payload.title,
+    kind: payload.kind,
+    timestamp: Date.now(),
+  };
+  await browser.storage.local.set({
+    [PENDING_MANDALA_SHELF_LINKS_KEY]: [...existingQueue, newEntry],
+  });
+
+  return { success: true, queued: true };
+}
+
+async function handleLogMandalaTime(payload: {
+  actionId?: string;
+  minutes: number;
+  linkId?: string;
+  videoTitle: string;
+}) {
+  const mandalaTab = await findMandalaTab();
+  if (mandalaTab && mandalaTab.id !== undefined) {
+    try {
+      const tabResponse = await browser.tabs.sendMessage(mandalaTab.id, {
+        action: "log-time",
+        ...payload,
+      });
+      return { success: true, queued: false, tabResponse };
+    } catch {
+      // Tab communication failed; fall through to queued write
+    }
+  }
+
+  const pendingData = await browser.storage.local.get(PENDING_MANDALA_LOGS_KEY);
+  const existingQueue = (pendingData[PENDING_MANDALA_LOGS_KEY] as PendingMandalaTimeLog[]) || [];
+  const newEntry: PendingMandalaTimeLog = {
+    id: crypto.randomUUID(),
+    actionId: payload.actionId,
+    minutes: payload.minutes,
+    linkId: payload.linkId,
+    videoTitle: payload.videoTitle,
+    timestamp: Date.now(),
+  };
+  await browser.storage.local.set({
+    [PENDING_MANDALA_LOGS_KEY]: [...existingQueue, newEntry],
+  });
+
+  return { success: true, queued: true, minutes: payload.minutes };
+}
 
 interface StageQueuePayload {
   orderedTabIds: number[];

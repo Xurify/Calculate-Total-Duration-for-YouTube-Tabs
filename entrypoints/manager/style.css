@@ -139,35 +139,36 @@ body {
   }
 
   .pile {
-    @apply w-full text-left flex flex-col gap-1.5 p-4 rounded-[14px] border border-border bg-surface-elevated cursor-pointer transition-[border-color,background-color] hover:border-border-hover;
-    border-left: 4px solid var(--section-rail, var(--color-border));
+    @apply w-full text-left flex flex-col gap-0.5 px-1 py-2.5 rounded-md border-0 bg-transparent cursor-pointer transition-colors hover:bg-surface-hover/50;
   }
 
-  .pile--unsorted,
   .pile--empty {
-    @apply border-dashed bg-transparent;
-    border-left-width: 1px;
+    @apply cursor-pointer;
+  }
+
+  .pile-line {
+    @apply flex items-baseline gap-2.5 min-w-0;
+  }
+
+  .pile-dot {
+    @apply w-2 h-2 rounded-full shrink-0 self-center;
+    background: var(--section-rail, var(--color-border));
   }
 
   .pile-title {
-    @apply font-display text-[19px] font-medium text-text-primary truncate flex-1 min-w-0;
+    @apply font-display text-[19px] font-medium text-text-primary truncate min-w-0;
+  }
+
+  .pile-leader {
+    @apply flex-1 min-w-4 border-b border-dotted border-border translate-y-[-5px];
   }
 
   .pile-stat {
     @apply text-xs text-text-muted tabular-nums whitespace-nowrap;
   }
 
-  .pile-bar {
-    @apply h-1 rounded-full bg-surface-hover overflow-hidden;
-  }
-
-  .pile-bar > div {
-    @apply h-full;
-    background: var(--section-rail, var(--color-accent));
-  }
-
   .pile-next {
-    @apply text-xs text-text-muted truncate;
+    @apply text-xs text-text-muted truncate pl-[1.1rem];
   }
 
   .window-chip {
@@ -370,12 +371,10 @@ body {
 }
 
 .section-empty-hint {
-  margin: 0 1rem 1rem;
-  padding: 1.25rem;
-  border-radius: 0.75rem;
-  border: 1px dashed color-mix(in srgb, var(--color-border) 85%, var(--section-rail, var(--color-accent)));
-  text-align: center;
-  font-size: 12px;
+  margin: 0 1rem 1rem 3rem;
+  padding: 0.25rem 0 0.75rem;
+  font-size: 13px;
+  font-style: italic;
   color: var(--color-text-muted);
 }
 

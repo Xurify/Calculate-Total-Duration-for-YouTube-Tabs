@@ -1577,8 +1577,9 @@ function renderSectionHeaderHtml(options: {
       </button>
       <span class="queue-section-dot" style="background: ${rail}" aria-hidden="true"></span>
       <h3 class="queue-section-title cursor-default section-title-target"${dataSectionAttr}>${escapeHtml(options.title)}</h3>
-      <span class="session-stat-pill">${escapeHtml(options.countLabel)}</span>
-      <span class="session-stat-pill">${escapeHtml(options.durationLabel)}</span>
+      ${options.countLabel.startsWith("0 ")
+        ? `<span class="session-stat-pill italic">empty</span>`
+        : `<span class="session-stat-pill">${escapeHtml(options.countLabel)}</span><span class="session-stat-pill">${escapeHtml(options.durationLabel)}</span>`}
     </div>
   `;
 }
@@ -1586,9 +1587,7 @@ function renderSectionHeaderHtml(options: {
 function renderSectionEmptyPlaceholder(colorIndex: number): string {
   const rail = sectionRailVar(colorIndex);
   return `
-    <div class="section-empty-hint" style="--section-rail: ${rail}">
-      Nothing here yet. Drag a video onto this pile, or right-click it and choose <span class="text-text-secondary font-medium">Move to pile</span>.
-    </div>
+    <div class="section-empty-hint" style="--section-rail: ${rail}">Empty. Drag a video here, or right-click one and choose Move to pile.</div>
   `;
 }
 
@@ -2143,22 +2142,18 @@ function pileCardHtml(options: {
 }): string {
   const rail = sectionRailVar(options.colorIndex);
   const unsorted = options.colorIndex === "unsorted";
-  const detailParts: string[] = [];
-  if (options.watchedPercent != null) detailParts.push(`${Math.round(options.watchedPercent)}% watched`);
-  if (options.next) detailParts.push(`next: ${options.next}`);
-  const detail = detailParts.length > 0 ? detailParts.join(" · ") : unsorted ? "Drag rows here or onto a pile" : "Empty pile";
-  const bar =
-    options.watchedPercent != null && !unsorted
-      ? `<div class="pile-bar"><div style="width: ${Math.min(100, Math.max(0, options.watchedPercent))}%"></div></div>`
-      : "";
+  const watched = options.watchedPercent != null && options.watchedPercent >= 1 ? ` · ${Math.round(options.watchedPercent)}%` : "";
+  const stat = options.count === 0 ? "empty" : `${options.count} · ${formatDurationWords(options.seconds)}${watched}`;
+  const next = options.next && options.count > 1 ? `<div class="pile-next">next: ${escapeHtml(options.next)}</div>` : "";
   return `
     <button type="button" class="pile${unsorted ? " pile--unsorted" : ""}" data-section-wrapper="${escapeHtml(options.key)}" data-pile-jump="${escapeHtml(options.key)}" style="--section-rail: ${rail}">
-      <div class="flex items-baseline gap-2">
+      <div class="pile-line">
+        <span class="pile-dot" aria-hidden="true"></span>
         <span class="pile-title${unsorted ? " text-text-secondary" : ""}">${escapeHtml(options.title)}</span>
-        <span class="pile-stat">${options.count} · ${formatDurationWords(options.seconds)}</span>
+        <span class="pile-leader" aria-hidden="true"></span>
+        <span class="pile-stat">${stat}</span>
       </div>
-      ${bar}
-      <div class="pile-next">${escapeHtml(detail)}</div>
+      ${next}
     </button>
   `;
 }
@@ -2232,8 +2227,7 @@ function renderPilesColumn(): void {
   if (cards.length === 0) {
     cards.push(`
       <button type="button" class="pile pile--empty" data-pile-create="1">
-        <span class="pile-title text-text-secondary">No piles yet</span>
-        <span class="pile-next">Sort videos into piles like “Grammar” or “Podcasts”. Click to create the first one.</span>
+        <span class="text-sm text-text-muted italic">No piles yet. Make one for grammar, podcasts, or a course.</span>
       </button>
     `);
   }

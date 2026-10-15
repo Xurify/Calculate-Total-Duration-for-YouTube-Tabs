@@ -18,6 +18,7 @@ web-ext.config.ts
 .vscode/*
 .cursor/*
 .claude/*
+pr2_body.md
 !.vscode/extensions.json
 .idea
 .DS_Store

@@ -927,7 +927,7 @@ function formatViewStats(count: number, durationSec: number, summary: DuplicateS
   if (showDuplicatesOnly && summary.duplicateVideoCount > 0) {
     return `${count} duplicate tab${count === 1 ? "" : "s"} · ${formatTime(durationSec)} total duration`;
   }
-  return `${count} video${count === 1 ? "" : "s"}${dupSuffix} · ${formatTime(durationSec)} total duration`;
+  return `${count} video${count === 1 ? "" : "s"}${dupSuffix} · ${formatDurationWords(durationSec)} in total`;
 }
 
 function refreshScopeVideoIdCountsFromVideos(videos: VideoData[]): void {
@@ -938,9 +938,10 @@ function refreshScopeVideoIdCountsFromSessionTabs(tabs: SavedSessionTab[]): void
   scopeVideoIdCounts = countItemsByVideoId(tabs, (tab) => tab.url ?? "");
 }
 
-function filterVideosForDisplay(videos: VideoData[]): VideoData[] {
+function filterVideosForDisplay(videos: VideoData[], options: { ignoreFacet?: boolean } = {}): VideoData[] {
   refreshScopeVideoIdCountsFromVideos(videos);
   let result = videos;
+  if (!options.ignoreFacet && facetKind !== "all") result = result.filter((video) => facetMatchesVideo(video));
   if (searchQuery) {
     const searchQueryNormalized = normalizeText(searchQuery);
     result = result.filter(
@@ -955,9 +956,13 @@ function filterVideosForDisplay(videos: VideoData[]): VideoData[] {
   return result;
 }
 
-function filterSessionTabsForDisplay(tabs: SavedSessionTab[]): SavedSessionTab[] {
+function filterSessionTabsForDisplay(tabs: SavedSessionTab[], options: { ignoreFacet?: boolean } = {}): SavedSessionTab[] {
   refreshScopeVideoIdCountsFromSessionTabs(tabs);
   let result = tabs;
+  if (!options.ignoreFacet && facetKind !== "all") {
+    const sections = orderedSections(selectedSession?.sections);
+    result = result.filter((tab) => facetMatchesSessionTab(tab, sections));
+  }
   if (searchQuery) {
     const searchNormalized = normalizeText(searchQuery);
     result = result.filter(
@@ -2827,14 +2832,11 @@ function renderMain() {
   const viewToolbar = document.getElementById("view-toolbar");
 
   syncTopNavState();
+  renderFacetRail();
+  renderTimeBar();
+  renderFacetCrumb();
   renderPlanner();
-
-  const boardView = !isReadingListView && !isSessionsView;
-  container.classList.toggle("board", boardView);
   container.classList.toggle("hidden", isSessionsView);
-  container.classList.toggle("overflow-y-auto", !boardView);
-  container.classList.toggle("px-8", !boardView);
-  container.classList.toggle("py-6", !boardView);
 
   const sessionsPanel = document.getElementById("sessions-panel");
   sessionsPanel?.classList.toggle("hidden", !isSessionsView);
@@ -2914,10 +2916,14 @@ function renderMain() {
     const fpSession = tabListStructureFingerprint();
     if (fpSession === lastTabListFingerprint) return;
 
-    const secs = orderedSections(session.sections);
     tabListContainerInnerHtmlUpdated = true;
-    setTabListInnerHTML(container, buildSessionBoardHtml(tabsToShow, secs));
-    thumbnailCacheBackfill(container);
+    if (tabsToShow.length === 0) {
+      setTabListInnerHTML(container, emptyListMessage());
+    } else {
+      const sorted = sortSessionTabsForDisplay(tabsToShow);
+      setTabListInnerHTML(container, layoutMode === "grid" ? renderSessionGrid(sorted) : `<div class="queue-card">${renderSessionList(sorted)}</div>`);
+      thumbnailCacheBackfill(container);
+    }
     lastTabListFingerprint = fpSession;
     return;
   }
@@ -2954,273 +2960,312 @@ function renderMain() {
     return;
   }
 
-  const secs = orderedSections(liveTabSectionsState.sections);
   tabListContainerInnerHtmlUpdated = true;
-  setTabListInnerHTML(container, buildLiveBoardHtml(videosToShow, secs, liveTabSectionsState.assignments));
-  thumbnailCacheBackfill(container);
+  if (videosToShow.length === 0) {
+    setTabListInnerHTML(container, emptyListMessage());
+  } else {
+    const sortedVideos = sortVideosForDisplay(videosToShow);
+    setTabListInnerHTML(container, layoutMode === "grid" ? renderVideoGrid(sortedVideos) : `<div class="queue-card">${renderVideoList(sortedVideos)}</div>`);
+    thumbnailCacheBackfill(container);
+  }
+  renderPlanner();
   lastTabListFingerprint = fpLive;
 }
 
-// ───────────────────────── Board (piles as columns) ─────────────────────────
+// ───────────────────────── Facets: the desk organises itself ─────────────────────────
 
-const BOARD_FULL_CARDS = 3;
+type FacetKind = "all" | "continue" | "language" | "channel" | "pile";
+let facetKind: FacetKind = "all";
+let facetValue = "";
 
-function boardStatHtml(count: number, seconds: number): string {
-  if (count === 0) return `<span class="session-stat-pill italic">empty</span><span class="session-stat-pill hidden"></span>`;
-  return `<span class="session-stat-pill">${count} ${count === 1 ? "video" : "videos"}</span><span class="session-stat-pill">${formatDurationWords(seconds)}</span>`;
+const UNKNOWN_LANGUAGE = "Unknown language";
+const FACET_PALETTE = SECTION_RAIL_VARS;
+/** Language → palette slot, assigned by share of time so the biggest language keeps its colour as filters change. */
+const languageColorSlots = new Map<string, number>();
+
+function languageLabelOf(languageName: string | null | undefined, code: string | null | undefined): string {
+  const stripped = languageName ? languageName.split("(")[0].trim() : "";
+  if (stripped) return stripped;
+  if (code) return code.toUpperCase();
+  return UNKNOWN_LANGUAGE;
 }
 
-function boardColumnHeadHtml(options: {
-  key: string;
-  title: string;
-  colorIndex: number | "unsorted";
-  count: number;
-  seconds: number;
-  watchedPercent: number | null;
-  sectionId?: string;
-  canStart: boolean;
-}): string {
-  const rail = options.colorIndex === "unsorted" ? "var(--color-text-primary)" : sectionRailVar(options.colorIndex);
-  const dataSectionAttr = options.sectionId ? ` data-section-id="${escapeHtml(options.sectionId)}"` : "";
-  const subtitle =
-    options.colorIndex === "unsorted"
-      ? `<span>New tabs land here. Drag them onto a pile.</span>`
-      : options.watchedPercent != null && options.watchedPercent >= 1
-        ? `<span>${Math.round(options.watchedPercent)}% watched</span>`
-        : `<span></span>`;
-  const start =
-    options.canStart && options.count > 0
-      ? `<button type="button" class="board-start" data-start-pile="${escapeHtml(options.key)}">▶ Start this pile</button>`
-      : "";
-  return `
-    <div class="board-col-head" style="--section-rail: ${rail}">
-      <h2 class="board-col-title section-title-target${options.colorIndex === "unsorted" ? " text-text-secondary" : ""}"${dataSectionAttr}>${escapeHtml(options.title)}</h2>
-      <span class="board-col-stat">${boardStatHtml(options.count, options.seconds)}</span>
-    </div>
-    <div class="board-col-sub">${subtitle}${start}</div>
-  `;
+function videoLanguageLabel(video: VideoData): string {
+  return languageLabelOf(video.languageName, video.language);
 }
 
-function boardThumbHtml(videoId: string | null, draggableOff: boolean): string {
-  const thumbQuality = thumbnailQuality === "high" ? "hqdefault.jpg" : "mqdefault.jpg";
-  const { src, cacheKey } = getThumbnailSrc(videoId, thumbQuality);
-  if (!src) return "";
-  const keyAttr = cacheKey ? ` data-thumbnail-key="${cacheKey}"` : "";
-  return `<img src="${src}"${keyAttr} class="manager-card-thumb absolute inset-0 w-full h-full object-cover" loading="lazy" decoding="async" alt=""${draggableOff ? ` draggable="false"` : ""} />`;
+function sessionTabLanguageLabel(tab: SavedSessionTab): string {
+  return languageLabelOf(tab.languageName, tab.language);
 }
 
-function boardVideoCardHtml(video: VideoData, compact: boolean): string {
-  const isSelected = selectedTabIds.has(video.id);
-  const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
-  const playing = Boolean(video.audible) && !video.suspended;
-  const planned = plannedTabIds.has(video.id);
-  const remaining = Math.max(0, video.seconds - video.currentTime);
-  const languageLabel = video.languageName ? video.languageName.split("(")[0].trim() : "";
-  const meta = video.isLive
-    ? `<span class="text-youtube font-semibold">Live</span> · not counted`
-    : video.suspended
-      ? `<span class="text-warning">Suspended tab</span>`
-      : video.currentTime > 0
-        ? `${formatDurationWords(remaining)} left`
-        : formatDurationWords(video.seconds);
-  const classes = [
-    "board-card group tab-card-dnd",
-    compact ? "board-card--compact" : "",
-    playing ? "board-card--playing" : "",
-    planned ? "board-card--planned" : "",
-    isSelected ? "board-card--selected" : "",
-    video.suspended ? "opacity-75" : "",
-  ].filter(Boolean).join(" ");
-  const badges = `
-    ${playing ? `<span class="board-tag">Playing</span>` : planned ? `<span class="board-tag board-tag--plan">In plan</span>` : ""}
-    <span class="manager-card-duration board-duration">${video.isLive ? "LIVE" : formatCompact(video.seconds)}</span>
-    <span class="manager-card-progress-wrap board-progress" style="opacity: ${!video.isLive && video.seconds > 0 && watchedPercent > 0 ? 1 : 0}"><span class="manager-card-progress block h-full bg-accent" style="width: ${watchedPercent}%"></span></span>`;
-  return `
-    <div class="${classes}" data-id="${video.id}" draggable="true">
-      <div class="board-thumb video-click-target cursor-pointer">
-        ${boardThumbHtml(getVideoIdFromUrl(video.url), true)}
-        ${badges}
-      </div>
-      <div class="board-body video-click-target cursor-pointer">
-        <h3 class="manager-card-title board-title" title="${escapeHtml(video.title)}">${escapeHtml(video.title)}</h3>
-        <div class="board-meta">
-          <span class="manager-card-channel truncate">${escapeHtml(video.channelName)}</span>
-          <span class="opacity-60">·</span>
-          <span class="whitespace-nowrap"><span class="manager-card-time-current hidden"></span><span class="manager-card-time-total hidden"></span>${meta}</span>
-          <span class="manager-card-language board-lang ${languageLabel ? "" : "hidden"}">${escapeHtml(languageLabel)}</span>
-          ${windowBadgeHtml(video)}
-          ${duplicateBadgeHtml(video.url)}
-        </div>
-      </div>
-      <div class="board-actions">
-        ${queueCheckboxHtml("selection-toggle", isSelected)}
-        <span class="flex-1"></span>
-        <button type="button" draggable="false" class="queue-action jump-btn" title="Go to tab" aria-label="Go to tab">${QUEUE_ICON_OPEN}</button>
-        <button type="button" draggable="false" class="queue-action queue-action--danger close-btn" title="Close tab" aria-label="Close tab">${QUEUE_ICON_CLOSE}</button>
-      </div>
-    </div>
-  `;
+function languageColor(label: string): string {
+  if (label === UNKNOWN_LANGUAGE) return "var(--color-border-hover)";
+  const slot = languageColorSlots.get(label);
+  return slot == null ? "var(--color-border-hover)" : FACET_PALETTE[slot % FACET_PALETTE.length];
 }
 
-function boardSessionCardHtml(tab: SavedSessionTab, compact: boolean): string {
-  const isSelected = selectedSessionTabUrls.has(tab.url);
-  const title = tab.title ?? "Untitled";
-  const sec = tab.seconds ?? 0;
-  const languageLabel = tab.languageName ? tab.languageName.split("(")[0].trim() : "";
-  const classes = ["board-card group tab-card-dnd", compact ? "board-card--compact" : "", isSelected ? "board-card--selected" : ""].filter(Boolean).join(" ");
-  return `
-    <div class="${classes}" data-session-tab-url="${escapeHtml(tab.url)}" draggable="true">
-      <div class="board-thumb session-video-click-target cursor-pointer">
-        ${boardThumbHtml(getVideoIdFromUrl(tab.url), true)}
-        <span class="board-duration">${formatCompact(sec)}</span>
-      </div>
-      <div class="board-body session-video-click-target cursor-pointer">
-        <h3 class="board-title" title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
-        <div class="board-meta">
-          <span class="truncate">${escapeHtml(tab.channelName ?? "")}</span>
-          ${languageLabel ? `<span class="board-lang">${escapeHtml(languageLabel)}</span>` : ""}
-          ${duplicateBadgeHtml(tab.url)}
-        </div>
-      </div>
-      <div class="board-actions">
-        ${queueCheckboxHtml("session-selection-toggle", isSelected)}
-        <span class="flex-1"></span>
-        <button type="button" draggable="false" class="queue-action session-open-new-tab" title="Open in new tab" aria-label="Open in new tab">${QUEUE_ICON_OPEN}</button>
-        <button type="button" draggable="false" class="queue-action queue-action--danger session-remove-btn" title="Remove from session" aria-label="Remove from session">${QUEUE_ICON_TRASH}</button>
-      </div>
-    </div>
-  `;
+function setFacet(kind: FacetKind, value = ""): void {
+  facetKind = kind;
+  facetValue = value;
+  render();
 }
 
-function boardColumnHtml(key: string, head: string, cards: string[], options: { wide: boolean; emptyHint: string }): string {
-  const body = cards.length > 0
-    ? `<div class="board-cards${options.wide ? " board-cards--wide" : ""}">${cards.join("")}</div>`
-    : `<div class="board-empty">${options.emptyHint}</div>`;
-  return `
-    <section class="board-col${options.wide ? " board-col--flex" : ""}" data-section-wrapper="${escapeHtml(key)}">
-      ${head}
-      ${body}
-      <div class="board-drop" aria-hidden="true">Drop here</div>
-    </section>
-  `;
+function facetMatchesVideo(video: VideoData): boolean {
+  switch (facetKind) {
+    case "all": return true;
+    case "continue": return !video.isLive && video.currentTime > 0 && video.seconds > 0 && video.currentTime < video.seconds;
+    case "language": return videoLanguageLabel(video) === facetValue;
+    case "channel": return (video.channelName || "Unknown channel") === facetValue;
+    case "pile": return (liveSectionIdForVideo(video) ?? "__unsorted") === facetValue;
+  }
 }
 
-function boardNewPileHtml(): string {
-  return `
-    <button type="button" class="board-col board-col--new" data-pile-create="1">
-      <span class="board-col-title text-accent">+ New pile</span>
-      <span class="text-xs text-text-muted">Grammar, podcasts, one course…</span>
-    </button>
-  `;
+function facetMatchesSessionTab(tab: SavedSessionTab, sections: SessionSection[]): boolean {
+  switch (facetKind) {
+    case "all": return true;
+    case "continue": return false;
+    case "language": return sessionTabLanguageLabel(tab) === facetValue;
+    case "channel": return (tab.channelName || "Unknown channel") === facetValue;
+    case "pile": return (sessionTabSectionId(tab, sections) ?? "__unsorted") === facetValue;
+  }
 }
 
-function buildLiveBoardHtml(videosToShow: VideoData[], sections: SessionSection[], assignments: Record<string, string>): string {
-  const { blocks, unsorted } = partitionLiveVideosBySection(videosToShow, sections, assignments);
-  // The inbox grows into a grid whenever it holds more than a handful; piles stay narrow columns.
-  const wide = sections.length === 0 || unsorted.length > 4;
-  const columns: string[] = [];
+function remainingOf(video: VideoData): number {
+  if (video.isLive) return 0;
+  return Math.max(0, video.seconds - video.currentTime);
+}
 
-  const unsortedSorted = sortVideosForDisplay(unsorted);
-  columns.push(boardColumnHtml(
-    "__unsorted",
-    boardColumnHeadHtml({
-      key: "__unsorted",
-      title: sections.length === 0 ? "On the desk" : "Inbox",
-      colorIndex: "unsorted",
-      count: unsorted.length,
-      seconds: unsorted.reduce((sum, video) => sum + video.seconds, 0),
-      watchedPercent: null,
-      canStart: false,
-    }),
-    unsortedSorted.map((video, index) => boardVideoCardHtml(video, !wide && index >= BOARD_FULL_CARDS)),
-    { wide, emptyHint: sections.length === 0 ? "The desk is clear. Open YouTube videos and they will show up here." : "Nothing new. Every open video is in a pile." }
-  ));
+interface FacetRow { kind: FacetKind; value: string; label: string; count: number; seconds: number; color?: string; sectionId?: string }
 
-  for (const { section, videos } of blocks) {
-    const total = videos.reduce((sum, video) => sum + video.seconds, 0);
-    const watched = videos.reduce((sum, video) => sum + (video.isLive ? 0 : Math.min(video.currentTime, video.seconds)), 0);
-    const sorted = sortVideosForDisplay(videos);
-    columns.push(boardColumnHtml(
-      section.id,
-      boardColumnHeadHtml({
-        key: section.id,
-        title: section.name,
-        colorIndex: section.colorIndex ?? 0,
-        count: videos.length,
-        seconds: total,
-        watchedPercent: total > 0 ? (watched / total) * 100 : 0,
-        sectionId: section.id,
-        canStart: true,
-      }),
-      sorted.map((video, index) => boardVideoCardHtml(video, index >= BOARD_FULL_CARDS)),
-      { wide: false, emptyHint: "Drop a video here" }
-    ));
+function tally<T>(items: T[], keyOf: (item: T) => string, secondsOf: (item: T) => number): Map<string, { count: number; seconds: number }> {
+  const map = new Map<string, { count: number; seconds: number }>();
+  for (const item of items) {
+    const key = keyOf(item);
+    const entry = map.get(key) ?? { count: 0, seconds: 0 };
+    entry.count += 1;
+    entry.seconds += secondsOf(item);
+    map.set(key, entry);
+  }
+  return map;
+}
+
+function assignLanguageColors(languages: Map<string, { count: number; seconds: number }>): void {
+  const ordered = Array.from(languages.entries())
+    .filter(([label]) => label !== UNKNOWN_LANGUAGE)
+    .sort((a, b) => b[1].seconds - a[1].seconds || a[0].localeCompare(b[0]));
+  const stillPresent = new Set(ordered.map(([label]) => label));
+  for (const label of Array.from(languageColorSlots.keys())) {
+    if (!stillPresent.has(label)) languageColorSlots.delete(label);
+  }
+  const taken = new Set(languageColorSlots.values());
+  for (const [label] of ordered) {
+    if (languageColorSlots.has(label)) continue;
+    let slot = 0;
+    while (taken.has(slot)) slot += 1;
+    languageColorSlots.set(label, slot);
+    taken.add(slot);
+  }
+}
+
+function facetRowsForLive(videos: VideoData[]): { languages: FacetRow[]; channels: FacetRow[]; piles: FacetRow[]; continueRow: FacetRow } {
+  const languages = tally(videos, videoLanguageLabel, remainingOf);
+  assignLanguageColors(languages);
+  const languageRows: FacetRow[] = Array.from(languages.entries())
+    .sort((a, b) => b[1].seconds - a[1].seconds || a[0].localeCompare(b[0]))
+    .map(([label, entry]) => ({ kind: "language", value: label, label, count: entry.count, seconds: entry.seconds, color: languageColor(label) }));
+
+  const channels = tally(videos, (video) => video.channelName || "Unknown channel", remainingOf);
+  const channelRows: FacetRow[] = Array.from(channels.entries())
+    .sort((a, b) => b[1].count - a[1].count || b[1].seconds - a[1].seconds || a[0].localeCompare(b[0]))
+    .slice(0, 8)
+    .map(([label, entry]) => ({ kind: "channel", value: label, label, count: entry.count, seconds: entry.seconds }));
+
+  const sections = orderedSections(liveTabSectionsState.sections);
+  const { blocks, unsorted } = partitionLiveVideosBySection(videos, sections, liveTabSectionsState.assignments);
+  const pileRows: FacetRow[] = blocks.map(({ section, videos: sectionVideos }) => ({
+    kind: "pile",
+    value: section.id,
+    label: section.name,
+    count: sectionVideos.length,
+    seconds: sectionVideos.reduce((sum, video) => sum + remainingOf(video), 0),
+    color: sectionRailVar(section.colorIndex ?? 0),
+    sectionId: section.id,
+  }));
+  if (sections.length > 0) {
+    pileRows.push({ kind: "pile", value: "__unsorted", label: "Not in a pile", count: unsorted.length, seconds: unsorted.reduce((sum, video) => sum + remainingOf(video), 0) });
   }
 
-  columns.push(boardNewPileHtml());
-  return columns.join("");
+  const started = videos.filter((video) => !video.isLive && video.currentTime > 0 && video.seconds > 0 && video.currentTime < video.seconds);
+  const continueRow: FacetRow = { kind: "continue", value: "", label: "Continue watching", count: started.length, seconds: started.reduce((sum, video) => sum + remainingOf(video), 0) };
+  return { languages: languageRows, channels: channelRows, piles: pileRows, continueRow };
 }
 
-function buildSessionBoardHtml(tabsToShow: SavedSessionTab[], sections: SessionSection[]): string {
-  const { blocks, unsorted } = partitionSessionTabsBySection(tabsToShow, sections);
-  const wide = sections.length === 0 || unsorted.length > 4;
-  const columns: string[] = [];
-
-  const unsortedSorted = sortSessionTabsForDisplay(unsorted);
-  columns.push(boardColumnHtml(
-    "__unsorted",
-    boardColumnHeadHtml({
-      key: "__unsorted",
-      title: sections.length === 0 ? "In this session" : "Inbox",
-      colorIndex: "unsorted",
-      count: unsorted.length,
-      seconds: unsorted.reduce((sum, tab) => sum + (tab.seconds ?? 0), 0),
-      watchedPercent: null,
-      canStart: false,
-    }),
-    unsortedSorted.map((tab, index) => boardSessionCardHtml(tab, !wide && index >= BOARD_FULL_CARDS)),
-    { wide, emptyHint: sections.length === 0 ? "This session is empty." : "Every video in this session is in a pile." }
-  ));
-
-  for (const { section, tabs } of blocks) {
-    const sorted = sortSessionTabsForDisplay(tabs);
-    columns.push(boardColumnHtml(
-      section.id,
-      boardColumnHeadHtml({
-        key: section.id,
-        title: section.name,
-        colorIndex: section.colorIndex ?? 0,
-        count: tabs.length,
-        seconds: tabs.reduce((sum, tab) => sum + (tab.seconds ?? 0), 0),
-        watchedPercent: null,
-        sectionId: section.id,
-        canStart: false,
-      }),
-      sorted.map((tab, index) => boardSessionCardHtml(tab, index >= BOARD_FULL_CARDS)),
-      { wide: false, emptyHint: "Drop a video here" }
-    ));
+function facetRowsForSession(tabs: SavedSessionTab[], sections: SessionSection[]): { languages: FacetRow[]; channels: FacetRow[]; piles: FacetRow[] } {
+  const seconds = (tab: SavedSessionTab) => tab.seconds ?? 0;
+  const languages = tally(tabs, sessionTabLanguageLabel, seconds);
+  assignLanguageColors(languages);
+  const languageRows: FacetRow[] = Array.from(languages.entries())
+    .sort((a, b) => b[1].seconds - a[1].seconds || a[0].localeCompare(b[0]))
+    .map(([label, entry]) => ({ kind: "language", value: label, label, count: entry.count, seconds: entry.seconds, color: languageColor(label) }));
+  const channels = tally(tabs, (tab) => tab.channelName || "Unknown channel", seconds);
+  const channelRows: FacetRow[] = Array.from(channels.entries())
+    .sort((a, b) => b[1].count - a[1].count || b[1].seconds - a[1].seconds || a[0].localeCompare(b[0]))
+    .slice(0, 8)
+    .map(([label, entry]) => ({ kind: "channel", value: label, label, count: entry.count, seconds: entry.seconds }));
+  const { blocks, unsorted } = partitionSessionTabsBySection(tabs, sections);
+  const pileRows: FacetRow[] = blocks.map(({ section, tabs: sectionTabs }) => ({
+    kind: "pile",
+    value: section.id,
+    label: section.name,
+    count: sectionTabs.length,
+    seconds: sectionTabs.reduce((sum, tab) => sum + seconds(tab), 0),
+    color: sectionRailVar(section.colorIndex ?? 0),
+    sectionId: section.id,
+  }));
+  if (sections.length > 0) {
+    pileRows.push({ kind: "pile", value: "__unsorted", label: "Not in a pile", count: unsorted.length, seconds: unsorted.reduce((sum, tab) => sum + seconds(tab), 0) });
   }
+  return { languages: languageRows, channels: channelRows, piles: pileRows };
+}
 
-  columns.push(boardNewPileHtml());
-  return columns.join("");
+function facetButtonHtml(row: FacetRow, extraAttrs = ""): string {
+  const active = facetKind === row.kind && facetValue === row.value;
+  const dot = row.color ? `<span class="facet-dot" style="background: ${row.color}"></span>` : `<span class="facet-dot facet-dot--none"></span>`;
+  const time = row.count > 0 ? formatDurationWords(row.seconds) : "";
+  return `
+    <button type="button" class="facet${active ? " facet--active" : ""}" data-facet-kind="${row.kind}" data-facet-value="${escapeHtml(row.value)}"${extraAttrs} title="${escapeHtml(row.label)}">
+      ${dot}
+      <span class="facet-name">${escapeHtml(row.label)}</span>
+      <span class="facet-count">${row.count}${time ? ` · ${time}` : ""}</span>
+    </button>`;
+}
+
+function facetGroupHtml(title: string, rows: FacetRow[], trailing = ""): string {
+  if (rows.length === 0 && !trailing) return "";
+  return `
+    <div class="facet-group">
+      <div class="facet-head">${escapeHtml(title)}</div>
+      ${rows.map((row) => facetButtonHtml(row, row.sectionId || row.value === "__unsorted" ? ` data-section-wrapper="${escapeHtml(row.value)}"` : "")).join("")}
+      ${trailing}
+    </div>`;
+}
+
+let lastFacetRailHtml = "";
+
+function renderFacetRail(): void {
+  const rail = document.getElementById("facet-rail");
+  if (!rail) return;
+  const live = !isReadingListView && !isSessionsView && selectedSession == null;
+  const session = selectedSession != null && !isSessionsView && !isReadingListView;
+  rail.classList.toggle("hidden", !live && !session);
+  if (!live && !session) return;
+
+  let html = "";
+  if (live) {
+    const base = filterVideosForDisplay(currentLiveBaseVideos(), { ignoreFacet: true });
+    const rows = facetRowsForLive(base);
+    const allRow: FacetRow = { kind: "all", value: "", label: "Everything", count: base.length, seconds: base.reduce((sum, video) => sum + remainingOf(video), 0) };
+    html += `<div class="facet-group">${facetButtonHtml(allRow)}${rows.continueRow.count > 0 ? facetButtonHtml(rows.continueRow) : ""}</div>`;
+    html += facetGroupHtml("Languages", rows.languages);
+    html += facetGroupHtml("Channels", rows.channels);
+    html += facetGroupHtml("Piles", rows.piles, `<button type="button" class="facet facet--add" data-pile-create="1"><span class="facet-dot facet-dot--none"></span><span class="facet-name">New pile…</span></button>`);
+    if (windowGroups.length > 1) {
+      const windowRows = windowGroups.map((group) =>
+        `<button type="button" class="facet sidebar-item${currentWindowId === group.id ? " facet--active" : ""}" data-sidebar-type="window" data-window-id="${group.id}"><span class="facet-dot facet-dot--none"></span><span class="facet-name">${escapeHtml(group.label)}</span><span class="facet-count">${group.tabs.length}</span></button>`
+      );
+      html += `<div class="facet-group"><div class="facet-head">Windows</div><button type="button" class="facet sidebar-item${currentWindowId === "all" ? " facet--active" : ""}" data-sidebar-type="all"><span class="facet-dot facet-dot--none"></span><span class="facet-name">All windows</span><span class="facet-count">${allVideos.length}</span></button>${windowRows.join("")}</div>`;
+    }
+  } else if (selectedSession) {
+    const sections = orderedSections(selectedSession.sections);
+    const base = filterSessionTabsForDisplay(selectedSession.tabs ?? [], { ignoreFacet: true });
+    const rows = facetRowsForSession(base, sections);
+    const allRow: FacetRow = { kind: "all", value: "", label: "Whole session", count: base.length, seconds: base.reduce((sum, tab) => sum + (tab.seconds ?? 0), 0) };
+    html += `<div class="facet-group">${facetButtonHtml(allRow)}</div>`;
+    html += facetGroupHtml("Languages", rows.languages);
+    html += facetGroupHtml("Channels", rows.channels);
+    html += facetGroupHtml("Piles", rows.piles, `<button type="button" class="facet facet--add" data-pile-create="1"><span class="facet-dot facet-dot--none"></span><span class="facet-name">New pile…</span></button>`);
+  }
+  if (html !== lastFacetRailHtml) {
+    lastFacetRailHtml = html;
+    rail.innerHTML = html;
+  }
+}
+
+function currentLiveBaseVideos(): VideoData[] {
+  if (currentWindowId === "all") return allVideos;
+  return windowGroups.find((group) => group.id === currentWindowId)?.tabs ?? [];
+}
+
+function facetCrumbText(): string {
+  switch (facetKind) {
+    case "all": return "";
+    case "continue": return "Continue watching";
+    case "language": return facetValue;
+    case "channel": return facetValue;
+    case "pile": {
+      if (facetValue === "__unsorted") return "Not in a pile";
+      const sections = selectedSession ? orderedSections(selectedSession.sections) : orderedSections(liveTabSectionsState.sections);
+      return sections.find((section) => section.id === facetValue)?.name ?? "Pile";
+    }
+  }
+}
+
+function renderFacetCrumb(): void {
+  const crumb = document.getElementById("facet-crumb");
+  const clear = document.getElementById("facet-clear");
+  const text = facetCrumbText();
+  if (crumb) crumb.textContent = text;
+  clear?.classList.toggle("hidden", text === "");
+}
+
+// ───────────────────────── Time bar: where the hours go ─────────────────────────
+
+function renderTimeBar(): void {
+  const bar = document.getElementById("time-bar");
+  if (!bar) return;
+  const live = !isReadingListView && !isSessionsView && selectedSession == null;
+  const session = selectedSession != null && !isSessionsView && !isReadingListView;
+  bar.classList.toggle("hidden", !live && !session);
+  if (!live && !session) return;
+
+  let entries: { label: string; seconds: number; count: number }[];
+  if (live) {
+    const base = filterVideosForDisplay(currentLiveBaseVideos(), { ignoreFacet: true });
+    const languages = tally(base, videoLanguageLabel, remainingOf);
+    assignLanguageColors(languages);
+    entries = Array.from(languages.entries()).map(([label, entry]) => ({ label, seconds: entry.seconds, count: entry.count }));
+  } else {
+    const base = filterSessionTabsForDisplay(selectedSession!.tabs ?? [], { ignoreFacet: true });
+    const languages = tally(base, sessionTabLanguageLabel, (tab) => tab.seconds ?? 0);
+    assignLanguageColors(languages);
+    entries = Array.from(languages.entries()).map(([label, entry]) => ({ label, seconds: entry.seconds, count: entry.count }));
+  }
+  entries.sort((a, b) => b.seconds - a.seconds || a.label.localeCompare(b.label));
+  const total = entries.reduce((sum, entry) => sum + entry.seconds, 0);
+  if (total <= 0) {
+    bar.innerHTML = "";
+    bar.classList.add("hidden");
+    return;
+  }
+  bar.innerHTML = entries
+    .filter((entry) => entry.seconds > 0)
+    .map((entry) => {
+      const share = (entry.seconds / total) * 100;
+      const active = facetKind === "language" && facetValue === entry.label;
+      const dimmed = facetKind === "language" && !active;
+      const label = share >= 9 ? `<span class="time-bar-label">${escapeHtml(entry.label)} <span class="time-bar-time">${formatDurationWords(entry.seconds)}</span></span>` : "";
+      return `<button type="button" class="time-bar-seg${active ? " time-bar-seg--active" : ""}${dimmed ? " time-bar-seg--dim" : ""}" style="width: ${share.toFixed(2)}%; background: ${languageColor(entry.label)}" data-facet-kind="language" data-facet-value="${escapeHtml(entry.label)}" title="${escapeHtml(entry.label)}: ${entry.count} videos, ${formatDurationWords(entry.seconds)}">${label}</button>`;
+    })
+    .join("");
 }
 
 // ───────────────────────── Session planner ─────────────────────────
 
-const PLAN_BUDGETS = [20, 45, 90] as const;
 let planBudgetMinutes: number | null = 45;
-let planPileKey = "all";
-let planSelect: CustomSelectHandle | null = null;
 let plannedTabIds = new Set<number>();
-let lastPlanOptionsSig = "";
 
 function planCandidates(): VideoData[] {
-  const videos = getLiveVideosForCurrentView().filter((video) => !video.isLive && !video.excluded && !video.suspended);
-  if (planPileKey === "all") return videos;
-  const sections = orderedSections(liveTabSectionsState.sections);
-  const { blocks, unsorted } = partitionLiveVideosBySection(videos, sections, liveTabSectionsState.assignments);
-  if (planPileKey === "__unsorted") return unsorted;
-  return blocks.find((block) => block.section.id === planPileKey)?.videos ?? [];
+  return getLiveVideosForCurrentView().filter((video) => !video.isLive && !video.excluded && !video.suspended);
 }
 
 /** Started videos first (finish what you began), then the current sort; take what fits the budget. */
@@ -3234,37 +3279,18 @@ function computePlan(): { ids: number[]; seconds: number } {
   const ids: number[] = [];
   let seconds = 0;
   for (const video of ordered) {
-    const remaining = Math.max(0, video.seconds - video.currentTime);
-    if (remaining <= 0) continue;
-    if (seconds + remaining > budget && ids.length > 0) continue;
-    if (remaining > budget) continue;
+    const remaining = remainingOf(video);
+    if (remaining <= 0 || remaining > budget) continue;
+    if (seconds + remaining > budget) continue;
     ids.push(video.id);
     seconds += remaining;
   }
   return { ids, seconds };
 }
 
-function syncPlanSelectOptions(): void {
-  if (!planSelect) return;
-  const sections = orderedSections(liveTabSectionsState.sections);
-  const options = [
-    { value: "all", label: "the whole desk" },
-    ...sections.map((section) => ({ value: section.id, label: section.name })),
-    ...(sections.length > 0 ? [{ value: "__unsorted", label: "the inbox" }] : []),
-  ];
-  const sig = options.map((option) => `${option.value}:${option.label}`).join("|");
-  if (sig === lastPlanOptionsSig) return;
-  lastPlanOptionsSig = sig;
-  planSelect.setOptions(options);
-  if (!options.some((option) => option.value === planPileKey)) {
-    planPileKey = "all";
-    planSelect.setValue("all");
-  }
-}
-
 function renderPlanner(): void {
   const planner = document.getElementById("planner");
-  const startButton = document.getElementById("btn-start-plan");
+  const startButton = document.getElementById("btn-start-plan") as HTMLButtonElement | null;
   const startLabel = document.getElementById("btn-start-plan-label");
   const summary = document.getElementById("plan-summary");
   if (!planner || !startButton || !summary) return;
@@ -3272,48 +3298,32 @@ function renderPlanner(): void {
   const live = !isReadingListView && !isSessionsView && selectedSession == null;
   planner.classList.toggle("hidden", !live);
   planner.classList.toggle("flex", live);
-  startButton.classList.toggle("hidden", !live);
-  if (!live) return;
+  if (!live) {
+    plannedTabIds = new Set();
+    return;
+  }
 
-  syncPlanSelectOptions();
   document.querySelectorAll<HTMLButtonElement>(".budget-chip").forEach((chip) => {
     const value = chip.dataset.budget === "all" ? null : Number(chip.dataset.budget);
     chip.setAttribute("aria-pressed", String(value === planBudgetMinutes));
   });
 
   const plan = computePlan();
-  const previousPlanned = Array.from(plannedTabIds).sort().join(",");
   plannedTabIds = new Set(plan.ids);
   const count = plan.ids.length;
+  const scope = facetCrumbText();
   summary.textContent =
     count === 0
-      ? "→ nothing fits. Pick a longer budget or another pile."
-      : `→ fits ${count} ${count === 1 ? "video" : "videos"}, ${formatDurationWords(plan.seconds)}`;
-  if (startLabel) startLabel.textContent = count === 0 ? "Start" : `Start ${planBudgetMinutes == null ? "everything" : formatDurationWords(plan.seconds)}`;
-  (startButton as HTMLButtonElement).disabled = count === 0;
+      ? "Nothing in this list fits. Try a longer budget or another filter."
+      : `${count} ${count === 1 ? "video" : "videos"}, ${formatDurationWords(plan.seconds)}${scope ? ` from ${scope}` : ""}. Started videos go first.`;
+  if (startLabel) startLabel.textContent = count === 0 ? "Start" : `Start ${formatDurationWords(plan.seconds)}`;
+  startButton.disabled = count === 0;
   startButton.classList.toggle("opacity-50", count === 0);
 
-  if (Array.from(plannedTabIds).sort().join(",") !== previousPlanned) {
-    document.querySelectorAll<HTMLElement>("#tab-list .board-card[data-id]").forEach((card) => {
-      const id = parseInt(card.dataset.id || "0", 10);
-      const planned = plannedTabIds.has(id);
-      card.classList.toggle("board-card--planned", planned);
-      const tag = card.querySelector(".board-tag--plan");
-      if (planned && !tag && !card.classList.contains("board-card--playing")) {
-        card.querySelector(".board-thumb")?.insertAdjacentHTML("afterbegin", `<span class="board-tag board-tag--plan">In plan</span>`);
-      } else if (!planned && tag) {
-        tag.remove();
-      }
-    });
-  }
-}
-
-function pileTabIdsForStart(key: string): number[] {
-  const videos = getLiveVideosForCurrentView().filter((video) => !video.isLive && !video.excluded);
-  const sections = orderedSections(liveTabSectionsState.sections);
-  const { blocks, unsorted } = partitionLiveVideosBySection(videos, sections, liveTabSectionsState.assignments);
-  const list = key === "__unsorted" ? unsorted : blocks.find((block) => block.section.id === key)?.videos ?? [];
-  return sortVideosForDisplay(list).map((video) => video.id);
+  document.querySelectorAll<HTMLElement>("#tab-list [data-id]").forEach((row) => {
+    const id = parseInt(row.dataset.id || "0", 10);
+    row.classList.toggle("queue-row--planned", plannedTabIds.has(id));
+  });
 }
 
 
@@ -3373,6 +3383,7 @@ function renderVideoList(videos: VideoData[], sectionColorIndex?: number | "unso
               <span class="manager-card-channel truncate">${escapeHtml(video.channelName)}</span>
               <span class="opacity-60">·</span>
               <span class="manager-card-time whitespace-nowrap"><span class="manager-card-time-current ${watchedPercent > 0 ? "text-text-primary" : "text-text-muted"}">${formatCompact(video.currentTime)}</span> of <span class="manager-card-time-total">${formatCompact(video.seconds)}</span></span>
+              ${plannedTabIds.has(video.id) ? `<span class="text-accent font-medium">in plan</span>` : ""}
               ${stateLabel}
               <span class="manager-card-language text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0 ${languageLabel ? "" : "hidden"}">${escapeHtml(languageLabel)}</span>
               ${windowBadgeHtml(video)}
@@ -4041,20 +4052,6 @@ function setupListeners() {
     openStudySessionModal();
   });
 
-  const planSelectRoot = document.getElementById("plan-pile-select");
-  if (planSelectRoot) {
-    planSelect = mountCustomSelect(planSelectRoot, {
-      options: [{ value: "all", label: "the whole desk" }],
-      value: "all",
-      compact: true,
-      ariaLabel: "Plan from",
-      onChange: (value) => {
-        planPileKey = value;
-        renderPlanner();
-      },
-    });
-  }
-
   document.getElementById("planner")?.addEventListener("click", (event) => {
     const chip = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-budget]");
     if (!chip) return;
@@ -4067,17 +4064,34 @@ function setupListeners() {
     openStudySessionModal(Array.from(plannedTabIds));
   });
 
-  document.getElementById("tab-list")?.addEventListener("click", (event) => {
+  const onFacetClick = (event: Event) => {
     const target = event.target as HTMLElement;
-    const startButton = target.closest<HTMLElement>("[data-start-pile]");
-    if (startButton?.dataset.startPile) {
-      event.stopPropagation();
-      openStudySessionModal(pileTabIdsForStart(startButton.dataset.startPile));
+    if (target.closest("[data-pile-create]")) {
+      openAddSectionModal();
       return;
     }
-    if (target.closest("[data-pile-create]")) {
-      event.stopPropagation();
-      openAddSectionModal();
+    if (target.closest(".sidebar-item")) return;
+    const button = target.closest<HTMLElement>("[data-facet-kind]");
+    if (!button) return;
+    const kind = button.dataset.facetKind as FacetKind;
+    const value = button.dataset.facetValue ?? "";
+    if (kind === facetKind && value === facetValue && kind !== "all") setFacet("all");
+    else setFacet(kind, value);
+  };
+  document.getElementById("facet-rail")?.addEventListener("click", onFacetClick);
+  document.getElementById("time-bar")?.addEventListener("click", onFacetClick);
+  document.getElementById("facet-clear")?.addEventListener("click", () => setFacet("all"));
+
+  document.getElementById("facet-rail")?.addEventListener("contextmenu", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLElement>("[data-facet-kind=\"pile\"]");
+    const sectionId = button?.dataset.facetValue;
+    if (!sectionId || sectionId === "__unsorted") return;
+    event.preventDefault();
+    sectionHeaderContextTarget = { sectionId };
+    const menu = document.getElementById("section-header-context-menu");
+    if (menu) {
+      menu.classList.remove("hidden");
+      positionFixedMenu(menu, event.clientX, event.clientY);
     }
   });
 
@@ -4142,6 +4156,8 @@ function setupListeners() {
       return;
     }
     isSessionsView = false;
+    facetKind = "all";
+    facetValue = "";
     if (type === "all") {
       isReadingListView = false;
       selectedSession = null;
@@ -4493,7 +4509,7 @@ function setupListeners() {
     clearSectionDropHighlight();
   });
 
-  const dropRoots = [document.getElementById("tab-list"), document.getElementById("piles-list")];
+  const dropRoots = [document.getElementById("tab-list"), document.getElementById("facet-rail")];
 
   dropRoots.forEach((root) => root?.addEventListener("dragover", (e) => {
     if (!e.dataTransfer?.types.includes(TAB_MANAGER_DRAG_MIME)) return;

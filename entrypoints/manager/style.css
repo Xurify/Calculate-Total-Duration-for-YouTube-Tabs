@@ -143,187 +143,84 @@ body {
     @apply font-display text-lg font-medium text-text-primary truncate flex-1 min-w-0 m-0;
   }
 
-  .board {
-    @apply flex items-start gap-5 overflow-x-auto overflow-y-hidden px-8 pt-5 pb-6;
-    scrollbar-width: thin;
+  .facet-group {
+    @apply flex flex-col gap-px;
   }
 
-  .board-col {
-    @apply w-[300px] shrink-0 flex flex-col gap-2.5 max-h-full min-h-[12rem] rounded-xl;
+  .facet-head {
+    @apply px-2.5 pt-1 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted;
   }
 
-  .board-col--flex {
-    @apply w-auto flex-1 min-w-[300px];
+  .facet {
+    @apply w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md border-0 bg-transparent text-left cursor-pointer transition-colors text-[13px] text-text-secondary hover:bg-surface-hover/60 hover:text-text-primary;
   }
 
-  .board-col--new {
-    @apply w-[220px] items-start text-left gap-2 border-0 bg-transparent cursor-pointer pt-0;
+  .facet--active {
+    @apply bg-surface-hover text-text-primary;
   }
 
-  .board-col--new .board-col-title {
-    @apply border-b-2 border-transparent pb-2;
+  .facet--add {
+    @apply text-accent hover:text-accent-hover;
   }
 
-  .board-col-head {
-    @apply flex items-baseline gap-2 px-0.5 pb-2 border-b-2;
-    border-color: var(--section-rail, var(--color-border));
+  .facet-dot {
+    @apply w-2.5 h-2.5 rounded-full shrink-0;
   }
 
-  .board-col-title {
-    @apply font-display text-[22px] font-medium text-text-primary truncate flex-1 min-w-0 m-0 cursor-default;
+  .facet-dot--none {
+    @apply bg-transparent;
   }
 
-  .board-col-stat {
-    @apply flex gap-1.5 shrink-0 text-xs text-text-muted tabular-nums;
+  .facet-name {
+    @apply flex-1 min-w-0 truncate font-medium;
   }
 
-  .board-col-sub {
-    @apply flex items-center gap-2 px-0.5 text-xs text-text-muted min-h-[1rem];
+  .facet--active .facet-name {
+    @apply font-semibold;
   }
 
-  .board-col-sub > span {
-    @apply flex-1 min-w-0 truncate;
+  .facet-count {
+    @apply text-xs text-text-muted tabular-nums whitespace-nowrap;
   }
 
-  .board-start {
-    @apply shrink-0 text-xs font-semibold text-accent hover:text-accent-hover border-0 bg-transparent p-0 cursor-pointer;
+  .facet.section-drop-target--active {
+    outline: 2px solid color-mix(in srgb, var(--color-accent) 65%, transparent);
+    outline-offset: -2px;
+    background: color-mix(in srgb, var(--color-accent) 8%, transparent);
   }
 
-  .board-cards {
-    @apply flex flex-col gap-2.5 min-h-0 overflow-y-auto pr-0.5;
-    scrollbar-width: thin;
-    scrollbar-color: var(--color-border) transparent;
+  .time-bar {
+    @apply flex w-full h-9 rounded-lg overflow-hidden gap-px;
   }
 
-  .board-cards--wide {
-    @apply grid gap-3 pb-2 content-start items-start;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    grid-auto-rows: max-content;
+  .time-bar-seg {
+    @apply relative h-full border-0 p-0 cursor-pointer overflow-hidden transition-[opacity,filter] min-w-[3px] text-left;
   }
 
-  .board-card {
-    @apply relative flex flex-col shrink-0 rounded-xl border border-border bg-surface-elevated overflow-hidden transition-[border-color,box-shadow] cursor-grab;
+  .time-bar-seg:hover {
+    filter: brightness(1.08);
   }
 
-  .board-card:hover {
-    border-color: var(--color-border-hover);
+  .time-bar-seg--dim {
+    opacity: 0.35;
   }
 
-  .board-card--selected {
-    @apply border-accent;
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 15%, transparent);
+  .time-bar-seg--active {
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--color-text-primary) 70%, transparent);
   }
 
-  .board-card--playing {
-    @apply border-accent;
+  .time-bar-label {
+    @apply absolute inset-y-0 left-2.5 right-2 flex items-center gap-1.5 text-[12px] font-semibold whitespace-nowrap overflow-hidden;
+    color: #1a1714;
   }
 
-  .board-card--planned:not(.board-card--playing) .board-thumb::after {
-    content: "";
-    @apply absolute inset-0 pointer-events-none;
-    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--color-accent) 45%, transparent);
+  .time-bar-time {
+    @apply font-normal opacity-80 tabular-nums;
   }
 
-  .board-thumb {
-    @apply relative w-full aspect-video shrink-0 bg-surface-hover overflow-hidden;
-  }
-
-  .board-tag {
-    @apply absolute top-2 left-2 z-10 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-[0.08em] bg-accent text-on-accent;
-  }
-
-  .board-tag--plan {
-    @apply bg-surface-elevated text-accent border border-accent/40;
-  }
-
-  .board-duration {
-    @apply absolute bottom-2 right-2 px-1.5 py-0.5 rounded text-[11px] font-medium bg-black/80 text-white tabular-nums;
-  }
-
-  .board-progress {
-    @apply absolute bottom-0 left-0 right-0 h-[3px] bg-black/30 transition-opacity;
-  }
-
-  .board-body {
-    @apply flex flex-col gap-0.5 px-3 pt-2.5 pb-3 min-w-0;
-  }
-
-  .board-title {
-    @apply text-sm font-medium text-text-primary leading-snug line-clamp-2 m-0;
-  }
-
-  .board-meta {
-    @apply text-xs text-text-muted flex items-center gap-1.5 min-w-0 truncate;
-  }
-
-  .board-lang {
-    @apply text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0;
-  }
-
-  .board-actions {
-    @apply absolute top-1.5 right-1.5 left-1.5 z-20 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity;
-  }
-
-  .board-card--selected .board-actions {
-    @apply opacity-100;
-  }
-
-  .board-actions .queue-action {
-    @apply bg-black/45 text-white hover:bg-black/70 hover:text-white;
-  }
-
-  .board-card--compact {
-    @apply flex-row items-center gap-2.5 pr-2;
-  }
-
-  .board-card--compact .board-thumb {
-    @apply w-[88px] shrink-0 rounded-md m-2 mr-0;
-  }
-
-  .board-card--compact .board-duration {
-    @apply bottom-1 right-1 px-1 py-px text-[10px];
-  }
-
-  .board-card--compact .board-tag {
-    @apply top-1 left-1 px-1 py-px text-[9px];
-  }
-
-  .board-card--compact .board-body {
-    @apply px-0 py-2;
-  }
-
-  .board-card--compact .board-title {
-    @apply text-[13px] line-clamp-1;
-  }
-
-  .board-card--compact .board-actions {
-    @apply static opacity-100 flex-col items-center gap-0.5 shrink-0 w-auto;
-  }
-
-  .board-card--compact .board-actions > span,
-  .board-card--compact .board-actions .queue-action {
-    @apply hidden;
-  }
-
-  .board-card--compact .board-actions > div {
-    @apply w-4 h-4;
-  }
-
-  .board-empty {
-    @apply mx-0.5 py-7 px-4 rounded-xl border border-dashed border-border text-center text-xs italic text-text-muted;
-  }
-
-  .board-drop {
-    @apply hidden mx-0.5 py-3 rounded-xl border border-dashed border-accent/60 text-center text-xs font-semibold text-accent;
-  }
-
-  .board-col.section-drop-target--active {
-    outline: none;
-    background: transparent;
-  }
-
-  .board-col.section-drop-target--active .board-drop {
-    @apply block;
+  .queue-row--planned .queue-offset::after {
+    content: "·";
+    @apply ml-1 text-accent;
   }
 
   .budget-chip {

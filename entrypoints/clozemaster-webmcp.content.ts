@@ -130,6 +130,7 @@ export default defineContentScript({
         "Extracts the current Clozemaster study session context, including language pair, reviews ready count, active sentence, and study progress.",
       annotations: {
         readOnlyHint: true,
+        untrustedContentHint: true,
       },
       execute: () => {
         const { languagePair, targetLanguage } = detectClozemasterLanguage();
@@ -207,7 +208,6 @@ export default defineContentScript({
       },
       annotations: {
         readOnlyHint: false,
-        consequentialHint: true,
       },
       execute: (inputArguments) => {
         const collectionName = inputArguments.collectionName?.trim() || "YouTube Immersion";

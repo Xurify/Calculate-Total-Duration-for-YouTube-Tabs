@@ -5,7 +5,8 @@
 
 export interface WebMcpToolAnnotations {
   readOnlyHint?: boolean;
-  consequentialHint?: boolean;
+  destructiveHint?: boolean;
+  /** Marks output that contains third-party text (titles, captions, URLs) the agent must not obey. */
   untrustedContentHint?: boolean;
 }
 
@@ -42,21 +43,26 @@ declare global {
   interface Document {
     modelContext?: WebMcpModelContext;
   }
+  interface Navigator {
+    modelContext?: WebMcpModelContext;
+  }
 }
 
-/**
- * Returns true if the current environment supports WebMCP document.modelContext.
- */
+// Chrome's early WebMCP builds exposed navigator.modelContext; newer ones use document.modelContext.
+function getModelContext(): WebMcpModelContext | null {
+  const candidates = [
+    typeof document !== "undefined" ? document.modelContext : undefined,
+    typeof navigator !== "undefined" ? navigator.modelContext : undefined,
+  ];
+  return candidates.find((context) => typeof context?.registerTool === "function") ?? null;
+}
+
 export function isWebMcpSupported(): boolean {
-  return (
-    typeof document !== "undefined" &&
-    "modelContext" in document &&
-    typeof document.modelContext?.registerTool === "function"
-  );
+  return getModelContext() !== null;
 }
 
 /**
- * Safely registers a WebMCP tool on document.modelContext if supported.
+ * Safely registers a WebMCP tool on the page's model context if supported.
  * Returns an unregister function that aborts the tool lifecycle.
  */
 export async function registerWebMcpTool<
@@ -66,7 +72,8 @@ export async function registerWebMcpTool<
   tool: WebMcpToolDefinition<InputArguments, ExecutionResult>,
   parentSignal?: AbortSignal
 ): Promise<(() => void) | null> {
-  if (!isWebMcpSupported() || !document.modelContext) {
+  const modelContext = getModelContext();
+  if (!modelContext) {
     return null;
   }
 
@@ -86,7 +93,7 @@ export async function registerWebMcpTool<
   }
 
   try {
-    await document.modelContext.registerTool(
+    await modelContext.registerTool(
       tool as unknown as WebMcpToolDefinition<Record<string, unknown>, unknown>,
       { signal: abortController.signal }
     );

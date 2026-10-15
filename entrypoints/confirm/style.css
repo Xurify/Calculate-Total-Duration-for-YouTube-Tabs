@@ -1,0 +1,10 @@
+@import "tailwindcss";
+@import "../../assets/theme.css";
+
+#allow.is-destructive {
+  background-color: var(--color-danger);
+}
+
+#allow.is-destructive:hover:not(:disabled) {
+  background-color: var(--color-danger-hover);
+}

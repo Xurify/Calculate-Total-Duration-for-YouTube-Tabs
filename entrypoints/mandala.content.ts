@@ -243,7 +243,7 @@ async function flushPendingMandalaQueues(): Promise<void> {
 export default defineContentScript({
   matches: [
     "https://mandalamethod.vercel.app/*",
-    "http://localhost:5173/*",
+    ...(import.meta.env.DEV ? ["http://localhost:5173/*"] : []),
   ],
   main() {
     registerBridgeListener({

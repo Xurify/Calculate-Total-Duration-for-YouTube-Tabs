@@ -373,6 +373,7 @@ export default defineContentScript({
         "Returns comprehensive metadata and playback state for the currently active YouTube video or short, including duration, current time, remaining time, language, and volume.",
       annotations: {
         readOnlyHint: true,
+        untrustedContentHint: true,
       },
       execute: async () => {
         const videoElement = document.querySelector("video");
@@ -482,6 +483,7 @@ export default defineContentScript({
       },
       annotations: {
         readOnlyHint: true,
+        untrustedContentHint: true,
       },
       execute: async (inputArguments) => {
         const videoId = getVideoIdFromCurrentLocation();
@@ -632,7 +634,6 @@ export default defineContentScript({
       },
       annotations: {
         readOnlyHint: false,
-        consequentialHint: false,
       },
       execute: (inputArguments) => {
         const moviePlayer = getMoviePlayerElement();
@@ -780,9 +781,10 @@ export default defineContentScript({
     const getOpenTabsCatalogTool: WebMcpToolDefinition<Record<string, unknown>, unknown> = {
       name: "get_open_tabs_catalog",
       description:
-        "Returns the complete catalog of all open YouTube tabs across all browser windows, including their video IDs, titles, channel names, total durations, remaining times, and detected languages. Use this to help the user plan focused study sessions.",
+        "Returns the complete catalog of all open YouTube tabs across all browser windows, including their video IDs, titles, channel names, total durations, remaining times, and detected languages. Use this to help the user plan focused study sessions. The first call from this page opens an approval window, so the user must allow it.",
       annotations: {
         readOnlyHint: true,
+        untrustedContentHint: true,
       },
       execute: async () => {
         return await sendBridgeRequest("get-open-tabs-catalog", {});
@@ -800,7 +802,7 @@ export default defineContentScript({
     > = {
       name: "stage_focused_study_queue",
       description:
-        "Stages a curated list of YouTube tabs for a focused study session. Can automatically stash unselected/distraction tabs into extension storage ('Saved Sessions') and close them guilt-free.",
+        "Stages a curated list of YouTube tabs for a focused study session. Can automatically stash unselected/distraction tabs into extension storage ('Saved Sessions') and close them guilt-free. The user must approve this in a separate window before anything is closed or removed.",
       inputSchema: {
         type: "object",
         properties: {
@@ -827,7 +829,7 @@ export default defineContentScript({
       },
       annotations: {
         readOnlyHint: false,
-        consequentialHint: true,
+        destructiveHint: true,
       },
       execute: async (inputArguments) => {
         const result = await sendBridgeRequest("stage-focused-study-queue", inputArguments);

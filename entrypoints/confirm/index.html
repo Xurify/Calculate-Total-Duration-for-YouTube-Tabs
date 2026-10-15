@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Study Harvester · Approve request</title>
+    <script src="/theme-init.js"></script>
+  </head>
+  <body class="m-0 min-h-screen bg-surface text-text-primary text-[13px] antialiased font-['Roboto',system-ui,sans-serif]">
+    <main class="flex min-h-screen flex-col gap-4 p-5">
+      <p class="m-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-text-muted">Study Harvester</p>
+      <h1 id="title" class="m-0 text-lg font-semibold leading-snug">Loading request…</h1>
+      <p class="m-0 text-text-secondary">
+        Requested by <strong id="origin" class="break-all text-text-primary"></strong>
+      </p>
+      <p id="summary" class="m-0 text-text-secondary"></p>
+      <ul id="items" class="m-0 hidden list-none space-y-1 rounded-[10px] border border-border bg-surface-elevated p-3"></ul>
+      <p class="m-0 text-[12px] text-text-muted">
+        Only allow this if you just asked an AI agent to do it. Web pages can make this request on their own.
+      </p>
+      <div class="mt-auto flex justify-end gap-2">
+        <button id="deny" type="button" class="h-9 rounded-lg border border-border bg-surface-elevated px-4 font-medium text-text-primary hover:bg-surface-hover cursor-pointer">
+          Deny
+        </button>
+        <button id="allow" type="button" disabled class="h-9 rounded-lg border-0 bg-accent px-4 font-semibold text-on-accent hover:bg-accent-hover cursor-pointer disabled:opacity-50 disabled:cursor-default">
+          Allow
+        </button>
+      </div>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

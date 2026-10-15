@@ -15,6 +15,7 @@
         <button type="button" id="nav-reading-list" class="sidebar-item nav-pill" data-sidebar-type="reading-list">
           Reading list <span id="reading-list-badge" class="tabular-nums text-text-muted">0</span>
         </button>
+        <button type="button" id="nav-sessions" class="sidebar-item nav-pill" data-sidebar-type="sessions">Saved sessions</button>
         <span class="inline-flex items-center gap-1 ml-2 px-2 py-1 rounded-full text-[10px] font-semibold bg-success/12 text-success border border-success/30" title="WebMCP standard active on YouTube, Mandala, and Clozemaster">
           <span class="w-1.5 h-1.5 rounded-full bg-success"></span>
           WebMCP
@@ -43,109 +44,89 @@
       </div>
     </header>
 
-    <main class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-      <div class="grid grid-cols-12 gap-x-6 px-10 pt-8 pb-16 max-w-[1600px] mx-auto">
+    <main class="flex-1 min-h-0 flex flex-col overflow-hidden">
 
-        <section class="col-span-12 xl:col-span-8 min-w-0 flex flex-col gap-5">
-          <div class="flex items-end gap-6">
-            <div class="min-w-0 flex flex-col gap-1.5">
-              <div class="text-[12px] font-semibold uppercase tracking-[0.12em] text-text-muted truncate">
-                <span id="desk-kicker">Up next</span> · <span id="current-view-title">All windows</span>
-              </div>
-              <div id="desk-time" class="font-display text-[48px] leading-none font-normal tracking-[-0.02em] text-text-primary">
-                <span id="desk-time-value">0 min</span> <span class="text-text-muted" id="desk-time-suffix">left</span>
-              </div>
-              <div id="current-view-stats" class="text-sm text-text-secondary mt-1 truncate"></div>
-            </div>
-            <div class="flex-1"></div>
-            <div class="flex items-center gap-2 shrink-0">
-              <div id="selection-actions" class="hidden items-center gap-2 pr-3 mr-1 border-r border-border">
-                <span id="selection-count" class="text-xs font-semibold text-accent whitespace-nowrap">0 selected</span>
-                <button type="button" id="btn-stage-study-selected" class="chip chip--accent whitespace-nowrap" title="Start a study session with the selected tabs">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                  Study selected
-                </button>
-                <div id="move-to-section-wrap" class="relative hidden">
-                  <button type="button" id="btn-move-to-section" class="chip whitespace-nowrap">Move to pile…</button>
-                  <div id="move-to-section-popover" role="menu" aria-label="Move to section" class="menu-panel menu-panel-animate menu-panel-animate--from-right custom-scrollbar hidden absolute right-0 top-full z-50 mt-1.5 max-h-64 min-w-[220px] overflow-y-auto"></div>
-                </div>
-                <button type="button" id="btn-close-selected" class="chip chip--danger whitespace-nowrap">Close selected</button>
-              </div>
-              <button type="button" id="btn-stage-study-header" class="btn-primary" title="Stage a focused study session">
-                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                Start study session
-              </button>
-            </div>
+      <div id="planner-strip" class="shrink-0 px-8 py-5 border-b border-border bg-surface-elevated flex items-center gap-7">
+        <div class="min-w-0 flex flex-col gap-1">
+          <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted truncate">
+            <span id="desk-kicker">On the desk</span> · <span id="current-view-title">All windows</span>
           </div>
-
-          <div id="view-toolbar" class="flex items-center gap-2 flex-wrap">
-            <div id="select-all-wrap" class="items-center gap-2 pr-3 mr-1 border-r border-border hidden">
-              <label class="flex items-center gap-2 cursor-pointer select-none group/select">
-                <div class="relative flex items-center justify-center w-4 h-4 cursor-pointer select-all-checkbox-wrap">
-                  <input type="checkbox" id="select-all-checkbox" class="peer appearance-none w-4 h-4 rounded border border-text-muted/50 checked:bg-accent checked:border-accent transition-colors cursor-pointer">
-                  <svg class="absolute w-2.5 h-2.5 text-on-accent opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-                  <div class="select-all-indeterminate-dash absolute inset-0 flex items-center justify-center pointer-events-none opacity-0"><div class="w-2 h-0.5 bg-accent rounded-full"></div></div>
-                </div>
-                <span class="text-xs font-medium text-text-muted group-hover/select:text-text-primary transition-colors whitespace-nowrap">Select all</span>
-              </label>
-            </div>
-
-            <div id="sort-select" class="custom-select custom-select--compact"></div>
-
-            <span class="w-px h-4 bg-border mx-1"></span>
-
-            <button type="button" id="view-list" class="chip">No grouping</button>
-            <button type="button" id="view-channel" class="chip">By channel</button>
-            <button type="button" id="view-language" class="chip" title="Experimental: groups by detected spoken language">By language</button>
-
-            <span class="w-px h-4 bg-border mx-1"></span>
-
-            <button type="button" id="btn-filter-duplicates" class="chip" title="Show videos that appear more than once">
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="8" height="14" x="3" y="5" rx="1"/><rect width="8" height="14" x="13" y="5" rx="1"/></svg>
-              <span id="btn-filter-duplicates-label">Duplicates</span>
-            </button>
-            <button type="button" id="btn-collapse-all" class="chip" title="Collapse or expand all groups">Collapse all</button>
-
-            <div class="ml-auto flex items-center rounded-full border border-border bg-surface-elevated p-0.5">
-              <button type="button" id="layout-list" class="w-7 h-6 flex items-center justify-center rounded-full text-text-muted transition-colors" title="List" aria-label="List layout">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
-              </button>
-              <button type="button" id="layout-grid" class="w-7 h-6 flex items-center justify-center rounded-full text-text-muted transition-colors" title="Grid" aria-label="Grid layout">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
-              </button>
-            </div>
+          <div id="desk-time" class="font-display text-[34px] leading-none tracking-[-0.02em] text-text-primary whitespace-nowrap">
+            <span id="desk-time-value">0 min</span> <span class="text-text-muted" id="desk-time-suffix">left</span>
           </div>
+          <div id="current-view-stats" class="text-xs text-text-secondary truncate"></div>
+        </div>
 
-          <div id="tab-list" class="queue-card min-h-[12rem]"></div>
-        </section>
-
-        <aside id="desk-side" class="col-span-12 xl:col-span-4 min-w-0 flex flex-col gap-4 mt-10 xl:mt-0">
-          <div id="piles-block" class="flex flex-col gap-4">
-            <div class="flex items-baseline gap-3 pt-1">
-              <h2 class="font-display text-[22px] font-medium m-0">Piles</h2>
-              <div class="flex-1"></div>
-              <button type="button" id="btn-add-section" class="text-[13px] font-semibold text-accent hover:text-accent-hover bg-transparent border-0 cursor-pointer">+ New pile</button>
-            </div>
-            <div id="piles-list" class="flex flex-col -mt-2"></div>
+        <div id="planner" class="hidden flex-col gap-1.5 flex-1 min-w-0 pl-7 border-l border-border">
+          <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">Plan a session</div>
+          <div class="flex items-center gap-2.5 flex-wrap text-sm text-text-secondary">
+            <span>I have</span>
+            <span class="inline-flex gap-0.5 p-0.5 rounded-full border border-border bg-surface" role="group" aria-label="Time budget">
+              <button type="button" class="budget-chip" data-budget="20">20 min</button>
+              <button type="button" class="budget-chip" data-budget="45">45 min</button>
+              <button type="button" class="budget-chip" data-budget="90">1 h 30</button>
+              <button type="button" class="budget-chip" data-budget="all">All of it</button>
+            </span>
+            <span>from</span>
+            <div id="plan-pile-select" class="custom-select custom-select--compact"></div>
+            <span id="plan-summary" class="text-text-secondary"></span>
           </div>
+        </div>
 
-          <div id="windows-block" class="flex flex-col gap-4">
-            <div class="flex items-baseline gap-3 pt-5 mt-1 border-t border-border">
-              <h2 class="font-display text-[22px] font-medium m-0">Windows</h2>
-            </div>
-            <div id="window-list-windows" class="flex flex-wrap gap-1.5 min-h-[1.75rem]"></div>
+        <div id="selection-actions" class="hidden items-center gap-2 shrink-0">
+          <span id="selection-count" class="text-xs font-semibold text-accent whitespace-nowrap">0 selected</span>
+          <button type="button" id="btn-stage-study-selected" class="chip chip--accent whitespace-nowrap" title="Start a study session with the selected tabs">
+            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Study selected
+          </button>
+          <div id="move-to-section-wrap" class="relative hidden">
+            <button type="button" id="btn-move-to-section" class="chip whitespace-nowrap">Move to pile…</button>
+            <div id="move-to-section-popover" role="menu" aria-label="Move to pile" class="menu-panel menu-panel-animate menu-panel-animate--from-right custom-scrollbar hidden absolute right-0 top-full z-50 mt-1.5 max-h-64 min-w-[220px] overflow-y-auto"></div>
           </div>
+          <button type="button" id="btn-close-selected" class="chip chip--danger whitespace-nowrap">Close selected</button>
+        </div>
 
-          <div class="flex items-baseline gap-3 pt-5 mt-1 border-t border-border">
-            <h2 class="font-display text-[22px] font-medium m-0">Saved sessions</h2>
-            <div class="flex-1"></div>
-            <span id="global-stats-count" class="text-xs text-text-muted tabular-nums whitespace-nowrap">0 videos · 00:00:00</span>
-          </div>
-          <input type="search" id="session-sidebar-search" class="w-full h-8 px-3 text-xs border border-border rounded-lg bg-surface-elevated text-text-primary placeholder:text-text-muted focus:outline-none" placeholder="Filter sessions…" />
-          <div id="saved-sessions-sidebar" class="flex flex-col gap-0.5 min-h-[3rem]" aria-busy="true"></div>
-        </aside>
-
+        <button type="button" id="btn-start-plan" class="btn-primary shrink-0 hidden" title="Start a study session with the planned videos">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <span id="btn-start-plan-label">Start</span>
+        </button>
+        <button type="button" id="btn-stage-study-header" class="hidden" aria-hidden="true"></button>
       </div>
+
+      <div id="view-toolbar" class="shrink-0 px-8 py-2.5 flex items-center gap-2 flex-wrap border-b border-border/60">
+        <div id="select-all-wrap" class="items-center gap-2 pr-3 mr-1 border-r border-border hidden">
+          <label class="flex items-center gap-2 cursor-pointer select-none group/select">
+            <div class="relative flex items-center justify-center w-4 h-4 cursor-pointer select-all-checkbox-wrap">
+              <input type="checkbox" id="select-all-checkbox" class="peer appearance-none w-4 h-4 rounded border border-text-muted/50 checked:bg-accent checked:border-accent transition-colors cursor-pointer">
+              <svg class="absolute w-2.5 h-2.5 text-on-accent opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              <div class="select-all-indeterminate-dash absolute inset-0 flex items-center justify-center pointer-events-none opacity-0"><div class="w-2 h-0.5 bg-accent rounded-full"></div></div>
+            </div>
+            <span class="text-xs font-medium text-text-muted group-hover/select:text-text-primary transition-colors whitespace-nowrap">Select all</span>
+          </label>
+        </div>
+        <div id="windows-block" class="flex items-center gap-1.5">
+          <div id="window-list-windows" class="flex flex-wrap gap-1.5"></div>
+        </div>
+        <span class="w-px h-4 bg-border mx-1"></span>
+        <div id="sort-select" class="custom-select custom-select--compact"></div>
+        <button type="button" id="btn-filter-duplicates" class="chip" title="Show videos that appear more than once">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="8" height="14" x="3" y="5" rx="1"/><rect width="8" height="14" x="13" y="5" rx="1"/></svg>
+          <span id="btn-filter-duplicates-label">Duplicates</span>
+        </button>
+        <span class="ml-auto text-xs text-text-muted">Drag a video onto a pile to sort it</span>
+      </div>
+
+      <div id="tab-list" class="board flex-1 min-h-0"></div>
+
+      <section id="sessions-panel" class="hidden flex-col gap-4 px-8 py-6 max-w-3xl">
+        <div class="flex items-center gap-3">
+          <input type="search" id="session-sidebar-search" class="flex-1 h-9 px-3 text-sm border border-border rounded-[10px] bg-surface-elevated text-text-primary placeholder:text-text-muted focus:outline-none" placeholder="Filter sessions…" />
+          <span id="global-stats-count" class="text-xs text-text-muted tabular-nums whitespace-nowrap">0 videos · 0 min</span>
+        </div>
+        <div id="saved-sessions-sidebar" class="queue-card flex flex-col min-h-[3rem]" aria-busy="true"></div>
+        <p class="text-xs text-text-muted m-0">Click a session to put it on the desk. Right-click for rename, pin, duplicate or delete.</p>
+      </section>
+
     </main>
 
     <!-- Settings Modal -->

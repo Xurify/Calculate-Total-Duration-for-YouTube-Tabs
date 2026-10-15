@@ -7,19 +7,20 @@ import {
   registerWebMcpTool,
   type WebMcpToolDefinition,
 } from "../utils/webmcp";
+import {
+  addCardsToCollection,
+  createCollection,
+  listMyCollections,
+  type ClozeCardInput,
+  type ClozemasterCollection,
+} from "../utils/clozemasterApi";
 
-interface ClozeCardInput {
-  sentence: string;
-  targetWord: string;
-  translation: string;
-  hint?: string;
-}
+const MAX_CARDS_PER_CALL = 50;
 
 interface StagedClozeCollection {
   collectionName: string;
   timestamp: number;
   cards: ClozeCardInput[];
-  tsvContent: string;
 }
 
 function detectClozemasterLanguage(): {
@@ -96,20 +97,6 @@ function extractActiveSentence(): {
   };
 }
 
-function convertCardsToTsv(cards: ClozeCardInput[]): string {
-  const lines = cards
-    .filter((card) => Boolean(card && card.sentence && card.targetWord && card.translation))
-    .map((card) => {
-      const sanitizedSentence = (card.sentence || "").replace(/\r?\n|\r|\t/g, " ").trim();
-      const sanitizedTranslation = (card.translation || "").replace(/\r?\n|\r|\t/g, " ").trim();
-      const sanitizedTargetWord = (card.targetWord || "").replace(/\r?\n|\r|\t/g, " ").trim();
-      const sanitizedHint = (card.hint || "").replace(/\r?\n|\r|\t/g, " ").trim();
-      return `${sanitizedSentence}\t${sanitizedTranslation}\t${sanitizedTargetWord}\t${sanitizedHint}`;
-    });
-
-  return lines.join("\n");
-}
-
 export default defineContentScript({
   matches: ["*://*.clozemaster.com/*"],
   world: "MAIN",
@@ -127,7 +114,7 @@ export default defineContentScript({
     > = {
       name: "get_clozemaster_session_summary",
       description:
-        "Extracts the current Clozemaster study session context, including language pair, reviews ready count, active sentence, and study progress.",
+        "Extracts the current Clozemaster study session context, including language pair, reviews ready count, active sentence, and the sentences the user captured from YouTube with Alt+C (capturedCards), which can be sent to add_sentences_to_clozemaster_collection.",
       annotations: {
         readOnlyHint: true,
         untrustedContentHint: true,
@@ -153,54 +140,76 @@ export default defineContentScript({
           targetLanguage,
           reviewsReadyCount,
           activeSentence: activeSentence.sentence ? activeSentence : null,
-          stagedHarvestCount: stagedCollections.length,
-          lastStagedAt: stagedCollections[0]?.timestamp ?? null,
+          capturedCards: stagedCollections.flatMap((collection) => collection.cards).slice(0, 100),
+          lastCapturedAt: stagedCollections[0]?.timestamp ?? null,
         };
       },
     };
 
-    const stageClozeCardsTool: WebMcpToolDefinition<
-      {
-        collectionName?: string;
-        cards: ClozeCardInput[];
+    const listCollectionsTool: WebMcpToolDefinition<Record<string, unknown>, unknown> = {
+      name: "list_clozemaster_collections",
+      description:
+        "Lists the user's own Clozemaster collections for the language currently open in Clozemaster, with their IDs and sentence counts. Use it to pick a collection before add_sentences_to_clozemaster_collection.",
+      annotations: {
+        readOnlyHint: true,
+        untrustedContentHint: true,
       },
+      execute: async () => {
+        try {
+          const collections = await listMyCollections();
+          return {
+            success: true,
+            collections: collections.map(({ id, name, numSentences }) => ({ id, name, numSentences })),
+          };
+        } catch (error) {
+          return { success: false, errorMessage: error instanceof Error ? error.message : String(error) };
+        }
+      },
+    };
+
+    const addSentencesTool: WebMcpToolDefinition<
+      { collectionId?: number; collectionName?: string; cards: ClozeCardInput[] },
       unknown
     > = {
-      name: "stage_cloze_cards",
+      name: "add_sentences_to_clozemaster_collection",
       description:
-        "Transforms harvested sentences from YouTube videos or study materials into formatted Clozemaster cloze flashcards and stages them for collection import (or injects them directly into the import textarea if on the import page).",
+        `Adds cloze sentences to one of the user's Clozemaster collections, for the language currently open in Clozemaster. Pass collectionId to use an existing collection, or collectionName to use the collection with that name and create it if it doesn't exist. Each sentence must be in the target language with exactly one word wrapped in {{ }}, for example "Včera som {{ochutnal}} bryndzové halušky." At most ${MAX_CARDS_PER_CALL} sentences per call. Requires Clozemaster Pro. Confirm the sentences with the user first: this writes to their Clozemaster account.`,
       inputSchema: {
         type: "object",
         properties: {
+          collectionId: {
+            type: "number",
+            description: "ID of an existing collection, from list_clozemaster_collections",
+          },
           collectionName: {
             type: "string",
-            description: "Custom collection or deck name (defaults to 'YouTube Immersion')",
+            description: "Collection name; created if the user has no collection with this name",
           },
           cards: {
             type: "array",
-            description: "List of cloze sentences to stage",
+            maxItems: MAX_CARDS_PER_CALL,
             items: {
               type: "object",
               properties: {
                 sentence: {
                   type: "string",
-                  description:
-                    "Sentence in the target language with the cloze word marked with {{clozeWord}} or [clozeWord]",
+                  description: "Target-language sentence with exactly one {{clozeWord}}",
                 },
+                translation: { type: "string", description: "Translation of the full sentence" },
                 targetWord: {
                   type: "string",
-                  description: "The specific word that was hidden / should be tested",
+                  description: "Optional; used to mark the cloze word when the sentence has no {{ }}",
                 },
-                translation: {
-                  type: "string",
-                  description: "English translation of the full sentence",
-                },
-                hint: {
-                  type: "string",
-                  description: "Optional grammar note or clue (e.g. 'locative case', 'past tense')",
+                hint: { type: "string", description: "Shown before answering, e.g. 'past tense'" },
+                notes: { type: "string", description: "Shown after answering, e.g. a grammar note or the video it came from" },
+                pronunciation: { type: "string" },
+                alternativeAnswers: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "Other words accepted as correct",
                 },
               },
-              required: ["sentence", "targetWord", "translation"],
+              required: ["sentence", "translation"],
             },
           },
         },
@@ -209,83 +218,57 @@ export default defineContentScript({
       annotations: {
         readOnlyHint: false,
       },
-      execute: (inputArguments) => {
-        const collectionName = inputArguments.collectionName?.trim() || "YouTube Immersion";
+      execute: async (inputArguments) => {
         const cards = Array.isArray(inputArguments.cards) ? inputArguments.cards : [];
-        const validCards = cards.filter(
-          (card) => Boolean(card && card.sentence && card.targetWord && card.translation)
-        );
-
-        if (validCards.length === 0) {
-          return {
-            success: false,
-            errorMessage: "No valid cards provided. Each card must include sentence, targetWord, and translation.",
-          };
+        if (cards.length === 0) {
+          return { success: false, errorMessage: "cards must contain at least one sentence." };
+        }
+        if (cards.length > MAX_CARDS_PER_CALL) {
+          return { success: false, errorMessage: `Send at most ${MAX_CARDS_PER_CALL} sentences per call.` };
         }
 
-        const tsvContent = convertCardsToTsv(validCards);
-
-        // Check if an import textarea exists in the DOM to populate directly
-        const importTextarea = document.querySelector(
-          "textarea[name='sentences'], textarea.collection-import-input, #bulk-import-sentences"
-        ) as HTMLTextAreaElement | null;
-
-        let injectedIntoDom = false;
-        if (importTextarea) {
-          const previousValue = importTextarea.value;
-          const nextValue = previousValue ? `${previousValue}\n${tsvContent}` : tsvContent;
-          const nativeTextareaValueSetter = Object.getOwnPropertyDescriptor(
-            window.HTMLTextAreaElement.prototype,
-            "value"
-          )?.set;
-          if (typeof nativeTextareaValueSetter === "function") {
-            nativeTextareaValueSetter.call(importTextarea, nextValue);
-          } else {
-            importTextarea.value = nextValue;
-          }
-          importTextarea.dispatchEvent(new Event("input", { bubbles: true }));
-          importTextarea.dispatchEvent(new Event("change", { bubbles: true }));
-          injectedIntoDom = true;
-        }
-
-        // Persist to local storage as safety net
-        let stagedToStorage = false;
         try {
-          const rawStaged = window.localStorage.getItem("clozemaster_staged_harvest");
-          const stagedList: StagedClozeCollection[] = rawStaged ? JSON.parse(rawStaged) : [];
-          stagedList.unshift({
-            collectionName,
-            timestamp: Date.now(),
-            cards: validCards,
-            tsvContent,
-          });
-          window.localStorage.setItem(
-            "clozemaster_staged_harvest",
-            JSON.stringify(stagedList.slice(0, 10))
-          );
-          stagedToStorage = true;
-        } catch (storageError) {
-          console.warn("[Clozemaster WebMCP] Could not persist staged cards to localStorage:", storageError);
-        }
+          const collections = await listMyCollections();
+          const requestedName = inputArguments.collectionName?.trim();
+          let collection: ClozemasterCollection | undefined;
+          let created = false;
 
-        return {
-          success: true,
-          collectionName,
-          cardsCount: validCards.length,
-          tsvContent,
-          injectedIntoDom,
-          stagedToStorage,
-          preview: validCards.slice(0, 3),
-          message: injectedIntoDom
-            ? `Injected ${validCards.length} cards into Clozemaster import textarea and staged for collection "${collectionName}".`
-            : `Staged ${validCards.length} cards for Clozemaster collection "${collectionName}" in local storage (ready to paste or import).`,
-        };
+          if (typeof inputArguments.collectionId === "number") {
+            collection = collections.find((candidate) => candidate.id === inputArguments.collectionId);
+            if (!collection) {
+              return { success: false, errorMessage: `No collection of yours has ID ${inputArguments.collectionId}.` };
+            }
+          } else if (requestedName) {
+            collection = collections.find(
+              (candidate) => candidate.name.trim().toLowerCase() === requestedName.toLowerCase()
+            );
+            if (!collection) {
+              collection = await createCollection(requestedName);
+              created = true;
+            }
+          } else {
+            return { success: false, errorMessage: "Pass collectionId or collectionName." };
+          }
+
+          const results = await addCardsToCollection(collection, cards);
+          const addedCount = results.filter((result) => result.added).length;
+          return {
+            success: addedCount > 0,
+            collection: { id: collection.id, name: collection.name, created },
+            addedCount,
+            failedCount: results.length - addedCount,
+            results,
+          };
+        } catch (error) {
+          return { success: false, errorMessage: error instanceof Error ? error.message : String(error) };
+        }
       },
     };
 
     await Promise.all([
       registerWebMcpTool(getClozemasterSessionSummaryTool, abortController.signal),
-      registerWebMcpTool(stageClozeCardsTool, abortController.signal),
+      registerWebMcpTool(listCollectionsTool, abortController.signal),
+      registerWebMcpTool(addSentencesTool, abortController.signal),
     ]);
   },
 });

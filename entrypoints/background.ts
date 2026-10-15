@@ -24,6 +24,13 @@ import {
 import { resolveVideoLanguage } from "../utils/channelLanguage";
 import { getVideoIdFromUrl, isYoutubeWatchOrShortsUrl } from "../utils/format";
 import { queryReadingList, removeReadingListItemById } from "../utils/readingList";
+import {
+  buildApprovalRequest,
+  ensureReadGrant,
+  handleApprovalPageMessage,
+  isExtensionPageSender,
+  requestApproval,
+} from "../utils/approvals";
 
 const BATCH_FLUSH_MS = 80;
 let pendingCacheUpdates = new Map<string, { url: string; metadata: Omit<CachedMetadata, "timestamp"> }>();
@@ -90,7 +97,11 @@ async function clearMetadataCacheInStore(): Promise<void> {
 }
 
 export default defineBackground(() => {
-  browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (handleApprovalPageMessage(message, sender, sendResponse)) {
+      return true;
+    }
+
     if (message.action === "ping") {
       sendResponse({ status: "ok" });
       return;
@@ -134,7 +145,18 @@ export default defineBackground(() => {
     }
 
     if (message.action === "get-open-tabs-catalog") {
-      void getOpenTabsCatalog()
+      void ensureReadGrant(
+        sender,
+        "open-tabs",
+        buildApprovalRequest(sender, {
+          title: "Share your open YouTube tabs?",
+          summary:
+            "This page wants the titles, channels and links of every YouTube tab open in all your windows.",
+          confirmLabel: "Share tabs",
+          destructive: false,
+        })
+      )
+        .then(() => getOpenTabsCatalog())
         .then((catalog) => sendResponse({ success: true, catalog }))
         .catch((error) =>
           sendResponse({
@@ -146,7 +168,7 @@ export default defineBackground(() => {
     }
 
     if (message.action === "stage-focused-study-queue") {
-      void stageFocusedStudyQueue(message.payload as StageQueuePayload, _sender.tab?.id)
+      void stageFocusedStudyQueue(message.payload as StageQueuePayload, sender)
         .then((result) => sendResponse(result))
         .catch((error) =>
           sendResponse({
@@ -158,7 +180,17 @@ export default defineBackground(() => {
     }
 
     if (message.action === "get-reading-list-catalog") {
-      void queryReadingList(false)
+      void ensureReadGrant(
+        sender,
+        "reading-list",
+        buildApprovalRequest(sender, {
+          title: "Share your Reading List?",
+          summary: "This page wants the title and link of every unread item in Chrome's Reading List.",
+          confirmLabel: "Share Reading List",
+          destructive: false,
+        })
+      )
+        .then(() => queryReadingList(false))
         .then((items) => sendResponse({ success: true, items }))
         .catch((error) =>
           sendResponse({
@@ -170,18 +202,30 @@ export default defineBackground(() => {
     }
 
     if (message.action === "shelve-and-clear-reading-item") {
-      const readingItemId = typeof message.id === "string" ? message.id : "";
-      void removeReadingListItemById(readingItemId)
-        .then((removed) => {
-          if (!removed) {
-            sendResponse({
-              success: false,
-              errorMessage:
-                "That id is not on the reading list. Call get_reading_list_catalog and pass an id from it.",
-            });
+      const readingItemId = typeof message.id === "string" ? message.id.trim() : "";
+      const notOnListMessage =
+        "That id is not on the reading list. Call get_reading_list_catalog and pass an id from it.";
+      void queryReadingList(false)
+        .then(async (items) => {
+          const item = items.find((candidate) => candidate.id === readingItemId);
+          if (!item) {
+            sendResponse({ success: false, errorMessage: notOnListMessage });
             return;
           }
-          sendResponse({ success: true, id: readingItemId });
+          const approved = await requestApproval(
+            buildApprovalRequest(sender, {
+              title: "Remove a Reading List item?",
+              summary: "This page wants to remove this item from Chrome's Reading List.",
+              items: [item.title ? `${item.title} — ${item.url}` : item.url],
+              confirmLabel: "Remove item",
+              destructive: true,
+            })
+          );
+          if (!approved) throw new Error("The user declined to remove this Reading List item.");
+          const removed = await removeReadingListItemById(readingItemId);
+          sendResponse(
+            removed ? { success: true, id: readingItemId } : { success: false, errorMessage: notOnListMessage }
+          );
         })
         .catch((error) =>
           sendResponse({
@@ -293,8 +337,7 @@ async function findMandalaTab() {
       const urlObject = new URL(candidateTab.url);
       return (
         urlObject.hostname === "mandalamethod.vercel.app" ||
-        urlObject.hostname === "localhost" ||
-        urlObject.hostname === "127.0.0.1"
+        (import.meta.env.DEV && urlObject.host === "localhost:5173")
       );
     } catch {
       return false;
@@ -487,7 +530,10 @@ async function getOpenTabsCatalog() {
   });
 }
 
-async function stageFocusedStudyQueue(payload: StageQueuePayload, senderTabId?: number) {
+const MAX_SESSION_NAME_LENGTH = 80;
+
+async function stageFocusedStudyQueue(payload: StageQueuePayload, sender: Browser.runtime.MessageSender) {
+  const senderTabId = sender.tab?.id;
   await storeReady;
 
   if (!payload || !Array.isArray(payload.orderedTabIds) || payload.orderedTabIds.length === 0) {
@@ -541,7 +587,25 @@ async function stageFocusedStudyQueue(payload: StageQueuePayload, senderTabId?: 
         };
       });
 
-      const sessionName = payload.sessionName?.trim() || "Stashed Backlog";
+      if (!isExtensionPageSender(sender)) {
+        const approved = await requestApproval(
+          buildApprovalRequest(sender, {
+            title: `Close ${tabsToStash.length} YouTube ${tabsToStash.length === 1 ? "tab" : "tabs"}?`,
+            summary:
+              "This page wants to save these tabs as a session in Study Harvester and then close them. You can reopen them from Saved Sessions.",
+            items: tabsToStash.map((tab) => tab.title || tab.url),
+            confirmLabel: "Stash and close",
+            destructive: true,
+          })
+        );
+        if (!approved) throw new Error("The user declined to stash and close the other tabs.");
+      }
+
+      const sessionName =
+        (typeof payload.sessionName === "string" ? payload.sessionName.trim() : "").slice(
+          0,
+          MAX_SESSION_NAME_LENGTH
+        ) || "Stashed Backlog";
       await saveSession(sessionName, tabsToStash);
       stashedCount = tabsToStash.length;
 
@@ -550,13 +614,15 @@ async function stageFocusedStudyQueue(payload: StageQueuePayload, senderTabId?: 
         .filter((tabId): tabId is number => typeof tabId === "number");
 
       if (tabIdsToRemove.length > 0) {
+        // One call with all IDs fails as a whole if the user closed any tab while the
+        // approval window was open, so close them one by one.
+        const removeTabs = () =>
+          Promise.allSettled(tabIdsToRemove.map((tabId) => browser.tabs.remove(tabId)));
         const callerIsTargeted = senderTabId !== undefined && tabIdsToRemove.includes(senderTabId);
         if (callerIsTargeted) {
-          setTimeout(() => {
-            void browser.tabs.remove(tabIdsToRemove).catch(() => {});
-          }, 150);
+          setTimeout(() => void removeTabs(), 150);
         } else {
-          await browser.tabs.remove(tabIdsToRemove);
+          await removeTabs();
         }
       }
     }
@@ -570,6 +636,8 @@ async function stageFocusedStudyQueue(payload: StageQueuePayload, senderTabId?: 
       try {
         await browser.scripting.executeScript({
           target: { tabId: firstTabId },
+          // movie_player.setPlaybackRate is a page-side method, invisible from the isolated world.
+          world: "MAIN",
           func: (speed: number) => {
             const video = document.querySelector("video");
             if (video) video.playbackRate = speed;

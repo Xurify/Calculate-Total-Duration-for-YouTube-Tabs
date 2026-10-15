@@ -1,5 +1,8 @@
 /**
- * Secure postMessage bridge between MAIN world (WebMCP) and ISOLATED world (Extension APIs).
+ * postMessage bridge between MAIN world (WebMCP) and ISOLATED world (Extension APIs).
+ *
+ * Any script on the page can send these messages, so this is not a trust boundary:
+ * the background asks the user to approve anything sensitive (see utils/approvals.ts).
  */
 
 export const BRIDGE_SOURCE_MAIN = "webmcp-study-harvester-main";
@@ -20,7 +23,8 @@ export interface BridgeResponseMessage<Result = unknown> {
   errorMessage?: string;
 }
 
-const BRIDGE_TIMEOUT_MILLISECONDS = 15000;
+// Long enough for the user to answer an approval window, which gives up after 120s.
+const BRIDGE_TIMEOUT_MILLISECONDS = 150_000;
 
 /**
  * Dispatches a request from the MAIN world to the ISOLATED world and awaits the response.

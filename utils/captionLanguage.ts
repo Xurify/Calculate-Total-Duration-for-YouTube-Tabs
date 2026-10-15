@@ -12,6 +12,8 @@ export interface LanguageDetectionHints {
 export interface DetectedLanguage {
   language: string | null;
   languageName: string | null;
+  /** Only YouTube's speech recognition backs this; it mislabels languages it lacks (Estonian → Finnish). */
+  weak?: boolean;
 }
 
 interface AudioTrackLabel {
@@ -32,8 +34,12 @@ interface StreamingFormat {
 
 export interface PlayerResponseForLanguage {
   videoDetails?: {
+    videoId?: string;
+    author?: string;
     defaultAudioLanguageCode?: string;
     defaultLanguage?: string;
+    title?: string;
+    shortDescription?: string;
   };
   microformat?: {
     playerMicroformatRenderer?: {
@@ -199,7 +205,7 @@ export function languageFromCaptionTracks(
   }
 
   if (asrTracks.length === 1) {
-    return toDetected(asrTracks[0]);
+    return { ...toDetected(asrTracks[0]), weak: true };
   }
 
   if (asrTracks.length > 1) {
@@ -207,7 +213,7 @@ export function languageFromCaptionTracks(
   }
 
   const first = captionTracks.find((track) => track.languageCode);
-  return first ? toDetected(first) : NO_LANGUAGE;
+  return first ? { ...toDetected(first), weak: true } : NO_LANGUAGE;
 }
 
 export function extractLanguageHintsFromPlayerResponse(
@@ -237,4 +243,11 @@ export function detectLanguageFromPlayerResponse(
   if (fromDefaultAudioTrack) return fromDefaultAudioTrack;
 
   return languageFromCaptionTracks(captionTracks, extractLanguageHintsFromPlayerResponse(playerResponse));
+}
+
+export function languageTextFromPlayerResponse(
+  playerResponse: PlayerResponseForLanguage | null | undefined
+): string {
+  const details = playerResponse?.videoDetails;
+  return [details?.title, details?.shortDescription].filter(Boolean).join("\n");
 }

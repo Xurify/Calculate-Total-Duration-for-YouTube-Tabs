@@ -7,7 +7,12 @@ import {
   type UserPrefs,
 } from "../utils/storage";
 import { applyMetadataBatchToCache, normalizeMetadataBatch } from "../utils/store";
-import { detectLanguageFromPlayerResponse } from "../utils/captionLanguage";
+import {
+  detectLanguageFromPlayerResponse,
+  languageTextFromPlayerResponse,
+  type DetectedLanguage,
+} from "../utils/captionLanguage";
+import { resolveVideoLanguage } from "../utils/channelLanguage";
 import { getVideoIdFromUrl, isYoutubeWatchOrShortsUrl } from "../utils/format";
 import { queryReadingList, removeReadingListItem } from "../utils/readingList";
 
@@ -337,6 +342,7 @@ interface ParsedPlayerResponse {
     lengthSeconds?: string;
     defaultAudioLanguageCode?: string;
     defaultLanguage?: string;
+    shortDescription?: string;
   };
   microformat?: {
     playerMicroformatRenderer?: {
@@ -358,16 +364,17 @@ function parseMetadataFromHtml(html: string): {
   channel: string;
   isLive: boolean;
   syncedVideoId: string | null;
-  language?: string | null;
-  languageName?: string | null;
+  detectedLanguage: DetectedLanguage;
+  languageText: string;
+  uiLanguage: string | null;
 } {
   let duration = 0;
   let title = "";
   let channel = "";
   let isLive = false;
   let syncedVideoId: string | null = null;
-  let language: string | null = null;
-  let languageName: string | null = null;
+  let detectedLanguage: DetectedLanguage = { language: null, languageName: null };
+  let languageText = "";
 
   const playerResponseMatch =
     html.match(/var ytInitialPlayerResponse\s*=\s*({.+?});/s) ||
@@ -390,9 +397,8 @@ function parseMetadataFromHtml(html: string): {
         }
       }
 
-      const detected = detectLanguageFromPlayerResponse(playerResponse);
-      language = detected.language;
-      languageName = detected.languageName;
+      detectedLanguage = detectLanguageFromPlayerResponse(playerResponse);
+      languageText = languageTextFromPlayerResponse(playerResponse);
     } catch (_) {}
   }
   if (duration === 0) {
@@ -414,8 +420,9 @@ function parseMetadataFromHtml(html: string): {
     channel,
     isLive,
     syncedVideoId,
-    language,
-    languageName,
+    detectedLanguage,
+    languageText,
+    uiLanguage: html.match(/<html[^>]*\slang="([^"]+)"/)?.[1] ?? null,
   };
 }
 
@@ -442,9 +449,16 @@ async function fetchOneTab(tab: TabToSync): Promise<boolean> {
       channel,
       isLive,
       syncedVideoId,
-      language,
-      languageName,
+      detectedLanguage,
+      languageText,
+      uiLanguage,
     } = parseMetadataFromHtml(html);
+    const { language, languageName } = await resolveVideoLanguage(
+      detectedLanguage,
+      languageText,
+      { channelName: channel, videoId: syncedVideoId },
+      uiLanguage
+    );
     if (duration > 0 || title || isLive) {
       const metadata: Omit<CachedMetadata, "timestamp"> = {
         seconds: duration,

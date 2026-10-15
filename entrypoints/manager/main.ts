@@ -38,7 +38,12 @@ import {
   type StoreState,
 } from "../../utils/store";
 import { formatTime, formatCompact, formatDurationWords, formatOffset, parseTimeParam, getVideoIdFromUrl, normalizeText, isYoutubeWatchOrShortsUrl } from "../../utils/format";
-import { detectLanguageFromPlayerResponse, normalizeLanguageCode } from "../../utils/captionLanguage";
+import {
+  detectLanguageFromPlayerResponse,
+  languageTextFromPlayerResponse,
+  normalizeLanguageCode,
+} from "../../utils/captionLanguage";
+import { resolveVideoLanguage } from "../../utils/channelLanguage";
 import {
   buildTabsFromVideos,
   countItemsByVideoId,
@@ -554,7 +559,12 @@ async function probeTabsMetadata() {
               videoDetails: {
                 defaultAudioLanguageCode: playerResponse?.videoDetails?.defaultAudioLanguageCode,
                 defaultLanguage: playerResponse?.videoDetails?.defaultLanguage,
+                videoId: playerResponse?.videoDetails?.videoId as string | undefined,
+                author: playerResponse?.videoDetails?.author as string | undefined,
+                title: playerResponse?.videoDetails?.title as string | undefined,
+                shortDescription: playerResponse?.videoDetails?.shortDescription as string | undefined,
               },
+              uiLanguage: document.documentElement.lang,
               microformat: {
                 playerMicroformatRenderer: {
                   defaultAudioLanguage: micro?.defaultAudioLanguage,
@@ -710,7 +720,13 @@ async function probeTabsMetadata() {
         const result = results[0].result;
 
         if (result.languageSource) {
-          const detected = detectLanguageFromPlayerResponse(result.languageSource);
+          const sourceDetails = result.languageSource.videoDetails;
+          const detected = await resolveVideoLanguage(
+            detectLanguageFromPlayerResponse(result.languageSource),
+            languageTextFromPlayerResponse(result.languageSource),
+            { channelName: sourceDetails?.author, videoId: sourceDetails?.videoId },
+            result.languageSource.uiLanguage
+          );
           result.language = detected.language;
           result.languageName = detected.languageName;
           const renderer = result.languageSource.captions?.playerCaptionsTracklistRenderer;

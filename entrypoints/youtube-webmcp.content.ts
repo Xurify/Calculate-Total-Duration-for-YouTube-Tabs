@@ -7,6 +7,11 @@ import {
   registerWebMcpTool,
   type WebMcpToolDefinition,
 } from "../utils/webmcp";
+import {
+  detectLanguageFromPlayerResponse,
+  languageTextFromPlayerResponse,
+  type DetectedLanguage,
+} from "../utils/captionLanguage";
 import { sendBridgeRequest } from "../utils/webmcpBridge";
 
 interface PlayerCaptionTrack {
@@ -29,6 +34,7 @@ interface PlayerResponseData {
     author?: string;
     isLive?: boolean;
     lengthSeconds?: string;
+    shortDescription?: string;
   };
   captions?: {
     playerCaptionsTracklistRenderer?: PlayerResponseCaptionContainer;
@@ -276,7 +282,7 @@ export default defineContentScript({
       annotations: {
         readOnlyHint: true,
       },
-      execute: () => {
+      execute: async () => {
         const videoElement = document.querySelector("video");
         const videoId = getVideoIdFromCurrentLocation();
         const playerResponse = getPlayerResponseFromWindow(videoId);
@@ -317,7 +323,22 @@ export default defineContentScript({
 
         const captionTracks =
           playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
-        const primaryTrack = captionTracks[0];
+        let detected = detectLanguageFromPlayerResponse(playerResponse);
+        if (!detected.language || detected.weak) {
+          // browser.i18n lives in the isolated world, so the YouTube content script runs CLD for us.
+          detected = await sendBridgeRequest<
+            { detected: DetectedLanguage; text: string; channelName: string; videoId: string | null },
+            DetectedLanguage
+          >(
+            "refine-language",
+            {
+              detected,
+              text: languageTextFromPlayerResponse(playerResponse),
+              channelName: playerResponse?.videoDetails?.author || channelName,
+              videoId,
+            }
+          ).catch(() => detected);
+        }
 
         return {
           videoId,
@@ -327,8 +348,8 @@ export default defineContentScript({
           currentTimeSeconds,
           remainingSeconds: isLive ? 0 : remainingSeconds,
           isLive,
-          language: primaryTrack?.languageCode ?? null,
-          languageName: primaryTrack?.name?.simpleText ?? null,
+          language: detected.language,
+          languageName: detected.languageName,
           availableLanguages: captionTracks.map((track) => ({
             code: track.languageCode,
             name: track.name?.simpleText ?? track.languageCode,

@@ -304,6 +304,44 @@ body {
     background-color: var(--color-border-hover) !important;
   }
 
+  /* First paint: either the snapshot (inert until real data lands) or a full skeleton. */
+  .desk-snapshot #tab-list,
+  .desk-snapshot #facet-rail,
+  .desk-snapshot #time-bar,
+  .desk-snapshot #time-bar-rest,
+  .desk-snapshot #planner {
+    pointer-events: none;
+  }
+
+  #time-bar-skeleton {
+    display: none;
+  }
+
+  .desk-loading #time-bar-skeleton {
+    display: flex;
+    background: color-mix(in srgb, var(--color-surface-hover) 70%, transparent);
+  }
+
+  .desk-loading #view-toolbar > * {
+    visibility: hidden;
+  }
+
+  .facet-skeleton {
+    @apply h-[30px] my-px ml-7 rounded-md;
+    background: color-mix(in srgb, var(--color-surface-hover) 70%, transparent);
+    background-clip: content-box;
+    padding: 7px 0;
+  }
+
+  .card-skeleton {
+    @apply rounded-lg overflow-hidden;
+    aspect-ratio: 16 / 13;
+    background:
+      linear-gradient(color-mix(in srgb, var(--color-surface-hover) 80%, transparent), color-mix(in srgb, var(--color-surface-hover) 80%, transparent)) top / 100% 62% no-repeat,
+      linear-gradient(color-mix(in srgb, var(--color-surface-hover) 55%, transparent), color-mix(in srgb, var(--color-surface-hover) 55%, transparent)) 0 72% / 85% 9% no-repeat,
+      linear-gradient(color-mix(in srgb, var(--color-surface-hover) 45%, transparent), color-mix(in srgb, var(--color-surface-hover) 45%, transparent)) 0 90% / 45% 7% no-repeat;
+  }
+
   .queue-skeleton {
     @apply h-[4.75rem] border-b border-border/60 last:border-b-0;
     background: linear-gradient(90deg, transparent 0 5.25rem, color-mix(in srgb, var(--color-surface-hover) 60%, transparent) 5.25rem 11.25rem, transparent 11.25rem 12rem, color-mix(in srgb, var(--color-surface-hover) 45%, transparent) 12rem 50%, transparent 50%);

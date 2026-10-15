@@ -1,11 +1,15 @@
-// Runs synchronously while the page parses, before the manager's module script loads tabs,
-// so the rail, heading and time bar show the last known desk instead of empty boxes.
+// Runs synchronously while the page parses, before the manager's module script loads tabs.
+// With a snapshot it paints the last known desk (rail, heading, time bar, planner, list);
+// without one it marks the page as loading so the skeleton shows instead of zeros.
 (function paintLastKnownDesk() {
+  var root = document.documentElement;
   try {
     var raw = localStorage.getItem("desk-snapshot");
-    if (!raw) return;
-    var snap = JSON.parse(raw);
-    if (!snap || snap.v !== 1) return;
+    var snap = raw ? JSON.parse(raw) : null;
+    if (!snap || snap.v !== 2) {
+      root.classList.add("desk-loading");
+      return;
+    }
     var set = function (id, html) {
       var el = document.getElementById(id);
       if (el && typeof html === "string") el.innerHTML = html;
@@ -16,8 +20,7 @@
     };
     var show = function (id, visible) {
       var el = document.getElementById(id);
-      if (!el) return;
-      el.classList.toggle("hidden", !visible);
+      if (el) el.classList.toggle("hidden", !visible);
     };
     set("facet-rail", snap.rail);
     set("time-bar", snap.timeBar);
@@ -36,8 +39,9 @@
       planner.classList.remove("hidden");
       planner.classList.add("flex");
     }
-    document.documentElement.classList.add("desk-snapshot");
+    if (snap.list) set("tab-list", snap.list);
+    root.classList.add("desk-snapshot");
   } catch (error) {
-    return;
+    root.classList.add("desk-loading");
   }
 })();

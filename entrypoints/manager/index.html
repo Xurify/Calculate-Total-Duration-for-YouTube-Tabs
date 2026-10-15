@@ -50,7 +50,11 @@
 
     <main class="flex-1 min-h-0 flex overflow-hidden">
 
-      <aside id="facet-rail" class="w-[236px] shrink-0 border-r border-border overflow-y-auto custom-scrollbar px-2 py-3 flex flex-col gap-4"></aside>
+      <aside id="facet-rail" class="w-[236px] shrink-0 border-r border-border overflow-y-auto custom-scrollbar px-2 py-3 flex flex-col gap-4">
+        <div class="facet-group" aria-hidden="true"><div class="facet-skeleton w-[88%]"></div><div class="facet-skeleton w-[70%]"></div></div>
+        <div class="facet-group" aria-hidden="true"><div class="facet-head">Languages</div><div class="facet-skeleton w-[60%]"></div><div class="facet-skeleton w-[64%]"></div><div class="facet-skeleton w-[58%]"></div></div>
+        <div class="facet-group" aria-hidden="true"><div class="facet-head">Channels</div><div class="facet-skeleton w-[76%]"></div><div class="facet-skeleton w-[52%]"></div><div class="facet-skeleton w-[68%]"></div><div class="facet-skeleton w-[61%]"></div></div>
+      </aside>
 
       <section class="flex-1 min-w-0 flex flex-col overflow-hidden">
 
@@ -61,9 +65,9 @@
                 <span id="desk-kicker">On the desk</span> · <span id="current-view-title">All windows</span>
               </div>
               <div id="desk-time" class="font-display text-[40px] leading-none tracking-[-0.02em] text-text-primary whitespace-nowrap">
-                <span id="desk-time-value">0 min</span> <span class="text-text-muted" id="desk-time-suffix">left</span>
+                <span id="desk-time-value">Reading your tabs</span><span class="text-text-muted" id="desk-time-suffix">…</span>
               </div>
-              <div id="current-view-stats" class="text-sm text-text-secondary truncate"></div>
+              <div id="current-view-stats" class="text-sm text-text-secondary truncate min-h-5">&nbsp;</div>
             </div>
             <div class="flex-1"></div>
             <div id="selection-actions" class="hidden items-center gap-2 shrink-0">
@@ -97,6 +101,7 @@
             <button type="button" id="btn-stage-study-header" class="hidden" aria-hidden="true"></button>
           </div>
           <div id="time-bar" class="time-bar hidden" role="img" aria-label="Where the time goes, by language"></div>
+          <div id="time-bar-skeleton" class="time-bar time-bar--skeleton" aria-hidden="true"></div>
           <div id="time-bar-rest" class="time-bar-rest hidden"></div>
         </div>
 
@@ -130,8 +135,8 @@
         </div>
 
         <div id="tab-list" class="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-8 py-5">
-          <div class="queue-card" aria-hidden="true">
-            <div class="queue-skeleton"></div><div class="queue-skeleton"></div><div class="queue-skeleton"></div><div class="queue-skeleton"></div><div class="queue-skeleton"></div><div class="queue-skeleton"></div>
+          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 p-3" aria-hidden="true">
+            <div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div>
           </div>
         </div>
         <!-- Paints the last known rail, heading and time bar before tabs load, so nothing jumps. -->

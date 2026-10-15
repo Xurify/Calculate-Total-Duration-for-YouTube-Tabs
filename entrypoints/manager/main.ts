@@ -3352,9 +3352,19 @@ function renderFacetRail(): void {
   }
 }
 
+let deskSnapshotTimeout: ReturnType<typeof setTimeout> | null = null;
+
 /** What public/desk-init.js paints on the next load, before any tab is read. Only the plain desk, unfiltered. */
 function saveDeskSnapshot(): void {
+  document.documentElement.classList.remove("desk-snapshot", "desk-loading");
   if (hasAnyFacet() || currentWindowId !== "all" || searchQuery) return;
+  if (deskSnapshotTimeout != null) clearTimeout(deskSnapshotTimeout);
+  deskSnapshotTimeout = setTimeout(writeDeskSnapshot, 1500);
+}
+
+function writeDeskSnapshot(): void {
+  deskSnapshotTimeout = null;
+  if (hasAnyFacet() || currentWindowId !== "all" || searchQuery || selectedSession || isReadingListView || isSessionsView) return;
   const html = (id: string) => document.getElementById(id)?.innerHTML ?? "";
   const text = (id: string) => document.getElementById(id)?.textContent ?? "";
   const visible = (id: string) => !document.getElementById(id)?.classList.contains("hidden");
@@ -3362,7 +3372,8 @@ function saveDeskSnapshot(): void {
     localStorage.setItem(
       "desk-snapshot",
       JSON.stringify({
-        v: 1,
+        v: 2,
+        list: html("tab-list"),
         rail: html("facet-rail"),
         timeBar: visible("time-bar") ? html("time-bar") : "",
         timeBarRest: visible("time-bar-rest") ? html("time-bar-rest") : "",

@@ -4435,12 +4435,13 @@ function setupListeners() {
     const sectionId = button?.dataset.facetValue;
     if (!sectionId || sectionId === "__unsorted") return;
     event.preventDefault();
+    // The document-level contextmenu listener closes every menu; keep it from closing this one.
+    event.stopPropagation();
+    document.getElementById("sidebar-context-menu")?.classList.add("hidden");
+    document.getElementById("tab-section-context-menu")?.classList.add("hidden");
     sectionHeaderContextTarget = { sectionId };
     const menu = document.getElementById("section-header-context-menu");
-    if (menu) {
-      menu.classList.remove("hidden");
-      positionFixedMenu(menu, event.clientX, event.clientY);
-    }
+    if (menu) positionFixedMenu(menu, event.clientX, event.clientY);
   });
 
   document.getElementById("study-modal-close")?.addEventListener("click", closeStudySessionModal);
@@ -5288,7 +5289,7 @@ function setupListeners() {
     const section = sections.find((s) => s.id === targetContext.sectionId);
     const confirmed = await showConfirm({
       title: "Delete pile",
-      message: `Delete “${section?.name ?? "section"}”? Videos move to Unsorted.`,
+      message: `Delete “${section?.name ?? "pile"}”? Its videos stay on the desk, just not in a pile.`,
       confirmLabel: "Delete",
       confirmDanger: true,
     });

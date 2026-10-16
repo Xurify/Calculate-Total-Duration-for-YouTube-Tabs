@@ -1,10 +1,13 @@
 import { registerBridgeListener } from "../utils/webmcpBridge";
+import { newTypeId } from "../utils/typeId";
+import type { TimeEntry } from "../utils/timeLog";
 import {
   mandalaStatusFor,
   saveCachedMandalaSummary,
   shelfLinksForVideo,
   PENDING_MANDALA_LOGS_KEY,
   PENDING_MANDALA_SHELF_LINKS_KEY,
+  type CachedMandalaAction,
   type CachedMandalaPillar,
   type CachedMandalaShelfLink,
   type CachedMandalaSummary,
@@ -94,26 +97,8 @@ function getActiveChart(library: MandalaChartLibrary | null): MandalaChartRecord
   return active || library.charts[0] || null;
 }
 
-const TYPE_ID_ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz";
-
-/** Same TypeID format as Mandala's newId: the kind, then a UUIDv7 in lowercase Crockford base32. */
 function newMandalaId(kind: "tool"): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  let time = Date.now();
-  for (let index = 5; index >= 0; index--) {
-    bytes[index] = time % 256;
-    time = Math.floor(time / 256);
-  }
-  bytes[6] = (bytes[6] & 0x0f) | 0x70;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  let value = 0n;
-  for (const byte of bytes) value = (value << 8n) | BigInt(byte);
-  let suffix = "";
-  for (let index = 0; index < 26; index++) {
-    suffix = TYPE_ID_ALPHABET[Number(value & 31n)] + suffix;
-    value >>= 5n;
-  }
-  return `${kind}_${suffix}`;
+  return newTypeId(kind);
 }
 
 function dateKeyOf(date: Date): string {
@@ -141,15 +126,18 @@ function extractChartSummary(chartRecord: MandalaChartRecord): CachedMandalaSumm
   const shelfLinks: CachedMandalaShelfLink[] = [];
 
   for (let pillarIndex = 0; pillarIndex < 8; pillarIndex++) {
-    let actionCount = 0;
+    const actions: CachedMandalaAction[] = [];
     for (let slot = 0; slot < 8; slot++) {
-      if (actionText(chartData, pillarIndex, slot)) actionCount++;
+      const text = actionText(chartData, pillarIndex, slot);
+      const id = chartData.actionIds?.[pillarIndex]?.[slot];
+      if (text && id) actions.push({ id, text, kind: chartData.meta?.[id]?.kind });
     }
     pillars.push({
       index: pillarIndex,
       title: pillarTitle(chartData, pillarIndex),
       named: Boolean(chartData.pillars?.[pillarIndex]?.trim()),
-      actionCount,
+      actionCount: actions.length,
+      actions,
     });
 
     for (const tool of chartData.tools?.[`p${pillarIndex}`] || []) {
@@ -295,12 +283,102 @@ async function flushPendingMandalaQueues(): Promise<void> {
   }
 }
 
+/**
+ * Time the tracker measured goes to the page by postMessage, the way Mandala's ingest.ts takes it. Mandala
+ * answers each request by id, so a request lost on the way is simply sent again next time. An older
+ * Mandala without ingest never says ready, and the entries wait in the extension.
+ */
+const INGEST_VERSION = 1;
+let mandalaTakesTime = false;
+let handoverInFlight = false;
+let handoverAskedAgain = false;
+
+type PendingTimeEntry = TimeEntry & { minutes: number };
+
+interface IngestResultMessage {
+  type: "mandala:ingest:result";
+  requestId: string;
+  logged?: string[];
+  known?: string[];
+  skipped?: { id: string; reason: string }[];
+}
+
+async function handTimeToMandala(): Promise<void> {
+  if (!mandalaTakesTime) return;
+  if (handoverInFlight) {
+    handoverAskedAgain = true;
+    return;
+  }
+  handoverInFlight = true;
+  try {
+    const response = (await browser.runtime.sendMessage({ action: "get-pending-time-entries" })) as { entries?: PendingTimeEntry[] } | undefined;
+    const entries = response?.entries ?? [];
+    if (entries.length === 0) return;
+    const requestId = crypto.randomUUID();
+    const sessions = entries.map((entry) => ({
+      id: entry.id,
+      // A shelf link carries its own action in Mandala; a rule names one, or leaves the pillar to pick.
+      ...(entry.linkId ? { link: entry.linkId } : entry.actionId ? { action: entry.actionId } : {}),
+      pillar: entry.pillarIndex,
+      minutes: entry.minutes,
+      ...(entry.mode === "passive" ? { mode: "passive" } : {}),
+      startedAt: entry.startedAt,
+    }));
+    const result = await new Promise<IngestResultMessage | null>((resolve) => {
+      const timeout = window.setTimeout(() => {
+        window.removeEventListener("message", onMessage);
+        resolve(null);
+      }, 5000);
+      const onMessage = (event: MessageEvent) => {
+        if (event.source !== window) return;
+        const data = event.data as IngestResultMessage | undefined;
+        if (data?.type !== "mandala:ingest:result" || data.requestId !== requestId) return;
+        window.clearTimeout(timeout);
+        window.removeEventListener("message", onMessage);
+        resolve(data);
+      };
+      window.addEventListener("message", onMessage);
+      window.postMessage({ type: "mandala:ingest", version: INGEST_VERSION, requestId, sessions }, window.location.origin);
+    });
+    if (!result) return;
+    await browser.runtime.sendMessage({
+      action: "mark-time-entries-synced",
+      logged: result.logged ?? [],
+      known: result.known ?? [],
+      skipped: result.skipped ?? [],
+    });
+    void syncMandalaSummaryToExtension();
+  } catch (error) {
+    console.warn("[Study Harvester] Could not hand time to Mandala:", error);
+  } finally {
+    handoverInFlight = false;
+    if (handoverAskedAgain) {
+      handoverAskedAgain = false;
+      void handTimeToMandala();
+    }
+  }
+}
+
+function greetMandala(): void {
+  window.addEventListener("message", (event) => {
+    if (event.source !== window) return;
+    const data = event.data as { type?: string } | undefined;
+    if (data?.type === "mandala:ready" && !mandalaTakesTime) {
+      mandalaTakesTime = true;
+      void handTimeToMandala();
+    }
+  });
+  window.postMessage({ type: "mandala:hello" }, window.location.origin);
+}
+
 export default defineContentScript({
   matches: [
     "https://mandalamethod.vercel.app/*",
     ...(import.meta.env.DEV ? ["http://localhost:5173/*"] : []),
   ],
   main() {
+    greetMandala();
+
     registerBridgeListener({
       "get-open-tabs-catalog": () => browser.runtime.sendMessage({ action: "get-open-tabs-catalog" }),
       "stage-focused-study-queue": (payload) =>
@@ -324,6 +402,12 @@ export default defineContentScript({
     });
 
     browser.runtime.onMessage.addListener((runtimeMessage, _sender, sendResponse) => {
+      if (runtimeMessage.action === "flush-time-log") {
+        void handTimeToMandala();
+        sendResponse({ success: true });
+        return true;
+      }
+
       if (runtimeMessage.action === "query-mandala-shelves") {
         const activeChart = getActiveChart(readMandalaLibrary());
         if (!activeChart) {

@@ -20,6 +20,9 @@ import {
 } from "../../utils/store";
 import { formatTime, formatCompact, formatDurationWords, formatOffset, parseTimeParam, getVideoIdFromUrl } from "../../utils/format";
 import { queryReadingList } from "../../utils/readingList";
+import { loadCachedMandalaSummary, type CachedMandalaSummary } from "../../utils/storage";
+import { hostOf, isTrackableUrl, pagePrefixOf, pillarColor, type SiteRule } from "../../utils/timeLog";
+import { actionOptionsHtml, escapeHtml as escapeText, matchWords, pillarChoices, pillarOptionsHtml, type CurrentSiteResponse } from "../../utils/timeUi";
 
 const VERSION_NUMBER = packageJson.version;
 
@@ -878,6 +881,14 @@ function renderNow(): void {
     stopLiveTick();
     resetVideoListFingerprint();
     setupApp();
+  if (!siteBlockLoaded) {
+    siteBlockLoaded = true;
+    void loadSiteBlock();
+  }
+    if (!siteBlockLoaded) {
+      siteBlockLoaded = true;
+      void loadSiteBlock();
+    }
 
     document.getElementById("now-playing")?.classList.add("hidden");
     document.getElementById("up-next-divider")?.classList.add("hidden");
@@ -968,6 +979,131 @@ function showConfirm(options: { title: string; message: string }): Promise<boole
   });
 }
 
+/* ───────────── This site: where the open tab's time goes ───────────── */
+
+let siteBlockLoaded = false;
+let sitePickerOpen = false;
+let pickedPillarIndex: number | null = null;
+let siteBlockTab: Browser.tabs.Tab | null = null;
+let siteBlockSummary: CachedMandalaSummary | null = null;
+let siteBlockStatus: CurrentSiteResponse | null = null;
+
+async function loadSiteBlock(): Promise<void> {
+  const block = document.getElementById("site-block");
+  if (!block) return;
+  try {
+    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !isTrackableUrl(tab.url)) {
+      block.classList.add("hidden");
+      return;
+    }
+    const [status, summary] = await Promise.all([
+      browser.runtime.sendMessage({ action: "get-current-site", tabId: tab.id, url: tab.url }) as Promise<CurrentSiteResponse>,
+      loadCachedMandalaSummary(),
+    ]);
+    siteBlockTab = tab;
+    siteBlockSummary = summary;
+    siteBlockStatus = status;
+    renderSiteBlock();
+  } catch {
+    block.classList.add("hidden");
+  }
+}
+
+function renderSiteBlock(): void {
+  const block = document.getElementById("site-block");
+  const tab = siteBlockTab;
+  const status = siteBlockStatus;
+  if (!block || !tab || !status || !isTrackableUrl(tab.url)) return;
+  const host = hostOf(tab.url);
+  const match = status.match;
+  const swatch = match ? `<span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:${pillarColor(match.pillarIndex)}"></span>` : "";
+  const where = match ? matchWords(match, siteBlockSummary) : "Not counted";
+  const minutes = match && status.todayMinutes > 0 ? ` · ${status.todayMinutes} min today` : "";
+  const canRemove = match && match.ruleId && match.source !== "pile";
+  const shownPillarIndex = pickedPillarIndex ?? match?.pillarIndex ?? pillarChoices(siteBlockSummary)[0]?.index ?? 0;
+
+  block.classList.remove("hidden");
+  block.innerHTML = `
+    <div class="rounded-[10px] border border-border bg-surface-elevated px-3 py-2 flex flex-col gap-2">
+      <div class="flex items-center gap-2 min-w-0">
+        <div class="flex-1 min-w-0 flex flex-col gap-0.5">
+          <div class="text-[10px] font-semibold uppercase tracking-[0.1em] text-text-muted truncate">This site · ${escapeText(host)}</div>
+          <div class="text-[12px] text-text-primary flex items-center gap-1.5 min-w-0"><span class="truncate">${swatch} ${escapeText(where)}${escapeText(minutes)}</span></div>
+        </div>
+        <button type="button" id="site-pick" class="shrink-0 h-7 px-2.5 rounded-md border border-border bg-surface text-[11px] font-semibold text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer">${match ? "Change" : "Count for…"}</button>
+      </div>
+      ${
+        sitePickerOpen
+          ? `<div class="flex flex-col gap-1.5 pt-1 border-t border-border/60">
+              ${
+                siteBlockSummary
+                  ? ""
+                  : `<p class="m-0 text-[10px] text-text-muted">Open Mandala once so your pillars show here. Until then the rule counts for a pillar by its number.</p>`
+              }
+              <label class="flex items-center gap-2 text-[11px] text-text-secondary">Pillar
+                <select id="site-pillar" class="flex-1 min-w-0 h-7 px-1.5 rounded-md border border-border bg-surface text-[11px] text-text-primary">${pillarOptionsHtml(siteBlockSummary, shownPillarIndex)}</select>
+              </label>
+              <label class="flex items-center gap-2 text-[11px] text-text-secondary">Action
+                <select id="site-action" class="flex-1 min-w-0 h-7 px-1.5 rounded-md border border-border bg-surface text-[11px] text-text-primary">${actionOptionsHtml(siteBlockSummary, shownPillarIndex, match?.actionId)}</select>
+              </label>
+              <label class="flex items-center gap-2 text-[11px] text-text-secondary">Scope
+                <select id="site-scope" class="flex-1 min-w-0 h-7 px-1.5 rounded-md border border-border bg-surface text-[11px] text-text-primary">
+                  <option value="host"${match?.source === "prefix" ? "" : " selected"}>Whole site (${escapeText(host)})</option>
+                  <option value="prefix"${match?.source === "prefix" ? " selected" : ""}>This page and what is under it</option>
+                </select>
+              </label>
+              <div class="flex items-center gap-2 pt-0.5">
+                <button type="button" id="site-save" class="h-7 px-3 rounded-md border-0 bg-accent text-on-accent text-[11px] font-semibold cursor-pointer hover:bg-accent-hover transition-colors">Count it</button>
+                ${canRemove ? `<button type="button" id="site-remove" class="h-7 px-2.5 rounded-md border border-border bg-surface text-[11px] font-medium text-text-secondary hover:text-danger hover:border-danger/40 cursor-pointer transition-colors">Stop counting</button>` : ""}
+                <span class="flex-1"></span>
+                <button type="button" id="site-cancel" class="h-7 px-2 rounded-md border-0 bg-transparent text-[11px] text-text-muted hover:text-text-primary cursor-pointer">Cancel</button>
+              </div>
+            </div>`
+          : ""
+      }
+    </div>
+  `;
+
+  document.getElementById("site-pick")?.addEventListener("click", () => {
+    sitePickerOpen = !sitePickerOpen;
+    pickedPillarIndex = null;
+    renderSiteBlock();
+  });
+  document.getElementById("site-cancel")?.addEventListener("click", () => {
+    sitePickerOpen = false;
+    renderSiteBlock();
+  });
+  document.getElementById("site-pillar")?.addEventListener("change", (event) => {
+    pickedPillarIndex = Number((event.target as HTMLSelectElement).value);
+    renderSiteBlock();
+  });
+  document.getElementById("site-save")?.addEventListener("click", async () => {
+    const pillarIndex = Number((document.getElementById("site-pillar") as HTMLSelectElement | null)?.value ?? shownPillarIndex);
+    const actionId = (document.getElementById("site-action") as HTMLSelectElement | null)?.value || undefined;
+    const scope = (document.getElementById("site-scope") as HTMLSelectElement | null)?.value === "prefix" ? "prefix" : "host";
+    const pattern = scope === "host" ? host : pagePrefixOf(tab.url!);
+    const rule: Omit<SiteRule, "id" | "createdAt"> & { id?: string } = {
+      id: match?.ruleId && match.source === scope ? match.ruleId : undefined,
+      kind: scope,
+      pattern,
+      label: scope === "host" ? host : pattern.replace(/^https?:\/\//, ""),
+      pillarIndex,
+      actionId,
+    };
+    await browser.runtime.sendMessage({ action: "set-site-rule", rule });
+    sitePickerOpen = false;
+    pickedPillarIndex = null;
+    await loadSiteBlock();
+  });
+  document.getElementById("site-remove")?.addEventListener("click", async () => {
+    if (match?.ruleId) await browser.runtime.sendMessage({ action: "remove-site-rule", id: match.ruleId });
+    sitePickerOpen = false;
+    pickedPillarIndex = null;
+    await loadSiteBlock();
+  });
+}
+
 function setupApp() {
   // Check if the dashboard shell is actually present, not just "not empty"
   // logic: if 'stat-total' exists, we are in the dashboard view.
@@ -993,6 +1129,8 @@ function setupApp() {
           <span id="stat-total" class="hidden"></span>
         </div>
       </header>
+
+      <section id="site-block" class="hidden shrink-0 px-3 pt-2.5"></section>
 
       <section id="now-playing" class="hidden shrink-0 px-3 pt-3">
         <div id="np-card" class="np-card" data-np-tab-id="">

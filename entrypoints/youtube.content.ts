@@ -1303,7 +1303,15 @@ function updateImmersionHud(): void {
     hudContainer.appendChild(popover);
   }
 
-  if (watchedMinutes >= 1 && savedPillarIndexes.length > 0) {
+  if (latestMandalaStatus.autoLogged && (watchedMinutes >= 1 || savedPillarIndexes.length > 0)) {
+    const autoLabel = hudButton(
+      hudIcon("clock"),
+      watchedMinutes >= 1 ? `${watchedMinutes} min` : "Counting",
+      "This video's time reaches Mandala on its own, through the time tracker"
+    );
+    autoLabel.disabled = true;
+    hudContainer.appendChild(autoLabel);
+  } else if (watchedMinutes >= 1 && savedPillarIndexes.length > 0) {
     const logTimeButton = hudButton(
       hudIcon("clock"),
       `Log ${watchedMinutes} min`,

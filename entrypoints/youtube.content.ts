@@ -352,7 +352,7 @@ function getTargetPlayerContainer(): HTMLElement {
   return document.body;
 }
 
-function showImmersionToast(messageText: string, accentColor = "#e3aa50") {
+function showImmersionToast(messageText: string) {
   const existingToast = document.getElementById("study-harvester-hud-toast");
   if (existingToast) {
     existingToast.remove();
@@ -362,7 +362,6 @@ function showImmersionToast(messageText: string, accentColor = "#e3aa50") {
   const toastElement = document.createElement("div");
   toastElement.id = "study-harvester-hud-toast";
   toastElement.textContent = messageText;
-  toastElement.style.borderLeftColor = accentColor;
 
   container.appendChild(toastElement);
   requestAnimationFrame(() => {
@@ -372,7 +371,7 @@ function showImmersionToast(messageText: string, accentColor = "#e3aa50") {
 
   window.setTimeout(() => {
     toastElement.style.opacity = "0";
-    toastElement.style.transform = "translateY(8px)";
+    toastElement.style.transform = "translateY(4px)";
     window.setTimeout(() => toastElement.remove(), 250);
   }, 3200);
 }
@@ -654,7 +653,7 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
 
   const save = async () => {
     if (!chosenToken) {
-      showImmersionToast("Pick a word to blank out first", "#e37050");
+      showImmersionToast("Pick a word to blank out first");
       return;
     }
     const sentence = capture.sentences[sentenceIndex];
@@ -680,10 +679,10 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
         | { success?: boolean }
         | undefined;
       if (!response?.success) throw new Error("not saved");
-      showImmersionToast(`Saved «${card.targetWord}» for Clozemaster`, "#48b788");
+      showImmersionToast(`Saved «${card.targetWord}» for Clozemaster`);
       close(capture.resumeOnClose);
     } catch {
-      showImmersionToast("Couldn't save the card", "#e37050");
+      showImmersionToast("Couldn't save the card");
     }
   };
 
@@ -767,7 +766,7 @@ async function triggerClozeCardCapture(): Promise<void> {
     return;
   }
 
-  showImmersionToast("This video has no transcript to take a sentence from", "#e37050");
+  showImmersionToast("This video has no transcript to take a sentence from");
   if (wasPlaying) void videoElement?.play();
 }
 
@@ -815,7 +814,7 @@ async function quickLogWatchedTimeToMandala(): Promise<void> {
     })) as { success: boolean; queued?: boolean; actionText?: string; errorMessage?: string };
 
     if (!response?.success) {
-      showImmersionToast(response?.errorMessage || "Could not log time to Mandala", "#e37050");
+      showImmersionToast(response?.errorMessage || "Could not log time to Mandala");
       return;
     }
     sessionWatchedSeconds = 0;
@@ -823,11 +822,10 @@ async function quickLogWatchedTimeToMandala(): Promise<void> {
     showImmersionToast(
       response.queued
         ? `Logged ${watchedMinutes} min. It reaches Mandala next time you open it.`
-        : `Logged ${watchedMinutes} min on “${truncateText(response.actionText || "", 40)}”`,
-      "#48b788"
+        : `Logged ${watchedMinutes} min on “${truncateText(response.actionText || "", 40)}”`
     );
   } catch {
-    showImmersionToast("Could not log time to Mandala", "#e37050");
+    showImmersionToast("Could not log time to Mandala");
   }
 }
 
@@ -845,7 +843,7 @@ async function saveCurrentVideoToMandalaShelf(pillarIndex: number): Promise<void
     })) as { success: boolean; queued?: boolean; errorMessage?: string };
 
     if (!response?.success) {
-      showImmersionToast(response?.errorMessage || "Failed to save to shelf", "#e37050");
+      showImmersionToast(response?.errorMessage || "Failed to save to shelf");
       return;
     }
     latestMandalaStatus.savedPillarIndexes = [...new Set([...latestMandalaStatus.savedPillarIndexes, pillarIndex])].sort(
@@ -855,12 +853,11 @@ async function saveCurrentVideoToMandalaShelf(pillarIndex: number): Promise<void
     showImmersionToast(
       response.queued
         ? `Saved to ${pillarTitle}. It reaches Mandala next time you open it.`
-        : `Saved to ${pillarTitle}'s shelf`,
-      "#48b788"
+        : `Saved to ${pillarTitle}'s shelf`
     );
     void checkMandalaStatusForCurrentPage();
   } catch {
-    showImmersionToast("Failed to save to shelf", "#e37050");
+    showImmersionToast("Failed to save to shelf");
   }
 }
 
@@ -872,96 +869,98 @@ function injectImmersionStyles(): void {
   styleElement.textContent = `
     #study-harvester-player-hud {
       position: absolute;
-      top: 14px;
-      right: 70px;
+      top: 12px;
+      right: 12px;
       display: flex;
       align-items: center;
-      gap: 6px;
-      z-index: 2147483600;
-      font-family: system-ui, -apple-system, sans-serif;
-      font-size: 12px;
-      color: #efe7da;
+      gap: 8px;
+      z-index: 60;
+      font-family: "YouTube Sans", Roboto, Arial, sans-serif;
+      color: #fff;
       user-select: none;
       pointer-events: auto;
-      transition: opacity 0.2s ease;
+      transition: opacity 0.1s cubic-bezier(0.4, 0, 1, 1);
     }
     .ytp-autohide #study-harvester-player-hud:not(.is-open),
     .ad-showing #study-harvester-player-hud {
       opacity: 0;
       pointer-events: none;
+      transition-duration: 0.5s;
+    }
+    .study-harvester-icon {
+      width: 18px;
+      height: 18px;
+      flex: none;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
     .study-harvester-hud-btn {
-      background-color: rgba(35, 31, 27, 0.92);
-      backdrop-filter: blur(8px);
-      color: #efe7da;
-      border: 1px solid rgba(239, 231, 218, 0.2);
-      padding: 6px 11px;
-      border-radius: 8px;
-      cursor: pointer;
       display: inline-flex;
       align-items: center;
-      gap: 5px;
-      font-weight: 500;
-      font-size: 11px;
-      transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+      gap: 6px;
+      height: 36px;
+      padding: 0 14px 0 10px;
+      border: none;
+      border-radius: 18px;
+      background-color: rgba(0, 0, 0, 0.6);
+      color: #fff;
+      font: 500 14px/1 "YouTube Sans", Roboto, Arial, sans-serif;
+      cursor: pointer;
     }
     .study-harvester-hud-btn:hover {
-      background-color: rgba(45, 40, 35, 0.98);
-      border-color: rgba(227, 170, 80, 0.55);
-      color: #ffffff;
-      transform: translateY(-1px);
-    }
-    .study-harvester-hud-btn.active {
-      background-color: rgba(72, 183, 136, 0.28);
-      border-color: #48b788;
-      color: #48b788;
-      font-weight: 700;
+      background-color: rgba(40, 40, 40, 0.8);
     }
     .study-harvester-shelf-popover {
       position: absolute;
-      top: calc(100% + 6px);
+      top: calc(100% + 8px);
       right: 0;
-      background-color: #231f1b;
-      border: 1px solid rgba(239, 231, 218, 0.2);
-      border-radius: 10px;
-      padding: 8px;
-      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.85);
+      min-width: 220px;
+      padding: 8px 0;
+      border-radius: 12px;
+      background-color: rgba(28, 28, 28, 0.9);
+      text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
       display: flex;
       flex-direction: column;
-      gap: 4px;
-      min-width: 220px;
-      z-index: 2147483610;
-    }
-    .study-harvester-pillar-item {
-      padding: 6px 10px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 11px;
-      color: #efe7da;
-      text-align: left;
-      border: none;
-      background: transparent;
-      transition: background-color 0.12s ease;
-    }
-    .study-harvester-pillar-item.saved {
-      color: #48b788;
-      cursor: default;
     }
     .study-harvester-shelf-header {
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: #e3aa50;
-      padding: 4px 8px;
+      padding: 6px 16px 8px;
+      font: 500 13px Roboto, Arial, sans-serif;
+      color: rgba(255, 255, 255, 0.7);
     }
     .study-harvester-shelf-hint {
-      font-size: 11px;
-      color: #a89e90;
-      padding: 0 8px 4px;
+      padding: 0 16px 8px;
+      font: 400 12px Roboto, Arial, sans-serif;
+      color: rgba(255, 255, 255, 0.7);
+    }
+    .study-harvester-pillar-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      height: 40px;
+      padding: 0 16px;
+      border: none;
+      background: transparent;
+      color: #eee;
+      font: 400 14px Roboto, Arial, sans-serif;
+      text-align: left;
+      cursor: pointer;
+    }
+    .study-harvester-pillar-item .study-harvester-icon {
+      width: 20px;
+      height: 20px;
+      opacity: 0.7;
+    }
+    .study-harvester-pillar-item.saved {
+      cursor: default;
+    }
+    .study-harvester-pillar-item.saved .study-harvester-icon {
+      opacity: 1;
     }
     .study-harvester-pillar-item:hover:not(:disabled) {
-      background-color: rgba(227, 170, 80, 0.22);
-      color: #ffffff;
+      background-color: rgba(255, 255, 255, 0.1);
     }
     #study-harvester-cloze-modal {
       position: absolute;
@@ -1163,23 +1162,18 @@ function injectImmersionStyles(): void {
     }
     #study-harvester-hud-toast {
       position: absolute;
-      bottom: 70px;
-      right: 24px;
-      background-color: #231f1b;
-      color: #efe7da;
-      padding: 12px 18px;
-      border-radius: 10px;
-      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.85);
-      font-size: 13px;
-      font-weight: 600;
-      letter-spacing: 0.02em;
-      font-family: system-ui, -apple-system, sans-serif;
-      z-index: 2147483647;
-      border: 1px solid rgba(239, 231, 218, 0.16);
-      border-left: 4px solid #e3aa50;
-      transition: opacity 0.22s ease-out, transform 0.22s ease-out;
+      left: 12px;
+      bottom: 64px;
+      max-width: min(480px, 70%);
+      padding: 10px 14px;
+      border-radius: 8px;
+      background-color: rgba(28, 28, 28, 0.9);
+      color: #fff;
+      font: 400 14px/20px Roboto, Arial, sans-serif;
+      z-index: 61;
+      transition: opacity 0.2s ease, transform 0.2s ease;
       opacity: 0;
-      transform: translateY(8px);
+      transform: translateY(4px);
       pointer-events: none;
     }
   `;
@@ -1191,6 +1185,38 @@ function removeImmersionHud(): void {
   if (existingHud) {
     existingHud.remove();
   }
+}
+
+const HUD_ICON_PATHS = {
+  shelf: "M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z",
+  clock: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zm0-13v4.5l3 2",
+  card: "M4 6h16v12H4zM8 12h3m3 0h2",
+  check: "M5 12.5l4.5 4.5L19 7",
+  plus: "M12 5v14M5 12h14",
+};
+
+function hudIcon(name: keyof typeof HUD_ICON_PATHS, filled = false): SVGSVGElement {
+  const svgNamespace = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNamespace, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.classList.add("study-harvester-icon");
+  const path = document.createElementNS(svgNamespace, "path");
+  path.setAttribute("d", HUD_ICON_PATHS[name]);
+  if (filled) path.setAttribute("fill", "currentColor");
+  svg.appendChild(path);
+  return svg;
+}
+
+function hudButton(icon: SVGSVGElement, label: string, title: string): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.className = "study-harvester-hud-btn";
+  button.type = "button";
+  button.title = title;
+  const text = document.createElement("span");
+  text.textContent = label;
+  button.append(icon, text);
+  return button;
 }
 
 function updateImmersionHud(): void {
@@ -1215,18 +1241,15 @@ function updateImmersionHud(): void {
   hudContainer.replaceChildren();
   hudContainer.classList.toggle("is-open", isPillarPopoverOpen);
 
-  const shelfButton = document.createElement("button");
-  shelfButton.className = "study-harvester-hud-btn";
-  shelfButton.type = "button";
-  if (savedPillarIndexes.length > 0) {
-    const savedTitles = savedPillarIndexes.map(pillarTitleAt);
-    const extra = savedTitles.length > 1 ? ` +${savedTitles.length - 1}` : "";
-    shelfButton.textContent = `🌿 ${savedTitles[0]}${extra}`;
-    shelfButton.title = `On Mandala's shelves: ${savedTitles.join(", ")}`;
-  } else {
-    shelfButton.textContent = "+ Mandala shelf";
-    shelfButton.title = "Save this video to a Mandala pillar's shelf";
-  }
+  const savedTitles = savedPillarIndexes.map(pillarTitleAt);
+  const shelfButton =
+    savedTitles.length > 0
+      ? hudButton(
+          hudIcon("shelf", true),
+          `${savedTitles[0]}${savedTitles.length > 1 ? ` +${savedTitles.length - 1}` : ""}`,
+          `On Mandala's shelves: ${savedTitles.join(", ")}`
+        )
+      : hudButton(hudIcon("shelf"), "Save", "Save this video to a Mandala pillar's shelf");
   shelfButton.addEventListener("click", (clickEvent) => {
     clickEvent.stopPropagation();
     isPillarPopoverOpen = !isPillarPopoverOpen;
@@ -1241,7 +1264,7 @@ function updateImmersionHud(): void {
 
     const header = document.createElement("div");
     header.className = "study-harvester-shelf-header";
-    header.textContent = "Save to a pillar's shelf";
+    header.textContent = "Save to shelf";
     popover.appendChild(header);
 
     if (!latestMandalaStatus.connected && !latestMandalaStatus.cached) {
@@ -1265,7 +1288,9 @@ function updateImmersionHud(): void {
       const pillarButton = document.createElement("button");
       pillarButton.className = `study-harvester-pillar-item${isSaved ? " saved" : ""}`;
       pillarButton.type = "button";
-      pillarButton.textContent = `${isSaved ? "✓" : "+"} ${pillar.title}`;
+      const label = document.createElement("span");
+      label.textContent = pillar.title;
+      pillarButton.append(hudIcon(isSaved ? "check" : "plus"), label);
       pillarButton.disabled = isSaved;
       pillarButton.title = isSaved ? "Already on this shelf" : `Save to ${pillar.title}'s shelf`;
       pillarButton.addEventListener("click", () => {
@@ -1279,11 +1304,11 @@ function updateImmersionHud(): void {
   }
 
   if (watchedMinutes >= 1 && savedPillarIndexes.length > 0) {
-    const logTimeButton = document.createElement("button");
-    logTimeButton.className = "study-harvester-hud-btn";
-    logTimeButton.type = "button";
-    logTimeButton.textContent = `⏱️ Log ${watchedMinutes}m`;
-    logTimeButton.title = `Log ${watchedMinutes} min to ${pillarTitleAt(savedPillarIndexes[0])} in Mandala`;
+    const logTimeButton = hudButton(
+      hudIcon("clock"),
+      `Log ${watchedMinutes} min`,
+      `Log ${watchedMinutes} min to ${pillarTitleAt(savedPillarIndexes[0])} in Mandala`
+    );
     logTimeButton.addEventListener("click", (clickEvent) => {
       clickEvent.stopPropagation();
       void quickLogWatchedTimeToMandala();
@@ -1291,11 +1316,11 @@ function updateImmersionHud(): void {
     hudContainer.appendChild(logTimeButton);
   }
 
-  const clozeButton = document.createElement("button");
-  clozeButton.className = "study-harvester-hud-btn";
-  clozeButton.type = "button";
-  clozeButton.textContent = "🗂️ Cloze";
-  clozeButton.title = "Make a Clozemaster card from the sentence just spoken (Alt+C)";
+  const clozeButton = hudButton(
+    hudIcon("card"),
+    "Cloze",
+    "Make a Clozemaster card from the sentence just spoken (Alt+C)"
+  );
   clozeButton.addEventListener("click", (clickEvent) => {
     clickEvent.stopPropagation();
     void triggerClozeCardCapture();

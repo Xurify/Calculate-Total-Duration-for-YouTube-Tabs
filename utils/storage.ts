@@ -793,6 +793,15 @@ export async function clearStagedClozeCards(): Promise<void> {
   await browser.storage.local.set({ [STAGED_CLOZE_CARDS_KEY]: [] });
 }
 
+/** Removes the cards with these ids and returns the ones still staged. */
+export async function removeStagedClozeCards(ids: string[]): Promise<StagedClozeCard[]> {
+  if (!browser.storage?.local) return [];
+  const idSet = new Set(ids);
+  const remainingCards = (await loadStagedClozeCards()).filter((card) => !idSet.has(card.id));
+  await browser.storage.local.set({ [STAGED_CLOZE_CARDS_KEY]: remainingCards });
+  return remainingCards;
+}
+
 export async function loadCachedMandalaSummary(): Promise<CachedMandalaSummary | null> {
   if (!browser.storage?.local) return null;
   const storedData = await browser.storage.local.get(CACHED_MANDALA_SUMMARY_KEY);

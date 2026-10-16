@@ -10,6 +10,8 @@ import {
   saveStagedClozeCard,
   loadStagedClozeCards,
   clearStagedClozeCards,
+  removeStagedClozeCards,
+  getSavedSessions,
   PENDING_MANDALA_LOGS_KEY,
   PENDING_MANDALA_SHELF_LINKS_KEY,
   type CachedMetadata,
@@ -322,7 +324,18 @@ export default defineBackground(() => {
     }
 
     if (message.action === "get-staged-cloze-cards") {
-      void loadStagedClozeCards()
+      void ensureReadGrant(
+        sender,
+        "staged-cards",
+        buildApprovalRequest(sender, {
+          title: "Share your captured sentences?",
+          summary:
+            "This page wants the sentences you captured from YouTube with Alt+C, with their translations and notes.",
+          confirmLabel: "Share sentences",
+          destructive: false,
+        })
+      )
+        .then(() => loadStagedClozeCards())
         .then((cards) => sendResponse({ success: true, cards }))
         .catch((error) =>
           sendResponse({
@@ -334,8 +347,55 @@ export default defineBackground(() => {
     }
 
     if (message.action === "clear-staged-cloze-cards") {
-      void clearStagedClozeCards()
-        .then(() => sendResponse({ success: true }))
+      void clearStagedCards(message.ids, sender)
+        .then((result) => sendResponse(result))
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        );
+      return true;
+    }
+
+    if (message.action === "mandala-remote") {
+      void handleMandalaRemote(message as MandalaRemoteMessage, sender)
+        .then((result) => sendResponse(result))
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        );
+      return true;
+    }
+
+    if (message.action === "get-saved-sessions") {
+      void ensureReadGrant(
+        sender,
+        "saved-sessions",
+        buildApprovalRequest(sender, {
+          title: "Share your saved sessions?",
+          summary:
+            "This page wants the names and video lists of the sessions saved in Study Harvester.",
+          confirmLabel: "Share sessions",
+          destructive: false,
+        })
+      )
+        .then(() => getSavedSessionsCatalog())
+        .then((sessions) => sendResponse({ success: true, sessions }))
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          })
+        );
+      return true;
+    }
+
+    if (message.action === "open-saved-session") {
+      void openSavedSession(message.payload as OpenSessionPayload, sender)
+        .then((result) => sendResponse(result))
         .catch((error) =>
           sendResponse({
             success: false,
@@ -346,6 +406,243 @@ export default defineBackground(() => {
     }
   });
 });
+
+async function clearStagedCards(rawIds: unknown, sender: Browser.runtime.MessageSender) {
+  if (rawIds !== undefined && rawIds !== null) {
+    if (!Array.isArray(rawIds) || rawIds.some((id) => typeof id !== "string")) {
+      throw new Error("ids must be an array of card ids from the captured cards.");
+    }
+  }
+  const requestedIds = Array.isArray(rawIds) ? new Set(rawIds as string[]) : null;
+  const stagedCards = await loadStagedClozeCards();
+  const targetCards = requestedIds ? stagedCards.filter((card) => requestedIds.has(card.id)) : stagedCards;
+  if (targetCards.length === 0) {
+    return { success: true, removedCount: 0, remainingCount: stagedCards.length };
+  }
+
+  if (!isExtensionPageSender(sender)) {
+    const approved = await requestApproval(
+      buildApprovalRequest(sender, {
+        title: `Remove ${targetCards.length} captured ${targetCards.length === 1 ? "sentence" : "sentences"}?`,
+        summary:
+          "This page wants to remove these sentences from the queue you captured with Alt+C. Do this once they are in Clozemaster; they cannot be brought back.",
+        items: targetCards.map((card) => card.sentence),
+        confirmLabel: "Remove sentences",
+        destructive: true,
+      })
+    );
+    if (!approved) throw new Error("The user declined to remove the captured sentences.");
+  }
+
+  let remainingCards: StagedClozeCard[] = [];
+  if (requestedIds) {
+    remainingCards = await removeStagedClozeCards(targetCards.map((card) => card.id));
+  } else {
+    await clearStagedClozeCards();
+  }
+  void broadcastToClozemasterTabs({ action: "staged-cloze-cards-changed" });
+  return { success: true, removedCount: targetCards.length, remainingCount: remainingCards.length };
+}
+
+interface MandalaRemoteMessage {
+  op: "status" | "save" | "log";
+  payload?: {
+    url?: string;
+    title?: string;
+    pillarIndex?: unknown;
+    kind?: unknown;
+    minutes?: unknown;
+    videoTitle?: string;
+  };
+}
+
+const MAX_LOGGED_MINUTES = 24 * 60;
+
+/**
+ * The Mandala actions agents reach through the bridge. The in-player HUD keeps calling the
+ * plain handlers: a click there is already the user's decision, a tool call is not.
+ */
+async function handleMandalaRemote(message: MandalaRemoteMessage, sender: Browser.runtime.MessageSender) {
+  const payload = message.payload ?? {};
+  const url = typeof payload.url === "string" ? payload.url : "";
+  if (!url) throw new Error("No video URL was supplied.");
+
+  if (message.op === "status") {
+    await ensureReadGrant(
+      sender,
+      "mandala-status",
+      buildApprovalRequest(sender, {
+        title: "Share your Mandala pillars?",
+        summary: "This page wants the names of your Mandala pillars and which of them hold this video.",
+        confirmLabel: "Share pillars",
+        destructive: false,
+      })
+    );
+    return { success: true, ...(await handleCheckMandalaStatus(url)) };
+  }
+
+  if (message.op === "save") {
+    const pillarIndex = payload.pillarIndex;
+    if (typeof pillarIndex !== "number" || !Number.isInteger(pillarIndex) || pillarIndex < 0 || pillarIndex > 7) {
+      throw new Error("pillarIndex must be an integer from 0 to 7.");
+    }
+    const kind = payload.kind === undefined ? "repeat" : payload.kind;
+    if (kind !== "repeat" && kind !== "once") {
+      throw new Error('kind must be "repeat" or "once".');
+    }
+    const title = typeof payload.title === "string" && payload.title.trim() ? payload.title.trim() : url;
+    const status = await handleCheckMandalaStatus(url);
+    const pillarTitle = status.pillars.find((pillar) => pillar.index === pillarIndex)?.title || `Pillar ${pillarIndex + 1}`;
+    if (status.savedPillarIndexes.includes(pillarIndex)) {
+      return { success: true, alreadyExisted: true, queued: false, pillarIndex, pillarTitle };
+    }
+
+    if (!isExtensionPageSender(sender)) {
+      const approved = await requestApproval(
+        buildApprovalRequest(sender, {
+          title: `Save this video to ${pillarTitle}?`,
+          summary: `This page wants to put this video on the shelf of your Mandala pillar “${pillarTitle}”${kind === "once" ? " as a one-time item" : ""}.`,
+          items: [title],
+          confirmLabel: "Save to shelf",
+          destructive: false,
+        })
+      );
+      if (!approved) throw new Error("The user declined to save this video to Mandala.");
+    }
+
+    const result = await handleSaveMandalaShelfLink({ pillarIndex, url, title, kind });
+    return { ...result, pillarIndex, pillarTitle };
+  }
+
+  if (message.op === "log") {
+    const minutes = payload.minutes;
+    if (typeof minutes !== "number" || !Number.isFinite(minutes) || minutes < 1 || minutes > MAX_LOGGED_MINUTES) {
+      throw new Error(`minutes must be a number from 1 to ${MAX_LOGGED_MINUTES}.`);
+    }
+    const wholeMinutes = Math.round(minutes);
+    const videoTitle = typeof payload.videoTitle === "string" ? payload.videoTitle : "";
+
+    if (!isExtensionPageSender(sender)) {
+      const approved = await requestApproval(
+        buildApprovalRequest(sender, {
+          title: `Log ${wholeMinutes} min to Mandala?`,
+          summary: "This page wants to log this watch time against the Mandala action this video is shelved under.",
+          items: [videoTitle || url],
+          confirmLabel: "Log time",
+          destructive: false,
+        })
+      );
+      if (!approved) throw new Error("The user declined to log this time to Mandala.");
+    }
+
+    return await handleLogMandalaTime({ url, minutes: wholeMinutes, videoTitle });
+  }
+
+  throw new Error(`Unknown Mandala operation "${String(message.op)}".`);
+}
+
+async function getSavedSessionsCatalog() {
+  const sessions = await getSavedSessions();
+  return sessions.map((session) => {
+    const languages = new Map<string, string>();
+    for (const tab of session.tabs) {
+      if (tab.language) languages.set(tab.language, tab.languageName ?? tab.language);
+    }
+    return {
+      id: session.id,
+      name: session.name,
+      savedAt: session.savedAt,
+      pinned: Boolean(session.pinned),
+      videoCount: session.tabs.length,
+      totalSeconds: session.tabs.reduce((total, tab) => total + (tab.seconds || 0), 0),
+      languages: [...languages.entries()].map(([code, name]) => ({ code, name })),
+      videos: session.tabs.map((tab) => ({
+        url: tab.url,
+        videoId: getVideoIdFromUrl(tab.url),
+        title: tab.title ?? "",
+        channelName: tab.channelName ?? "",
+        durationSeconds: tab.seconds ?? 0,
+        language: tab.language ?? null,
+        languageName: tab.languageName ?? null,
+      })),
+    };
+  });
+}
+
+interface OpenSessionPayload {
+  sessionId?: unknown;
+  urls?: unknown;
+}
+
+const OPEN_TABS_BATCH = 8;
+
+async function openSavedSession(payload: OpenSessionPayload, sender: Browser.runtime.MessageSender) {
+  const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId.trim() : "";
+  if (!sessionId) throw new Error("sessionId is required. Call youtube_list_saved_sessions and pass an id from it.");
+  if (payload.urls !== undefined && (!Array.isArray(payload.urls) || payload.urls.some((url) => typeof url !== "string"))) {
+    throw new Error("urls must be an array of the session's video URLs.");
+  }
+
+  const session = (await getSavedSessions()).find((candidate) => candidate.id === sessionId);
+  if (!session) throw new Error("No saved session has that id. Call youtube_list_saved_sessions for the current ids.");
+
+  const requestedIds = Array.isArray(payload.urls)
+    ? new Set((payload.urls as string[]).map((url) => getVideoIdFromUrl(url) ?? normalizeYoutubeUrl(url)))
+    : null;
+  const selectedTabs = session.tabs.filter((tab) => {
+    if (!tab.url) return false;
+    if (!requestedIds) return true;
+    return requestedIds.has(getVideoIdFromUrl(tab.url) ?? tab.url);
+  });
+  if (selectedTabs.length === 0) {
+    throw new Error(
+      requestedIds ? "None of those urls belong to this session." : "This session has no videos to open."
+    );
+  }
+
+  const openTabs = await browser.tabs.query({});
+  const openVideoIds = new Set(
+    openTabs.map((tab) => (tab.url ? getVideoIdFromUrl(tab.url) : null)).filter((id): id is string => Boolean(id))
+  );
+  const tabsToOpen = selectedTabs.filter((tab) => {
+    const videoId = getVideoIdFromUrl(tab.url);
+    return !videoId || !openVideoIds.has(videoId);
+  });
+  if (tabsToOpen.length === 0) {
+    return { success: true, sessionId, name: session.name, openedCount: 0, alreadyOpenCount: selectedTabs.length };
+  }
+
+  if (!isExtensionPageSender(sender)) {
+    const approved = await requestApproval(
+      buildApprovalRequest(sender, {
+        title: `Open ${tabsToOpen.length} ${tabsToOpen.length === 1 ? "tab" : "tabs"} from “${session.name}”?`,
+        summary: "This page wants to reopen these saved videos as background tabs in this window.",
+        items: tabsToOpen.map((tab) => tab.title || tab.url),
+        confirmLabel: "Open tabs",
+        destructive: false,
+      })
+    );
+    if (!approved) throw new Error("The user declined to open the saved session.");
+  }
+
+  const windowId = sender.tab?.windowId;
+  let openedCount = 0;
+  for (let index = 0; index < tabsToOpen.length; index += OPEN_TABS_BATCH) {
+    const batch = tabsToOpen.slice(index, index + OPEN_TABS_BATCH);
+    const results = await Promise.allSettled(
+      batch.map((tab) => browser.tabs.create({ url: tab.url, active: false, ...(windowId != null ? { windowId } : {}) }))
+    );
+    openedCount += results.filter((result) => result.status === "fulfilled").length;
+  }
+
+  return {
+    success: true,
+    sessionId,
+    name: session.name,
+    openedCount,
+    alreadyOpenCount: selectedTabs.length - tabsToOpen.length,
+  };
+}
 
 async function findMandalaTab() {
   const allTabs = await browser.tabs.query({});
@@ -687,6 +984,7 @@ async function getOpenTabsCatalog() {
       isLive: cached?.isLive || false,
       language: cached?.language ?? null,
       languageName: cached?.languageName ?? null,
+      chapters: cached?.chapters ?? [],
       active: tab.active ?? false,
     };
   });

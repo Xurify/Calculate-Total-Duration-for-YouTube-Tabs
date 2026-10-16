@@ -23,6 +23,7 @@ import {
   type WordToken,
 } from "../utils/transcript";
 import { requestPageTranscript } from "../utils/youtubeTranscript";
+import { placeHudBelowNativeControls } from "../utils/hudLayout";
 
 const DEBOUNCE_MS = 150;
 
@@ -341,15 +342,19 @@ function extractLiveCaptionText(): string {
 }
 
 function getTargetPlayerContainer(): HTMLElement {
-  const playerContainer =
-    document.getElementById("movie_player") ||
-    document.querySelector(".html5-video-player") ||
-    document.querySelector("#player");
+  const candidates = [
+    document.getElementById("movie_player"),
+    document.getElementById("shorts-player"),
+    ...document.querySelectorAll(".html5-video-player"),
+    document.querySelector("#player"),
+  ].filter((candidate): candidate is HTMLElement => candidate instanceof HTMLElement);
 
-  if (playerContainer && playerContainer instanceof HTMLElement) {
-    return playerContainer;
-  }
-  return document.body;
+  // Watch and Shorts pages keep each other's player in the DOM, hidden; the one with a size is in use.
+  const shownPlayer = candidates.find((candidate) => {
+    const rect = candidate.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+  return shownPlayer ?? candidates[0] ?? document.body;
 }
 
 function showImmersionToast(messageText: string) {
@@ -1077,7 +1082,7 @@ function injectImmersionStyles(): void {
       color: var(--sh-ink);
     }
     .study-harvester-cloze-sentence {
-      padding: 2px 2px 6px;
+      padding: 2px 0 6px;
       font: 400 23px/1.5 Georgia, "Times New Roman", serif;
       color: var(--sh-ink);
       max-height: 150px;
@@ -1086,17 +1091,18 @@ function injectImmersionStyles(): void {
     }
     .study-harvester-cloze-word {
       display: inline;
-      margin: 0 -1px;
-      padding: 0 3px 1px;
+      margin: 0 -3px;
+      padding: 0 3px;
       border: none;
-      border-bottom: 2px solid transparent;
       border-radius: 5px 5px 0 0;
       background: transparent;
+      box-shadow: inset 0 -2px 0 transparent;
       color: inherit;
       font: inherit;
       line-height: inherit;
+      vertical-align: baseline;
       cursor: pointer;
-      transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+      transition: background-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
     }
     .study-harvester-cloze-word:hover {
       background-color: rgba(240, 182, 90, 0.12);
@@ -1104,7 +1110,7 @@ function injectImmersionStyles(): void {
     }
     .study-harvester-cloze-word.is-blank {
       background-color: rgba(240, 182, 90, 0.14);
-      border-bottom-color: var(--sh-accent);
+      box-shadow: inset 0 -2px 0 var(--sh-accent);
       color: var(--sh-accent);
     }
     .study-harvester-cloze-note {
@@ -1161,10 +1167,12 @@ function injectImmersionStyles(): void {
     .study-harvester-cloze-pick {
       display: inline-flex;
       flex: none;
-      align-items: center;
+      align-items: baseline;
       gap: 8px;
-      height: 36px;
+      height: 38px;
+      box-sizing: border-box;
       padding: 0 12px;
+      line-height: 36px;
       border-radius: 12px;
       border: 1px solid rgba(240, 182, 90, 0.3);
       background: rgba(240, 182, 90, 0.08);
@@ -1248,6 +1256,54 @@ function removeImmersionHud(): void {
   if (existingHud) {
     existingHud.remove();
   }
+  stopHudLayoutWatch();
+}
+
+const OWN_OVERLAY_SELECTOR = "#study-harvester-player-hud, #study-harvester-cloze-modal, #study-harvester-hud-toast";
+// YouTube mounts the Shorts overlay a moment after the player, so the HUD looks again as the page settles.
+const HUD_LAYOUT_RECHECK_DELAYS_MS = [400, 1500];
+
+let hudLayoutFrame: number | null = null;
+let hudLayoutTimers: number[] = [];
+let hudPlayerResizeObserver: ResizeObserver | null = null;
+let hudWatchedPlayer: HTMLElement | null = null;
+
+function layoutHudAroundNativeControls(): void {
+  const hudContainer = document.getElementById("study-harvester-player-hud");
+  const playerContainer = hudContainer?.parentElement;
+  if (!hudContainer || !playerContainer) return;
+  placeHudBelowNativeControls(hudContainer, playerContainer, (element) => element.closest(OWN_OVERLAY_SELECTOR) !== null);
+}
+
+function scheduleHudLayout(): void {
+  if (hudLayoutFrame !== null) return;
+  hudLayoutFrame = requestAnimationFrame(() => {
+    hudLayoutFrame = null;
+    layoutHudAroundNativeControls();
+  });
+}
+
+function watchPlayerForHudLayout(playerContainer: HTMLElement): void {
+  if (hudWatchedPlayer !== playerContainer) {
+    hudPlayerResizeObserver?.disconnect();
+    hudPlayerResizeObserver ??= new ResizeObserver(() => scheduleHudLayout());
+    hudPlayerResizeObserver.observe(playerContainer);
+    hudWatchedPlayer = playerContainer;
+  }
+  for (const timer of hudLayoutTimers) clearTimeout(timer);
+  hudLayoutTimers = HUD_LAYOUT_RECHECK_DELAYS_MS.map((delay) => window.setTimeout(scheduleHudLayout, delay));
+  scheduleHudLayout();
+}
+
+function stopHudLayoutWatch(): void {
+  if (hudLayoutFrame !== null) {
+    cancelAnimationFrame(hudLayoutFrame);
+    hudLayoutFrame = null;
+  }
+  for (const timer of hudLayoutTimers) clearTimeout(timer);
+  hudLayoutTimers = [];
+  hudPlayerResizeObserver?.disconnect();
+  hudWatchedPlayer = null;
 }
 
 const HUD_ICON_PATHS = {
@@ -1305,6 +1361,8 @@ function updateImmersionHud(): void {
   if (!hudContainer) {
     hudContainer = document.createElement("div");
     hudContainer.id = "study-harvester-player-hud";
+  }
+  if (hudContainer.parentElement !== playerContainer) {
     playerContainer.appendChild(hudContainer);
   }
 
@@ -1420,6 +1478,8 @@ function updateImmersionHud(): void {
     void triggerClozeCardCapture();
   });
   hudContainer.appendChild(clozeButton);
+
+  watchPlayerForHudLayout(playerContainer);
 }
 
 function isEditableTarget(targetElement: EventTarget | null): boolean {

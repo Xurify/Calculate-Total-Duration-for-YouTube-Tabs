@@ -21,7 +21,8 @@ Expands the extension into a **WebMCP Study Harvester** conforming to the W3C We
 
 4. **Clozemaster Spaced-Repetition Adapter**:
    - `get_clozemaster_session_summary`: Extracts language pair, pending reviews count, and active sentence context. Returns `null` when review count is not present to avoid confusing 0 reviews with missing selectors.
-   - `stage_cloze_cards`: Generates TSV import strings, stages cloze sentences with `{{cloze}}` markup, and safely injects into React-controlled import textareas via native property setters.
+   - `list_clozemaster_collections`: Lists the user's own collections for the open language, with IDs and sentence counts.
+   - `add_sentences_to_clozemaster_collection`: Adds up to 50 cloze sentences to a collection chosen by ID, or by name (created if missing), through the same JSON endpoints as Clozemaster's "Add Sentence to Collection" modal, using the user's session and CSRF token. Accepts `{{word}}`, `[word]`, or a plain sentence plus `targetWord`, and reports each sentence's result. Custom collections need Clozemaster Pro.
 
 5. **Mandala Method Unified Bridge**:
    - Content scripts registered on `https://mandalamethod.vercel.app/*` and `http://localhost:5173/*` so AI agents on Mandala have simultaneous access to Mandala chart tools (`add_shelf_link`, `update_shelf_link`, `read_shelves`, `finish_action`) and Harvester tab tools in a single context window.

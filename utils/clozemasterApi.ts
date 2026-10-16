@@ -5,11 +5,30 @@
  * so they can change whenever Clozemaster ships a new frontend. Custom collections need Pro.
  */
 
+import { sendBridgeRequest } from "./webmcpBridge";
+
 export interface ClozemasterCollection {
-  id: number;
+  /** Clozemaster sends numbers or strings here; its own modal compares them as strings. */
+  id: number | string;
+  /** The `<name>-<uuid>` part of the collection's play URL. */
+  slug: string | null;
   name: string;
   numSentences: number | null;
   sentencesUrl: string;
+  playUrl: string | null;
+}
+
+export type ClozemasterFailureReason = "signed_out" | "pro_required" | "wrong_view" | "request_failed";
+
+/** Thrown with a reason a tool can branch on and an instruction a person can follow. */
+export class ClozemasterError extends Error {
+  constructor(
+    readonly reason: ClozemasterFailureReason,
+    message: string,
+    readonly instruction: string
+  ) {
+    super(message);
+  }
 }
 
 export interface ClozeCardInput {
@@ -30,7 +49,9 @@ export interface CardResult {
 }
 
 interface RawCollection {
-  id: number;
+  id: number | string;
+  slug?: string;
+  playUrl?: string;
   name: string;
   numSentences?: number;
   collectionClozeSentencesUrl?: string;
@@ -50,78 +71,281 @@ function requestHeaders(extra: Record<string, string> = {}): Record<string, stri
   };
 }
 
-async function postJson(url: string, body: unknown): Promise<Record<string, unknown>> {
-  const response = await fetch(url, {
-    method: "POST",
-    credentials: "same-origin",
-    headers: requestHeaders({ "Content-Type": "application/json", "X-CSRF-Token": csrfToken() }),
-    body: JSON.stringify(body),
-  });
-  const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!response.ok || data.errors) {
-    const errors = data.errors;
-    const message = Array.isArray(errors) ? errors.join(", ") : errors ? String(errors) : `HTTP ${response.status}`;
-    throw new Error(message);
-  }
-  return data;
+interface JQueryXhr {
+  status: number;
+  responseJSON?: unknown;
 }
 
-function findKeyDeep(value: unknown, key: string, depth = 0): string | null {
-  if (!value || typeof value !== "object" || depth > 6) return null;
-  const record = value as Record<string, unknown>;
-  if (typeof record[key] === "string") return record[key] as string;
-  for (const child of Object.values(record)) {
-    const found = findKeyDeep(child, key, depth + 1);
-    if (found) return found;
-  }
-  return null;
+interface PageJQuery {
+  ajax: (settings: Record<string, unknown>) => {
+    done: (callback: (data: unknown, status: string, xhr: JQueryXhr) => void) => {
+      fail: (callback: (xhr: JQueryXhr) => void) => void;
+    };
+  };
 }
 
 /**
- * Clozemaster renders its React views with react-rails, so the per-language collections
- * endpoint is embedded in each mount point's data-react-props JSON.
+ * Clozemaster's API answers its own jQuery but returns 400 to a plain fetch with the same
+ * URL and query (checked October 2026), so requests go through the page's jQuery when it has one.
  */
-export function findCollectionsUrl(): string | null {
-  for (const element of document.querySelectorAll<HTMLElement>("[data-react-props]")) {
+async function requestJson(
+  url: string,
+  options: { method?: "GET" | "POST"; query?: Record<string, string>; body?: unknown } = {}
+): Promise<{ status: number; data: Record<string, unknown> | null }> {
+  const method = options.method ?? "GET";
+  const pageJQuery = (window as unknown as { jQuery?: PageJQuery }).jQuery;
+  if (typeof pageJQuery?.ajax === "function") {
+    return new Promise((resolve) => {
+      pageJQuery
+        .ajax({
+          url,
+          method,
+          dataType: "json",
+          ...(method === "POST"
+            ? { contentType: "application/json", data: JSON.stringify(options.body) }
+            : { data: options.query }),
+        })
+        .done((data, _status, xhr) => resolve({ status: xhr.status, data: (data as Record<string, unknown>) ?? null }))
+        .fail((xhr) => resolve({ status: xhr.status, data: (xhr.responseJSON as Record<string, unknown>) ?? null }));
+    });
+  }
+
+  const query = options.query ? new URLSearchParams(options.query).toString() : "";
+  const response = await fetch(query ? `${url}${url.includes("?") ? "&" : "?"}${query}` : url, {
+    method,
+    credentials: "same-origin",
+    headers: requestHeaders(
+      method === "POST" ? { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() } : { "X-CSRF-Token": csrfToken() }
+    ),
+    body: method === "POST" ? JSON.stringify(options.body) : undefined,
+  });
+  const data = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+  return { status: response.status, data };
+}
+
+async function postJson(url: string, body: unknown): Promise<Record<string, unknown>> {
+  const { status, data } = await requestJson(url, { method: "POST", body });
+  if (status < 200 || status >= 300 || data?.errors) {
+    const errors = data?.errors;
+    const message = Array.isArray(errors) ? errors.join(", ") : errors ? String(errors) : `HTTP ${status}`;
+    throw new Error(message);
+  }
+  return data ?? {};
+}
+
+function findValueDeep(value: unknown, key: string, depth = 0): unknown {
+  if (!value || typeof value !== "object" || depth > 6) return undefined;
+  const record = value as Record<string, unknown>;
+  if (key in record && record[key] !== null && record[key] !== undefined) return record[key];
+  for (const child of Object.values(record)) {
+    const found = findValueDeep(child, key, depth + 1);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/** Clozemaster renders its views with react-rails, so page data sits in each mount point's data-react-props JSON. */
+function readReactProps(root: ParentNode): unknown[] {
+  const props: unknown[] = [];
+  for (const element of root.querySelectorAll<HTMLElement>("[data-react-props]")) {
     try {
-      const found = findKeyDeep(JSON.parse(element.dataset.reactProps ?? ""), "collectionsUrl");
-      if (found) return found;
+      props.push(JSON.parse(element.dataset.reactProps ?? ""));
     } catch {
       // Not every mount point carries valid JSON props.
     }
   }
-  return null;
+  return props;
 }
 
-function requireCollectionsUrl(): string {
-  const collectionsUrl = findCollectionsUrl();
-  if (!collectionsUrl) {
-    throw new Error(
-      "Couldn't find your Clozemaster collections on this page. Open the Clozemaster dashboard for the language you want, signed in, and try again."
-    );
+function propValue(allProps: unknown[], key: string): unknown {
+  for (const props of allProps) {
+    const found = findValueDeep(props, key);
+    if (found !== undefined) return found;
   }
-  return collectionsUrl;
+  return undefined;
+}
+
+interface PageState {
+  collectionsUrl: string | null;
+  /** DashboardV5 keeps collectionsUrl out of its props and loads it from this JSON endpoint. */
+  languagePairingUrl: string | null;
+  /** The query DashboardV5 sends with languagePairingUrl, built from its own props. */
+  languagePairingQuery: Record<string, string>;
+  isSignedIn: boolean | null;
+  isPro: boolean | null;
+  dashboardPath: string | null;
+}
+
+function languagePairFromPath(pathname: string): string | null {
+  return pathname.match(/^\/l\/([a-z]{3}-[a-z]{3})(?:\/|$)/i)?.[1]?.toLowerCase() ?? null;
+}
+
+function readPageState(root: ParentNode, pathname: string): PageState {
+  const allProps = readReactProps(root);
+  const collectionsUrl = propValue(allProps, "collectionsUrl");
+  const languagePairingUrl = propValue(allProps, "languagePairingUrl");
+  const query: Record<string, string> = {};
+  for (const [prop, param] of [
+    ["includeCefr", "include_cefr"],
+    ["includeDiscover", "include_discover"],
+    ["includeFastTrackV2Collections", "include_fast_track_v2_collections"],
+  ]) {
+    const value = propValue(allProps, prop);
+    if (value !== undefined) query[param] = String(value);
+  }
+  const isSignedIn = propValue(allProps, "isSignedIn");
+  const isPro = propValue(allProps, "isPro");
+  const webUrl = propValue(allProps, "languagePairingWebUrl");
+  const pair = languagePairFromPath(pathname);
+  let dashboardPath: string | null = null;
+  if (typeof webUrl === "string" && webUrl.startsWith("/")) dashboardPath = webUrl;
+  else if (pair) dashboardPath = `/l/${pair}`;
+  return {
+    collectionsUrl: typeof collectionsUrl === "string" ? collectionsUrl : null,
+    languagePairingUrl: typeof languagePairingUrl === "string" ? languagePairingUrl : null,
+    languagePairingQuery: query,
+    isSignedIn: typeof isSignedIn === "boolean" ? isSignedIn : null,
+    isPro: typeof isPro === "boolean" ? isPro : null,
+    dashboardPath,
+  };
+}
+
+function looksSignedOut(root: Document): boolean {
+  return Boolean(root.querySelector('form[action*="sign_in"], form[action*="login"], input[type="password"]'));
+}
+
+const SIGN_IN_INSTRUCTION = "Sign in at https://www.clozemaster.com/login, then open your language's dashboard and try again.";
+
+/** The same request DashboardV5 makes on load; its languagePairing carries collectionsUrl. */
+async function fromLanguagePairing(
+  state: PageState
+): Promise<{ collectionsUrl: string; isPro: boolean | null } | null> {
+  if (state.collectionsUrl) return { collectionsUrl: state.collectionsUrl, isPro: state.isPro };
+  if (!state.languagePairingUrl) return null;
+  const { status, data: raw } = await requestJson(state.languagePairingUrl, { query: state.languagePairingQuery });
+  if (status === 401) {
+    throw new ClozemasterError("signed_out", "You're not signed in to Clozemaster.", SIGN_IN_INSTRUCTION);
+  }
+  if (status < 200 || status >= 300) return null;
+  const data = raw as {
+    languagePairing?: { collectionsUrl?: string };
+    user?: { isPro?: boolean };
+  } | null;
+  const collectionsUrl = data?.languagePairing?.collectionsUrl;
+  if (typeof collectionsUrl !== "string") return null;
+  const isPro = data?.user?.isPro;
+  return { collectionsUrl, isPro: typeof isPro === "boolean" ? isPro : state.isPro };
+}
+
+interface VisitedCollectionUrl {
+  url: string;
+  languagePair: string;
+}
+
+/**
+ * Finds the collections endpoint: in the page props, or through the languagePairingUrl the
+ * dashboard loads it from. Settings and play views can lack both, so this falls back to
+ * pages Clozemaster itself links to (the language dashboard and its collections tab) and to
+ * collection play pages from the person's history, fetching each and reading its props.
+ * Nothing is navigated to, and only a page that actually carries the endpoint counts.
+ */
+async function resolveCollectionsUrl(): Promise<{ collectionsUrl: string; isPro: boolean | null }> {
+  const here = readPageState(document, window.location.pathname);
+  if (here.isSignedIn === false || (here.isSignedIn === null && looksSignedOut(document))) {
+    throw new ClozemasterError("signed_out", "You're not signed in to Clozemaster.", SIGN_IN_INSTRUCTION);
+  }
+  const fromHere = await fromLanguagePairing(here);
+  if (fromHere) return fromHere;
+
+  const candidates: string[] = [];
+  if (here.dashboardPath) candidates.push(here.dashboardPath, `${here.dashboardPath}?tab=collections`);
+  const pair = languagePairFromPath(here.dashboardPath ?? window.location.pathname);
+  const visited = await sendBridgeRequest<Record<string, never>, VisitedCollectionUrl[]>(
+    "find-clozemaster-collection-urls",
+    {}
+  ).catch(() => []);
+  for (const entry of visited) {
+    if (!pair || entry.languagePair === pair) candidates.push(entry.url);
+    if (candidates.length >= 4) break;
+  }
+
+  const currentUrl = window.location.pathname + window.location.search;
+  for (const candidate of new Set(candidates)) {
+    if (candidate === currentUrl) continue;
+    const response = await fetch(candidate, { credentials: "same-origin" }).catch(() => null);
+    if (!response) continue;
+    const landedOn = new URL(response.url);
+    if (/\/(sign-up|login|users\/sign_in)/.test(landedOn.pathname)) {
+      throw new ClozemasterError("signed_out", "You're not signed in to Clozemaster.", SIGN_IN_INSTRUCTION);
+    }
+    if (!response.ok) continue;
+    const page = new DOMParser().parseFromString(await response.text(), "text/html");
+    const there = readPageState(page, landedOn.pathname);
+    if (there.isSignedIn === false) {
+      throw new ClozemasterError("signed_out", "You're not signed in to Clozemaster.", SIGN_IN_INSTRUCTION);
+    }
+    const fromThere = await fromLanguagePairing(there);
+    if (fromThere) return { collectionsUrl: fromThere.collectionsUrl, isPro: fromThere.isPro ?? here.isPro };
+  }
+
+  const where = here.dashboardPath
+    ? `https://www.clozemaster.com${here.dashboardPath}?tab=collections`
+    : "https://www.clozemaster.com/dashboard, then pick the language you study";
+  throw new ClozemasterError(
+    "wrong_view",
+    "This Clozemaster page doesn't show your collections.",
+    `Open ${where} while signed in, and try again.`
+  );
 }
 
 function toCollection(raw: RawCollection): ClozemasterCollection | null {
   const sentencesUrl = raw.collectionClozeSentencesUrl ?? raw.collectionClozeSentencesUpsertUrl;
-  if (typeof raw.id !== "number" || !sentencesUrl) return null;
-  return { id: raw.id, name: raw.name, numSentences: raw.numSentences ?? null, sentencesUrl };
+  if ((typeof raw.id !== "number" && typeof raw.id !== "string") || !sentencesUrl) return null;
+  return {
+    id: raw.id,
+    slug: raw.slug ?? null,
+    name: raw.name,
+    numSentences: raw.numSentences ?? null,
+    sentencesUrl,
+    playUrl: raw.playUrl ?? null,
+  };
 }
 
 export async function listMyCollections(): Promise<ClozemasterCollection[]> {
-  const response = await fetch(`${requireCollectionsUrl()}?filter=mine&order=updatedAt`, {
-    credentials: "same-origin",
-    headers: requestHeaders(),
-  });
-  if (response.status === 401) throw new Error("You're not signed in to Clozemaster.");
-  if (!response.ok) throw new Error(`Couldn't load your collections (HTTP ${response.status}).`);
-  const data = (await response.json()) as { collections?: RawCollection[] };
-  return (data.collections ?? []).map(toCollection).filter((c): c is ClozemasterCollection => c !== null);
+  const { collectionsUrl, isPro } = await resolveCollectionsUrl();
+  const { status, data: raw } = await requestJson(collectionsUrl, { query: { filter: "mine", order: "updatedAt" } });
+  if (status === 401) {
+    throw new ClozemasterError("signed_out", "You're not signed in to Clozemaster.", SIGN_IN_INSTRUCTION);
+  }
+  if (status === 403 || (isPro === false && (status < 200 || status >= 300))) {
+    throw new ClozemasterError(
+      "pro_required",
+      "Custom collections are a Clozemaster Pro feature.",
+      "Upgrade to Clozemaster Pro, or add the sentences by hand in Clozemaster."
+    );
+  }
+  if (status < 200 || status >= 300) {
+    throw new ClozemasterError(
+      "request_failed",
+      `Couldn't load your collections (HTTP ${status}).`,
+      "Reload the Clozemaster page and try again."
+    );
+  }
+  const data = (raw ?? {}) as { collections?: RawCollection[] };
+  const collections = (data.collections ?? []).map(toCollection).filter((c): c is ClozemasterCollection => c !== null);
+  if (collections.length === 0 && isPro === false) {
+    throw new ClozemasterError(
+      "pro_required",
+      "Custom collections are a Clozemaster Pro feature.",
+      "Upgrade to Clozemaster Pro, or add the sentences by hand in Clozemaster."
+    );
+  }
+  return collections;
 }
 
 export async function createCollection(name: string): Promise<ClozemasterCollection> {
-  const data = await postJson(requireCollectionsUrl(), { collection: { name } });
+  const { collectionsUrl } = await resolveCollectionsUrl();
+  const data = await postJson(collectionsUrl, { collection: { name } });
   const collection = data.collection ? toCollection(data.collection as RawCollection) : null;
   if (!collection) throw new Error("Clozemaster didn't return the new collection.");
   return collection;

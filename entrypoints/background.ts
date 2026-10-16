@@ -3,6 +3,10 @@ import {
   normalizeYoutubeUrl,
   saveSession,
   loadCachedMandalaSummary,
+  saveCachedMandalaSummary,
+  mandalaStatusFor,
+  shelfLinksForVideo,
+  type MandalaStatus,
   saveStagedClozeCard,
   loadStagedClozeCards,
   clearStagedClozeCards,
@@ -204,7 +208,7 @@ export default defineBackground(() => {
     if (message.action === "shelve-and-clear-reading-item") {
       const readingItemId = typeof message.id === "string" ? message.id.trim() : "";
       const notOnListMessage =
-        "That id is not on the reading list. Call get_reading_list_catalog and pass an id from it.";
+        "That id is not on the reading list. Call reading_list_get_unread and pass an id from it.";
       void queryReadingList(false)
         .then(async (items) => {
           const item = items.find((candidate) => candidate.id === readingItemId);
@@ -233,6 +237,27 @@ export default defineBackground(() => {
             errorMessage: error instanceof Error ? error.message : String(error),
           })
         );
+      return true;
+    }
+
+    if (message.action === "clozemaster-remote") {
+      void handleClozemasterRemote(message as ClozemasterRemoteMessage, sender)
+        .then((result) => sendResponse(result))
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            reason: error instanceof ClozemasterRemoteError ? error.reason : "request_failed",
+            errorMessage: error instanceof Error ? error.message : String(error),
+            ...(error instanceof ClozemasterRemoteError ? error.details : {}),
+          })
+        );
+      return true;
+    }
+
+    if (message.action === "find-clozemaster-collection-urls") {
+      void findClozemasterCollectionUrls()
+        .then((result) => sendResponse(result))
+        .catch(() => sendResponse([]));
       return true;
     }
 
@@ -269,14 +294,7 @@ export default defineBackground(() => {
     }
 
     if (message.action === "log-mandala-time") {
-      void handleLogMandalaTime(
-        message.payload as {
-          actionId?: string;
-          minutes: number;
-          linkId?: string;
-          videoTitle: string;
-        }
-      )
+      void handleLogMandalaTime(message.payload as { url: string; minutes: number; videoTitle: string })
         .then((result) => sendResponse(result))
         .catch((error) =>
           sendResponse({
@@ -363,14 +381,178 @@ async function broadcastToClozemasterTabs(messagePayload: unknown): Promise<void
   }
 }
 
-async function handleCheckMandalaStatus(rawUrl: string) {
+const CLOZEMASTER_PLAY_URL = /^https:\/\/www\.clozemaster\.com\/l\/([a-z]{3}-[a-z]{3})\/collections\/([^/?#]+)\/play(?:[?#]|$)/i;
+
+/** Only collection play URLs the person actually visited; nothing else from history leaves here. */
+async function findClozemasterCollectionUrls(limit = 10) {
+  const items = await browser.history.search({ text: "clozemaster.com/l/", startTime: 0, maxResults: 1000 });
+  const bySlug = new Map<string, { url: string; languagePair: string; slug: string; title: string; lastVisitTime: number }>();
+  for (const item of items) {
+    const match = item.url?.match(CLOZEMASTER_PLAY_URL);
+    if (!item.url || !match) continue;
+    const slug = decodeURIComponent(match[2]);
+    const lastVisitTime = item.lastVisitTime ?? 0;
+    const existing = bySlug.get(slug);
+    if (existing && existing.lastVisitTime >= lastVisitTime) continue;
+    bySlug.set(slug, { url: item.url, languagePair: match[1].toLowerCase(), slug, title: item.title ?? "", lastVisitTime });
+  }
+  return [...bySlug.values()].sort((first, second) => second.lastVisitTime - first.lastVisitTime).slice(0, limit);
+}
+
+interface ClozemasterRemoteMessage {
+  op: "list" | "add";
+  payload?: {
+    languagePair?: string;
+    collectionId?: number | string;
+    collectionName?: string;
+    cards?: Array<{ sentence?: string }>;
+  };
+}
+
+class ClozemasterRemoteError extends Error {
+  constructor(
+    readonly reason: string,
+    message: string,
+    readonly details: Record<string, unknown> = {}
+  ) {
+    super(message);
+  }
+}
+
+const CLOZEMASTER_PAIR_URL = /^https:\/\/www\.clozemaster\.com\/l\/([a-z]{3}-[a-z]{3})(?:[/?#]|$)/i;
+
+function clozemasterPairOf(url: string | undefined): string | null {
+  return url?.match(CLOZEMASTER_PAIR_URL)?.[1]?.toLowerCase() ?? null;
+}
+
+/** Language pairs the person has opened in Clozemaster, most recent first. */
+async function visitedClozemasterPairs(): Promise<string[]> {
+  const items = await browser.history.search({ text: "clozemaster.com/l/", startTime: 0, maxResults: 1000 });
+  const pairs: string[] = [];
+  for (const item of [...items].sort((first, second) => (second.lastVisitTime ?? 0) - (first.lastVisitTime ?? 0))) {
+    const pair = clozemasterPairOf(item.url);
+    if (pair && !pairs.includes(pair)) pairs.push(pair);
+  }
+  return pairs;
+}
+
+async function waitForTabComplete(tabId: number, timeoutMilliseconds = 20_000): Promise<void> {
+  const deadline = Date.now() + timeoutMilliseconds;
+  while (Date.now() < deadline) {
+    const tab = await browser.tabs.get(tabId);
+    if (tab.status === "complete") return;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+}
+
+/**
+ * A Clozemaster tab for the language: an open one if there is one, otherwise a background tab
+ * on that language's dashboard (the /l/<pair> page Clozemaster's own language menu links to).
+ */
+async function clozemasterTabFor(requestedPair: string | null): Promise<{ tabId: number; opened: boolean; pair: string | null }> {
+  const tabs = (await browser.tabs.query({ url: "https://www.clozemaster.com/*" })).filter((tab) => tab.id !== undefined);
+  const matching = requestedPair
+    ? tabs.find((tab) => clozemasterPairOf(tab.url) === requestedPair)
+    : tabs.find((tab) => clozemasterPairOf(tab.url)) ?? tabs[0];
+  if (matching?.id !== undefined) return { tabId: matching.id, opened: false, pair: clozemasterPairOf(matching.url) };
+
+  let pair = requestedPair;
+  if (!pair) {
+    const visited = await visitedClozemasterPairs();
+    if (visited.length === 1) pair = visited[0];
+    else if (visited.length > 1) {
+      throw new ClozemasterRemoteError("language_required", "Which Clozemaster language should these go to?", {
+        instruction: "Pass languagePair, one of knownLanguagePairs.",
+        knownLanguagePairs: visited,
+      });
+    } else {
+      throw new ClozemasterRemoteError("no_clozemaster_tab", "No Clozemaster language is known yet.", {
+        instruction: "Open https://www.clozemaster.com, sign in and open the language you study, then try again.",
+      });
+    }
+  }
+
+  const created = await browser.tabs.create({ url: `https://www.clozemaster.com/l/${pair}`, active: false });
+  if (created.id === undefined) throw new ClozemasterRemoteError("request_failed", "Couldn't open Clozemaster.");
+  await waitForTabComplete(created.id);
+  return { tabId: created.id, opened: true, pair };
+}
+
+async function sendToClozemasterTab(tabId: number, message: unknown): Promise<unknown> {
+  // A freshly opened tab may not have its content script yet.
+  for (let attempt = 0; attempt < 12; attempt++) {
+    try {
+      const response = await browser.tabs.sendMessage(tabId, message);
+      const notReady = (response as { reason?: string } | undefined)?.reason === "not_ready";
+      if (response !== undefined && !notReady) return response;
+    } catch {
+      // Receiving end not there yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new ClozemasterRemoteError("not_ready", "The Clozemaster tab didn't answer.", {
+    instruction: "Reload the Clozemaster tab and try again.",
+  });
+}
+
+async function handleClozemasterRemote(message: ClozemasterRemoteMessage, sender: Browser.runtime.MessageSender) {
+  const payload = message.payload ?? {};
+  const requestedPair = payload.languagePair?.trim().toLowerCase() || null;
+  if (requestedPair && !/^[a-z]{3}-[a-z]{3}$/.test(requestedPair)) {
+    throw new ClozemasterRemoteError("invalid_input", `"${payload.languagePair}" isn't a Clozemaster language pair.`, {
+      instruction: 'Use a pair from a Clozemaster URL, such as "slk-eng".',
+    });
+  }
+
+  if (message.op === "list") {
+    await ensureReadGrant(
+      sender,
+      "clozemaster-collections",
+      buildApprovalRequest(sender, {
+        title: "Share your Clozemaster collections?",
+        summary: "This page wants to see the names of your Clozemaster collections so it can add sentences to one.",
+        confirmLabel: "Allow",
+        destructive: false,
+      })
+    );
+  } else if (!isExtensionPageSender(sender)) {
+    const cards = Array.isArray(payload.cards) ? payload.cards : [];
+    const target = payload.collectionName?.trim()
+      ? `“${payload.collectionName.trim()}” (created if you don't have it yet)`
+      : `collection ${payload.collectionId ?? "?"}`;
+    const approved = await requestApproval(
+      buildApprovalRequest(sender, {
+        title: `Add ${cards.length} ${cards.length === 1 ? "sentence" : "sentences"} to Clozemaster?`,
+        summary: `This page wants to add these sentences to your Clozemaster ${target}${requestedPair ? ` for ${requestedPair}` : ""}.`,
+        items: cards.map((card) => card.sentence ?? ""),
+        confirmLabel: "Add sentences",
+        destructive: false,
+      })
+    );
+    if (!approved) throw new ClozemasterRemoteError("declined", "The user declined to add these sentences.");
+  }
+
+  const { tabId, opened, pair } = await clozemasterTabFor(requestedPair);
+  try {
+    const { languagePair: _ignored, ...opPayload } = payload;
+    const result = (await sendToClozemasterTab(tabId, { action: "clozemaster-op", op: message.op, payload: opPayload })) as Record<
+      string,
+      unknown
+    >;
+    return { ...result, languagePair: pair };
+  } finally {
+    if (opened) void browser.tabs.remove(tabId).catch(() => {});
+  }
+}
+
+async function handleCheckMandalaStatus(rawUrl: string): Promise<MandalaStatus> {
   const mandalaTab = await findMandalaTab();
   if (mandalaTab && mandalaTab.id !== undefined) {
     try {
-      const tabResponse = await browser.tabs.sendMessage(mandalaTab.id, {
+      const tabResponse = (await browser.tabs.sendMessage(mandalaTab.id, {
         action: "query-mandala-shelves",
         url: rawUrl,
-      });
+      })) as MandalaStatus | undefined;
       if (tabResponse && typeof tabResponse === "object") {
         return tabResponse;
       }
@@ -381,41 +563,9 @@ async function handleCheckMandalaStatus(rawUrl: string) {
 
   const cachedSummary = await loadCachedMandalaSummary();
   if (!cachedSummary) {
-    return {
-      connected: false,
-      cached: false,
-      pillars: [],
-    };
+    return { connected: false, cached: false, pillars: [], savedPillarIndexes: [] };
   }
-
-  const normalizedTargetUrl = normalizeYoutubeUrl(rawUrl);
-  const targetVideoId = getVideoIdFromUrl(normalizedTargetUrl);
-
-  const matchedLink = cachedSummary.shelfLinks.find((link) => {
-    const linkNormalized = normalizeYoutubeUrl(link.url);
-    if (linkNormalized === normalizedTargetUrl) return true;
-    const linkVideoId = getVideoIdFromUrl(linkNormalized);
-    return Boolean(targetVideoId && linkVideoId && targetVideoId === linkVideoId);
-  });
-
-  const matchedPillar = matchedLink
-    ? cachedSummary.pillars.find((pillar) => pillar.index === matchedLink.pillarIndex)
-    : undefined;
-
-  return {
-    connected: false,
-    cached: true,
-    activeChartTitle: cachedSummary.activeChartTitle,
-    matchedShelfItem: matchedLink
-      ? {
-          pillarIndex: matchedLink.pillarIndex,
-          pillarTitle: matchedPillar?.title || `Pillar ${matchedLink.pillarIndex + 1}`,
-          linkId: matchedLink.id,
-          toolTitle: matchedLink.title,
-        }
-      : undefined,
-    pillars: cachedSummary.pillars,
-  };
+  return mandalaStatusFor(cachedSummary, rawUrl, { connected: false, cached: true });
 }
 
 async function handleSaveMandalaShelfLink(payload: {
@@ -427,11 +577,12 @@ async function handleSaveMandalaShelfLink(payload: {
   const mandalaTab = await findMandalaTab();
   if (mandalaTab && mandalaTab.id !== undefined) {
     try {
-      const tabResponse = await browser.tabs.sendMessage(mandalaTab.id, {
+      const tabResponse = (await browser.tabs.sendMessage(mandalaTab.id, {
         action: "add-shelf-link",
         ...payload,
-      });
-      return { success: true, queued: false, tabResponse };
+      })) as { success?: boolean; errorMessage?: string } | undefined;
+      if (tabResponse?.success) return { success: true, queued: false };
+      if (tabResponse) return { success: false, errorMessage: tabResponse.errorMessage };
     } catch {
       // Tab communication failed; fall through to queued write
     }
@@ -451,35 +602,46 @@ async function handleSaveMandalaShelfLink(payload: {
     [PENDING_MANDALA_SHELF_LINKS_KEY]: [...existingQueue, newEntry],
   });
 
+  // Until the Mandala tab flushes the queue, the cache is what the player reads its shelves from.
+  const cachedSummary = await loadCachedMandalaSummary();
+  if (cachedSummary) {
+    await saveCachedMandalaSummary({
+      ...cachedSummary,
+      shelfLinks: [
+        ...cachedSummary.shelfLinks,
+        { id: newEntry.id, pillarIndex: payload.pillarIndex, title: payload.title, url: payload.url, kind: payload.kind },
+      ],
+    });
+  }
+
   return { success: true, queued: true };
 }
 
-async function handleLogMandalaTime(payload: {
-  actionId?: string;
-  minutes: number;
-  linkId?: string;
-  videoTitle: string;
-}) {
+async function handleLogMandalaTime(payload: { url: string; minutes: number; videoTitle: string }) {
   const mandalaTab = await findMandalaTab();
   if (mandalaTab && mandalaTab.id !== undefined) {
     try {
-      const tabResponse = await browser.tabs.sendMessage(mandalaTab.id, {
+      const tabResponse = (await browser.tabs.sendMessage(mandalaTab.id, {
         action: "log-time",
         ...payload,
-      });
-      return { success: true, queued: false, tabResponse };
+      })) as { success?: boolean; errorMessage?: string; actionText?: string; pillarTitle?: string } | undefined;
+      if (tabResponse) return { ...tabResponse, success: Boolean(tabResponse.success), queued: false, minutes: payload.minutes };
     } catch {
       // Tab communication failed; fall through to queued write
     }
+  }
+
+  const cachedSummary = await loadCachedMandalaSummary();
+  if (cachedSummary && shelfLinksForVideo(cachedSummary.shelfLinks, payload.url).length === 0) {
+    return { success: false, errorMessage: "Save this video to a pillar first" };
   }
 
   const pendingData = await browser.storage.local.get(PENDING_MANDALA_LOGS_KEY);
   const existingQueue = (pendingData[PENDING_MANDALA_LOGS_KEY] as PendingMandalaTimeLog[]) || [];
   const newEntry: PendingMandalaTimeLog = {
     id: crypto.randomUUID(),
-    actionId: payload.actionId,
+    url: payload.url,
     minutes: payload.minutes,
-    linkId: payload.linkId,
     videoTitle: payload.videoTitle,
     timestamp: Date.now(),
   };

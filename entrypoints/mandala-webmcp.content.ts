@@ -26,7 +26,7 @@ export default defineContentScript({
     const abortController = new AbortController();
 
     const getOpenTabsCatalogTool: WebMcpToolDefinition<Record<string, unknown>, unknown> = {
-      name: "get_open_tabs_catalog",
+      name: "youtube_list_open_tabs",
       description:
         "Returns the complete catalog of all open YouTube tabs across all browser windows, including their titles, channel names, durations, remaining times, and detected languages. Use this while viewing your Mandala chart to align open videos with active learning pillars. The first call from this page opens an approval window, so the user must allow it.",
       annotations: {
@@ -47,7 +47,7 @@ export default defineContentScript({
       },
       unknown
     > = {
-      name: "stage_focused_study_queue",
+      name: "youtube_stage_study_queue",
       description:
         "Stages a curated list of YouTube tabs for a focused study session based on your Mandala priorities. Can automatically stash unselected/distraction tabs into extension storage ('Saved Sessions') and close them guilt-free. The user must approve this in a separate window before anything is closed or removed.",
       inputSchema: {
@@ -84,9 +84,9 @@ export default defineContentScript({
     };
 
     const getReadingListCatalogTool: WebMcpToolDefinition<Record<string, unknown>, unknown> = {
-      name: "get_reading_list_catalog",
+      name: "reading_list_get_unread",
       description:
-        "Retrieves unread Chrome Reading List articles, each with an id. Pass that id to shelve_and_clear_reading_item. To save one onto a pillar, pass its address as path to add_shelf_link. The first call from this page opens an approval window, so the user must allow it.",
+        "Retrieves unread Chrome Reading List articles, each with an id. Pass that id to reading_list_remove_item. To save one onto a pillar, pass its address as path to add_shelf_link. The first call from this page opens an approval window, so the user must allow it.",
       annotations: {
         readOnlyHint: true,
         untrustedContentHint: true,
@@ -100,15 +100,15 @@ export default defineContentScript({
       { id: string },
       unknown
     > = {
-      name: "shelve_and_clear_reading_item",
+      name: "reading_list_remove_item",
       description:
-        "Removes one unread Reading List item after it has been saved to a pillar with add_shelf_link. Pass the id from get_reading_list_catalog. The extension resolves that id to the saved address. The user must approve this in a separate window before anything is removed.",
+        "Removes one unread Reading List item after it has been saved to a pillar with add_shelf_link. Pass the id from reading_list_get_unread. The extension resolves that id to the saved address. The user must approve this in a separate window before anything is removed.",
       inputSchema: {
         type: "object",
         properties: {
           id: {
             type: "string",
-            description: "Id from get_reading_list_catalog, such as rl_1a2b3c4d. Not a web address.",
+            description: "Id from reading_list_get_unread, such as rl_1a2b3c4d. Not a web address.",
           },
         },
         required: ["id"],
@@ -122,7 +122,7 @@ export default defineContentScript({
         if (!id || id.includes("://") || id.includes("/")) {
           return {
             success: false,
-            errorMessage: "Pass the id from get_reading_list_catalog, not a web address.",
+            errorMessage: "Pass the id from reading_list_get_unread, not a web address.",
           };
         }
         return await sendBridgeRequest("shelve-and-clear-reading-item", { id });

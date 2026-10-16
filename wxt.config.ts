@@ -5,7 +5,7 @@ export default defineConfig({
   manifest: {
     name: "Study Harvester",
     description: "Turn open YouTube tabs into a study desk: see the time left, sort videos into piles, and start focused sessions.",
-    permissions: ["tabs", "scripting", "storage", "readingList"],
+    permissions: ["tabs", "scripting", "storage", "readingList", "history"],
     host_permissions: [
       "*://*.youtube.com/*",
     ],

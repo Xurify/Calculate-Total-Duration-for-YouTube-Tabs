@@ -7,15 +7,16 @@ import {
   registerWebMcpTool,
   type WebMcpToolDefinition,
 } from "../utils/webmcp";
+import type { ClozeCardInput } from "../utils/clozemasterApi";
 import {
-  addCardsToCollection,
-  createCollection,
-  listMyCollections,
-  type ClozeCardInput,
-  type ClozemasterCollection,
-} from "../utils/clozemasterApi";
-
-const MAX_CARDS_PER_CALL = 50;
+  CARDS_INPUT_SCHEMA,
+  COLLECTION_TARGET_PROPERTIES,
+  MAX_CARDS_PER_CALL,
+  addSentencesResult,
+  listCollectionsResult,
+  type AddSentencesInput,
+} from "../utils/clozemasterTools";
+import { servePageRequests } from "../utils/pageService";
 
 interface StagedClozeCollection {
   collectionName: string;
@@ -102,6 +103,12 @@ export default defineContentScript({
   world: "MAIN",
   runAt: "document_idle",
   async main() {
+    // Serves the YouTube tab's Clozemaster tools, which reach this tab through the background.
+    servePageRequests({
+      "clozemaster:list": () => listCollectionsResult(),
+      "clozemaster:add": (payload) => addSentencesResult(payload as AddSentencesInput),
+    });
+
     if (!isWebMcpSupported()) {
       return;
     }
@@ -112,9 +119,9 @@ export default defineContentScript({
       Record<string, unknown>,
       unknown
     > = {
-      name: "get_clozemaster_session_summary",
+      name: "clozemaster_get_session",
       description:
-        "Extracts the current Clozemaster study session context, including language pair, reviews ready count, active sentence, and the sentences the user captured from YouTube with Alt+C (capturedCards), which can be sent to add_sentences_to_clozemaster_collection.",
+        "Extracts the current Clozemaster study session context, including language pair, reviews ready count, active sentence, and the sentences the user captured from YouTube with Alt+C (capturedCards). Each captured card has its language code and a source note; send only the ones in the language open in Clozemaster to clozemaster_add_sentences, and write a translation for any card whose translation is empty.",
       annotations: {
         readOnlyHint: true,
         untrustedContentHint: true,
@@ -147,122 +154,35 @@ export default defineContentScript({
     };
 
     const listCollectionsTool: WebMcpToolDefinition<Record<string, unknown>, unknown> = {
-      name: "list_clozemaster_collections",
+      name: "clozemaster_list_collections",
       description:
-        "Lists the user's own Clozemaster collections for the language currently open in Clozemaster, with their IDs and sentence counts. Use it to pick a collection before add_sentences_to_clozemaster_collection.",
+        "Lists the user's own Clozemaster collections for the language open in Clozemaster, with their IDs, slugs, play URLs and sentence counts. Use it to pick a collection before clozemaster_add_sentences. Works from any page of that language, including settings and play views. On failure it returns reason (signed_out, pro_required, wrong_view or request_failed) and an instruction to show the user; wrong_view also lists collection play URLs from the user's history.",
       annotations: {
         readOnlyHint: true,
         untrustedContentHint: true,
       },
-      execute: async () => {
-        try {
-          const collections = await listMyCollections();
-          return {
-            success: true,
-            collections: collections.map(({ id, name, numSentences }) => ({ id, name, numSentences })),
-          };
-        } catch (error) {
-          return { success: false, errorMessage: error instanceof Error ? error.message : String(error) };
-        }
-      },
+      execute: () => listCollectionsResult(),
     };
 
     const addSentencesTool: WebMcpToolDefinition<
-      { collectionId?: number; collectionName?: string; cards: ClozeCardInput[] },
+      AddSentencesInput & Record<string, unknown>,
       unknown
     > = {
-      name: "add_sentences_to_clozemaster_collection",
+      name: "clozemaster_add_sentences",
       description:
         `Adds cloze sentences to one of the user's Clozemaster collections, for the language currently open in Clozemaster. Pass collectionId to use an existing collection, or collectionName to use the collection with that name and create it if it doesn't exist. Each sentence must be in the target language with exactly one word wrapped in {{ }}, for example "Včera som {{ochutnal}} bryndzové halušky." At most ${MAX_CARDS_PER_CALL} sentences per call. Requires Clozemaster Pro. Confirm the sentences with the user first: this writes to their Clozemaster account.`,
       inputSchema: {
         type: "object",
         properties: {
-          collectionId: {
-            type: "number",
-            description: "ID of an existing collection, from list_clozemaster_collections",
-          },
-          collectionName: {
-            type: "string",
-            description: "Collection name; created if the user has no collection with this name",
-          },
-          cards: {
-            type: "array",
-            maxItems: MAX_CARDS_PER_CALL,
-            items: {
-              type: "object",
-              properties: {
-                sentence: {
-                  type: "string",
-                  description: "Target-language sentence with exactly one {{clozeWord}}",
-                },
-                translation: { type: "string", description: "Translation of the full sentence" },
-                targetWord: {
-                  type: "string",
-                  description: "Optional; used to mark the cloze word when the sentence has no {{ }}",
-                },
-                hint: { type: "string", description: "Shown before answering, e.g. 'past tense'" },
-                notes: { type: "string", description: "Shown after answering, e.g. a grammar note or the video it came from" },
-                pronunciation: { type: "string" },
-                alternativeAnswers: {
-                  type: "array",
-                  items: { type: "string" },
-                  description: "Other words accepted as correct",
-                },
-              },
-              required: ["sentence", "translation"],
-            },
-          },
+          ...COLLECTION_TARGET_PROPERTIES,
+          cards: CARDS_INPUT_SCHEMA,
         },
         required: ["cards"],
       },
       annotations: {
         readOnlyHint: false,
       },
-      execute: async (inputArguments) => {
-        const cards = Array.isArray(inputArguments.cards) ? inputArguments.cards : [];
-        if (cards.length === 0) {
-          return { success: false, errorMessage: "cards must contain at least one sentence." };
-        }
-        if (cards.length > MAX_CARDS_PER_CALL) {
-          return { success: false, errorMessage: `Send at most ${MAX_CARDS_PER_CALL} sentences per call.` };
-        }
-
-        try {
-          const collections = await listMyCollections();
-          const requestedName = inputArguments.collectionName?.trim();
-          let collection: ClozemasterCollection | undefined;
-          let created = false;
-
-          if (typeof inputArguments.collectionId === "number") {
-            collection = collections.find((candidate) => candidate.id === inputArguments.collectionId);
-            if (!collection) {
-              return { success: false, errorMessage: `No collection of yours has ID ${inputArguments.collectionId}.` };
-            }
-          } else if (requestedName) {
-            collection = collections.find(
-              (candidate) => candidate.name.trim().toLowerCase() === requestedName.toLowerCase()
-            );
-            if (!collection) {
-              collection = await createCollection(requestedName);
-              created = true;
-            }
-          } else {
-            return { success: false, errorMessage: "Pass collectionId or collectionName." };
-          }
-
-          const results = await addCardsToCollection(collection, cards);
-          const addedCount = results.filter((result) => result.added).length;
-          return {
-            success: addedCount > 0,
-            collection: { id: collection.id, name: collection.name, created },
-            addedCount,
-            failedCount: results.length - addedCount,
-            results,
-          };
-        } catch (error) {
-          return { success: false, errorMessage: error instanceof Error ? error.message : String(error) };
-        }
-      },
+      execute: (inputArguments) => addSentencesResult(inputArguments),
     };
 
     await Promise.all([

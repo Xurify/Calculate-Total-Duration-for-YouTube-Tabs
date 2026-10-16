@@ -1,7 +1,7 @@
 /**
  * Content script that runs on YouTube watch/shorts pages.
- * Handles metadata caching, chapter extraction, sentence navigation,
- * slow replay, shadowing mode, cloze capture, and in-player Mandala integration.
+ * Handles metadata caching, chapter extraction, transcript sentence navigation,
+ * cloze capture, and in-player Mandala integration.
  */
 import {
   detectLanguageFromPlayerResponse,
@@ -11,7 +11,18 @@ import {
 import { resolveVideoLanguage, type VideoChannel } from "../utils/channelLanguage";
 import { registerBridgeListener } from "../utils/webmcpBridge";
 import { extractChaptersFromPlayerResponse } from "../utils/chapters";
-import type { VideoChapter, StagedClozeCard } from "../utils/storage";
+import type { MandalaStatus, VideoChapter, StagedClozeCard } from "../utils/storage";
+import {
+  buildSentences,
+  countWordFrequencies,
+  maskSentence,
+  pickClozeToken,
+  segmentWords,
+  sentenceIndexAt,
+  type TranscriptSentence,
+  type WordToken,
+} from "../utils/transcript";
+import { requestPageTranscript } from "../utils/youtubeTranscript";
 
 const DEBOUNCE_MS = 150;
 
@@ -55,69 +66,36 @@ let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let lastReadTime = 0;
 const MAX_WAIT_MS = 1000;
 
-interface TranscriptSegment {
-  startSeconds: number;
-  durationSeconds: number;
-  text: string;
+interface ImmersionTranscript {
+  videoId: string;
+  languageCode: string | null;
+  punctuated: boolean;
+  sentences: TranscriptSentence[];
+  frequencies: Map<string, number>;
 }
 
-interface Json3CaptionPayload {
-  events?: Array<{
-    tStartMs?: number;
-    dDurationMs?: number;
-    segs?: Array<{
-      utf8?: string;
-    }>;
-  }>;
-}
-
-interface MandalaStatusResponse {
-  connected: boolean;
-  cached: boolean;
-  activeChartTitle?: string;
-  matchedShelfItem?: {
-    pillarIndex: number;
-    pillarTitle: string;
-    linkId: string;
-    toolTitle: string;
-  };
-  pillars: Array<{
-    index: number;
-    title: string;
-    actionCount: number;
-  }>;
-}
-
-interface SubtitleMemoryEntry {
-  text: string;
-  startSeconds: number;
-  endSeconds: number;
-}
-
-let loadedSegmentsForVideoId: string | null = null;
-let cachedTranscriptSegments: TranscriptSegment[] = [];
-let isFetchingTranscript = false;
-
-let observedSubtitleHistory: SubtitleMemoryEntry[] = [];
-let currentlyActiveLiveSubtitle: { text: string; startSeconds: number; observedAt: number } | null = null;
-let lastShadowingSentenceText = "";
-let captionObserver: MutationObserver | null = null;
+let immersionTranscript: ImmersionTranscript | null = null;
+let pendingTranscript: { videoId: string; request: Promise<ImmersionTranscript | null> } | null = null;
 
 let sessionWatchedSeconds = 0;
 let lastWatchTickTimestamp = Date.now();
 let watchedTimerInterval: ReturnType<typeof setInterval> | null = null;
 
-let isShadowingModeActive = false;
-let isShadowingPauseActive = false;
-let shadowingCountdownTimer: ReturnType<typeof setInterval> | null = null;
-let originalPlaybackRate = 1;
-let isSlowReplayActive = false;
-let slowReplayTargetSegment: TranscriptSegment | null = null;
+let sentencePlayback: {
+  startSeconds: number;
+  endSeconds: number;
+  restoreRate: number | null;
+  pauseAtEnd: boolean;
+} | null = null;
 
-let latestMandalaStatus: MandalaStatusResponse = {
+let closeOpenClozeModal: ((resume: boolean) => void) | null = null;
+let handleClozeModalKey: ((keyboardEvent: KeyboardEvent) => boolean) | null = null;
+
+let latestMandalaStatus: MandalaStatus = {
   connected: false,
   cached: false,
   pillars: [],
+  savedPillarIndexes: [],
 };
 
 let isPillarPopoverOpen = false;
@@ -349,46 +327,6 @@ function setPlaybackVolume(volume: number) {
   return getPlaybackState();
 }
 
-function decodeXmlEntities(encodedText: string): string {
-  return encodedText
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_fullMatch, charCodeString) => String.fromCharCode(Number(charCodeString)));
-}
-
-function ensureSubtitlesEnabled(): boolean {
-  const moviePlayerElement = document.getElementById("movie_player") as (HTMLElement & {
-    isSubtitlesOn?: () => boolean;
-    toggleSubtitlesOn?: () => void;
-  }) | null;
-
-  if (moviePlayerElement && typeof moviePlayerElement.isSubtitlesOn === "function") {
-    try {
-      if (!moviePlayerElement.isSubtitlesOn()) {
-        moviePlayerElement.toggleSubtitlesOn?.();
-        return true;
-      }
-      return true;
-    } catch {
-      // Ignore player method call failure
-    }
-  }
-
-  const subtitlesButton = document.querySelector(".ytp-subtitles-button") as HTMLElement | null;
-  if (subtitlesButton) {
-    const isPressed = subtitlesButton.getAttribute("aria-pressed") === "true";
-    if (!isPressed) {
-      subtitlesButton.click();
-      return true;
-    }
-  }
-  return false;
-}
-
 function extractLiveCaptionText(): string {
   const segmentElements = document.querySelectorAll(".ytp-caption-segment");
   if (segmentElements.length === 0) return "";
@@ -400,166 +338,6 @@ function extractLiveCaptionText(): string {
     }
   }
   return textParts.join(" ").replace(/\s+/g, " ").trim();
-}
-
-async function fetchTranscriptSegmentsForActiveVideo(): Promise<TranscriptSegment[]> {
-  const videoId = getVideoIdFromLocation();
-  if (!videoId) return [];
-  if (loadedSegmentsForVideoId === videoId && cachedTranscriptSegments.length > 0) {
-    return cachedTranscriptSegments;
-  }
-  if (isFetchingTranscript) return cachedTranscriptSegments;
-
-  isFetchingTranscript = true;
-  try {
-    const playerResponse = readPlayerResponseFromPage();
-    const captionTracks =
-      (playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks as Array<{
-        baseUrl?: string;
-        languageCode?: string;
-        kind?: string;
-      }>) || [];
-
-    if (captionTracks.length === 0) {
-      isFetchingTranscript = false;
-      return [];
-    }
-
-    const selectedTrack =
-      captionTracks.find((track) => track.kind !== "asr") || captionTracks[0];
-
-    if (!selectedTrack?.baseUrl) {
-      isFetchingTranscript = false;
-      return [];
-    }
-
-    const jsonResponse = await fetch(`${selectedTrack.baseUrl}&fmt=json3`);
-    if (jsonResponse.ok) {
-      const responseText = await jsonResponse.text();
-      if (responseText && responseText.length > 0) {
-        try {
-          const jsonData = JSON.parse(responseText) as Json3CaptionPayload;
-          if (Array.isArray(jsonData.events)) {
-            const segments: TranscriptSegment[] = [];
-            for (const captionEvent of jsonData.events) {
-              const startSeconds = (captionEvent.tStartMs ?? 0) / 1000;
-              const durationSeconds = (captionEvent.dDurationMs ?? 0) / 1000;
-              const text = (captionEvent.segs ?? [])
-                .map((segmentPart) => segmentPart.utf8 ?? "")
-                .join("")
-                .trim();
-              if (text) {
-                segments.push({ startSeconds, durationSeconds, text });
-              }
-            }
-            if (segments.length > 0) {
-              loadedSegmentsForVideoId = videoId;
-              cachedTranscriptSegments = segments;
-              isFetchingTranscript = false;
-              return segments;
-            }
-          }
-        } catch {
-          // JSON parse failed, proceed to XML fallback
-        }
-      }
-    }
-
-    const xmlResponse = await fetch(selectedTrack.baseUrl);
-    const xmlText = await xmlResponse.text();
-    if (xmlText && xmlText.length > 0) {
-      const textTagRegex = /<text\s+start="([\d.]+)"(?:\s+dur="([\d.]+)")?[^>]*>([\s\S]*?)<\/text>/gi;
-      const segments: TranscriptSegment[] = [];
-      let match: RegExpExecArray | null;
-
-      while ((match = textTagRegex.exec(xmlText)) !== null) {
-        const startSeconds = parseFloat(match[1]) || 0;
-        const durationSeconds = match[2] ? parseFloat(match[2]) || 0 : 0;
-        const rawText = match[3].replace(/<[^>]+>/g, "").trim();
-        const text = decodeXmlEntities(rawText);
-        if (text) {
-          segments.push({ startSeconds, durationSeconds, text });
-        }
-      }
-
-      if (segments.length > 0) {
-        loadedSegmentsForVideoId = videoId;
-        cachedTranscriptSegments = segments;
-        isFetchingTranscript = false;
-        return segments;
-      }
-    }
-
-    isFetchingTranscript = false;
-    return [];
-  } catch {
-    isFetchingTranscript = false;
-    return [];
-  }
-}
-
-function getActiveSubtitleSegment(currentTimeSeconds: number): {
-  segment: TranscriptSegment | null;
-  index: number;
-} {
-  const liveCaptionText = extractLiveCaptionText();
-  if (liveCaptionText) {
-    return {
-      segment: {
-        startSeconds: Math.max(0, currentTimeSeconds - 1.2),
-        durationSeconds: 3.5,
-        text: liveCaptionText,
-      },
-      index: -1,
-    };
-  }
-
-  if (observedSubtitleHistory.length > 0) {
-    const matchedHistory = observedSubtitleHistory.find(
-      (historyEntry) =>
-        currentTimeSeconds >= historyEntry.startSeconds && currentTimeSeconds <= historyEntry.endSeconds + 1.5
-    );
-    if (matchedHistory) {
-      return {
-        segment: {
-          startSeconds: matchedHistory.startSeconds,
-          durationSeconds: Math.max(2, matchedHistory.endSeconds - matchedHistory.startSeconds),
-          text: matchedHistory.text,
-        },
-        index: -1,
-      };
-    }
-  }
-
-  if (cachedTranscriptSegments.length > 0) {
-    for (let index = 0; index < cachedTranscriptSegments.length; index++) {
-      const candidateSegment = cachedTranscriptSegments[index];
-      const segmentEnd = candidateSegment.startSeconds + Math.max(1, candidateSegment.durationSeconds);
-      if (currentTimeSeconds >= candidateSegment.startSeconds && currentTimeSeconds <= segmentEnd) {
-        return { segment: candidateSegment, index };
-      }
-    }
-
-    for (let index = cachedTranscriptSegments.length - 1; index >= 0; index--) {
-      if (currentTimeSeconds >= cachedTranscriptSegments[index].startSeconds) {
-        return { segment: cachedTranscriptSegments[index], index };
-      }
-    }
-  }
-
-  if (observedSubtitleHistory.length > 0) {
-    const latestHistory = observedSubtitleHistory[0];
-    return {
-      segment: {
-        startSeconds: latestHistory.startSeconds,
-        durationSeconds: Math.max(2, latestHistory.endSeconds - latestHistory.startSeconds),
-        text: latestHistory.text,
-      },
-      index: -1,
-    };
-  }
-
-  return { segment: null, index: -1 };
 }
 
 function getTargetPlayerContainer(): HTMLElement {
@@ -574,7 +352,7 @@ function getTargetPlayerContainer(): HTMLElement {
   return document.body;
 }
 
-function showImmersionToast(messageText: string, accentColor = "#e3aa50") {
+function showImmersionToast(messageText: string) {
   const existingToast = document.getElementById("study-harvester-hud-toast");
   if (existingToast) {
     existingToast.remove();
@@ -584,7 +362,6 @@ function showImmersionToast(messageText: string, accentColor = "#e3aa50") {
   const toastElement = document.createElement("div");
   toastElement.id = "study-harvester-hud-toast";
   toastElement.textContent = messageText;
-  toastElement.style.borderLeftColor = accentColor;
 
   container.appendChild(toastElement);
   requestAnimationFrame(() => {
@@ -594,589 +371,403 @@ function showImmersionToast(messageText: string, accentColor = "#e3aa50") {
 
   window.setTimeout(() => {
     toastElement.style.opacity = "0";
-    toastElement.style.transform = "translateY(8px)";
+    toastElement.style.transform = "translateY(4px)";
     window.setTimeout(() => toastElement.remove(), 250);
   }, 3200);
 }
 
-function triggerSentenceReplay(): void {
-  const videoElement = document.querySelector("video");
-  if (!videoElement) return;
-
-  const currentLive = extractLiveCaptionText();
-  let targetSentence: { text: string; startSeconds: number } | null = null;
-
-  if (currentLive && currentlyActiveLiveSubtitle) {
-    targetSentence = currentlyActiveLiveSubtitle;
-  } else if (observedSubtitleHistory.length > 0) {
-    targetSentence = observedSubtitleHistory[0];
-  } else {
-    const { segment } = getActiveSubtitleSegment(videoElement.currentTime);
-    targetSentence = segment;
-  }
-
-  if (!targetSentence) {
-    videoElement.currentTime = Math.max(0, videoElement.currentTime - 4);
-    showImmersionToast("⟲ Rewound 4s");
-    return;
-  }
-
-  const distanceIntoSentence = videoElement.currentTime - targetSentence.startSeconds;
-  if (distanceIntoSentence < 0.6 && observedSubtitleHistory.length > 1) {
-    const previousSentence = observedSubtitleHistory[1];
-    videoElement.currentTime = previousSentence.startSeconds;
-    showImmersionToast(`⟲ Replaying: “${previousSentence.text.slice(0, 42)}…”`);
-  } else {
-    videoElement.currentTime = targetSentence.startSeconds;
-    showImmersionToast(`⟲ Replaying: “${targetSentence.text.slice(0, 42)}…”`);
-  }
+function truncateText(text: string, maxLength: number): string {
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1).trimEnd()}…` : text;
 }
 
-function triggerSlowSentenceReplay(): void {
-  const videoElement = document.querySelector("video");
-  if (!videoElement) return;
-
-  const { segment } = getActiveSubtitleSegment(videoElement.currentTime);
-  if (!segment) {
-    videoElement.currentTime = Math.max(0, videoElement.currentTime - 4);
-    videoElement.playbackRate = 0.75;
-    isSlowReplayActive = true;
-    showImmersionToast("🐢 0.75x Slow Replay (4s)");
-    return;
-  }
-
-  videoElement.currentTime = segment.startSeconds;
-  if (!isSlowReplayActive) {
-    originalPlaybackRate = videoElement.playbackRate || 1;
-    isSlowReplayActive = true;
-  }
-  slowReplayTargetSegment = segment;
-  videoElement.playbackRate = 0.75;
-  showImmersionToast(`🐢 0.75x Slow Replay: “${segment.text.slice(0, 36)}…”`);
+function formatTimestamp(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.floor(totalSeconds % 60);
+  return `${minutes}:${seconds < 10 ? "0" : ""}${seconds}`;
 }
 
-function triggerNextSentence(): void {
-  const videoElement = document.querySelector("video");
-  if (!videoElement) return;
-
-  const { index } = getActiveSubtitleSegment(videoElement.currentTime);
-  if (index >= 0 && index + 1 < cachedTranscriptSegments.length) {
-    const nextSegment = cachedTranscriptSegments[index + 1];
-    videoElement.currentTime = nextSegment.startSeconds;
-    showImmersionToast(`⏭ Next: “${nextSegment.text.slice(0, 40)}…”`);
-  } else {
-    videoElement.currentTime += 5;
-    showImmersionToast("⏭ Jumped forward 5s");
-  }
-}
-
-function toggleShadowingMode(): void {
-  isShadowingModeActive = !isShadowingModeActive;
-  if (isShadowingModeActive) {
-    ensureSubtitlesEnabled();
-    showImmersionToast("🎙️ Shadowing ON · Auto-pauses at each sentence", "#48b788");
-  } else {
-    if (shadowingCountdownTimer) {
-      clearInterval(shadowingCountdownTimer);
-      shadowingCountdownTimer = null;
-    }
-    isShadowingPauseActive = false;
-    removeShadowingCountdownHud();
-    showImmersionToast("Shadowing Mode OFF", "#7a7265");
-  }
-  updateImmersionHud();
-}
-
-function showShadowingCountdownHud(
-  secondsRemaining: number,
-  spokenSentenceText: string,
-  entry: SubtitleMemoryEntry
-): void {
-  const container = getTargetPlayerContainer();
-  let hudContainer = document.getElementById("study-harvester-shadowing-hud");
-  if (!hudContainer) {
-    hudContainer = document.createElement("div");
-    hudContainer.id = "study-harvester-shadowing-hud";
-    container.appendChild(hudContainer);
+/** `allowOpeningPanel` may flash YouTube's transcript panel open, so only a user action passes it. */
+async function loadImmersionTranscript(allowOpeningPanel = false): Promise<ImmersionTranscript | null> {
+  const videoId = getVideoIdFromLocation();
+  if (!videoId) return null;
+  if (immersionTranscript?.videoId === videoId) return immersionTranscript;
+  if (pendingTranscript?.videoId === videoId) {
+    const pending = await pendingTranscript.request;
+    if (pending || !allowOpeningPanel) return pending;
   }
 
-  hudContainer.innerHTML = "";
-
-  const titleHeader = document.createElement("div");
-  titleHeader.className = "study-harvester-shadowing-header";
-  titleHeader.textContent = "🎙️ SHADOWING PRACTICE · SPEAK ALOUD";
-  hudContainer.appendChild(titleHeader);
-
-  const sentenceElement = document.createElement("div");
-  sentenceElement.className = "study-harvester-shadowing-sentence";
-  sentenceElement.textContent = `“${spokenSentenceText}”`;
-  hudContainer.appendChild(sentenceElement);
-
-  const timerRow = document.createElement("div");
-  timerRow.className = "study-harvester-shadowing-timer-row";
-
-  const numberSpan = document.createElement("span");
-  numberSpan.className = "study-harvester-shadowing-number";
-  numberSpan.textContent = String(secondsRemaining);
-  timerRow.appendChild(numberSpan);
-
-  const labelSpan = document.createElement("span");
-  labelSpan.className = "study-harvester-shadowing-label";
-  labelSpan.textContent = secondsRemaining === 1 ? "second remaining" : "seconds remaining";
-  timerRow.appendChild(labelSpan);
-
-  hudContainer.appendChild(timerRow);
-
-  const buttonRow = document.createElement("div");
-  buttonRow.className = "study-harvester-shadowing-actions";
-
-  const continueButton = document.createElement("button");
-  continueButton.className = "study-harvester-shadowing-btn-primary";
-  continueButton.type = "button";
-  continueButton.textContent = "▶ Continue (Space)";
-  continueButton.addEventListener("click", (clickEvent) => {
-    clickEvent.stopPropagation();
-    resumeFromShadowingPause();
-  });
-  buttonRow.appendChild(continueButton);
-
-  const replayButton = document.createElement("button");
-  replayButton.className = "study-harvester-shadowing-btn-secondary";
-  replayButton.type = "button";
-  replayButton.textContent = "⟲ Replay (A)";
-  replayButton.addEventListener("click", (clickEvent) => {
-    clickEvent.stopPropagation();
-    replayLastShadowingSentence(entry);
-  });
-  buttonRow.appendChild(replayButton);
-
-  const exitButton = document.createElement("button");
-  exitButton.className = "study-harvester-shadowing-btn-ghost";
-  exitButton.type = "button";
-  exitButton.textContent = "Stop (Shift+S)";
-  exitButton.addEventListener("click", (clickEvent) => {
-    clickEvent.stopPropagation();
-    toggleShadowingMode();
-  });
-  buttonRow.appendChild(exitButton);
-
-  hudContainer.appendChild(buttonRow);
-}
-
-function removeShadowingCountdownHud(): void {
-  const existingHud = document.getElementById("study-harvester-shadowing-hud");
-  if (existingHud) {
-    existingHud.remove();
-  }
-}
-
-function resumeFromShadowingPause(): void {
-  if (shadowingCountdownTimer) {
-    clearInterval(shadowingCountdownTimer);
-    shadowingCountdownTimer = null;
-  }
-  isShadowingPauseActive = false;
-  removeShadowingCountdownHud();
-
-  const videoElement = document.querySelector("video");
-  if (videoElement && videoElement.paused) {
-    void videoElement.play();
-  }
-}
-
-function replayLastShadowingSentence(completedEntry?: SubtitleMemoryEntry): void {
-  const targetEntry = completedEntry || observedSubtitleHistory[0];
-  if (!targetEntry) return;
-
-  const videoElement = document.querySelector("video");
-  if (!videoElement) return;
-
-  if (shadowingCountdownTimer) {
-    clearInterval(shadowingCountdownTimer);
-    shadowingCountdownTimer = null;
-  }
-  isShadowingPauseActive = false;
-  removeShadowingCountdownHud();
-
-  videoElement.currentTime = targetEntry.startSeconds;
-  void videoElement.play();
-  showImmersionToast(`⟲ Replaying: “${targetEntry.text.slice(0, 38)}…”`);
-}
-
-function triggerShadowingPause(completedEntry: SubtitleMemoryEntry): void {
-  const videoElement = document.querySelector("video");
-  if (!videoElement) return;
-
-  videoElement.pause();
-  isShadowingPauseActive = true;
-
-  if (shadowingCountdownTimer) {
-    clearInterval(shadowingCountdownTimer);
-    shadowingCountdownTimer = null;
-  }
-
-  let countdownSeconds = 3;
-  showShadowingCountdownHud(countdownSeconds, completedEntry.text, completedEntry);
-
-  shadowingCountdownTimer = setInterval(() => {
-    countdownSeconds--;
-    if (countdownSeconds > 0) {
-      showShadowingCountdownHud(countdownSeconds, completedEntry.text, completedEntry);
-    } else {
-      resumeFromShadowingPause();
-    }
-  }, 1000);
-}
-
-function trackLiveCaptionProgress(): void {
-  const videoElement = document.querySelector("video");
-  if (!videoElement || videoElement.paused || isShadowingPauseActive) {
-    return;
-  }
-
-  const liveCaptionText = extractLiveCaptionText();
-  const currentTimestamp = Date.now();
-
-  if (liveCaptionText) {
-    if (!currentlyActiveLiveSubtitle) {
-      currentlyActiveLiveSubtitle = {
-        text: liveCaptionText,
-        startSeconds: videoElement.currentTime,
-        observedAt: currentTimestamp,
-      };
-    } else if (currentlyActiveLiveSubtitle.text !== liveCaptionText) {
-      if (liveCaptionText.startsWith(currentlyActiveLiveSubtitle.text)) {
-        currentlyActiveLiveSubtitle.text = liveCaptionText;
-      } else {
-        const finishedSentence = currentlyActiveLiveSubtitle.text;
-        const startSeconds = currentlyActiveLiveSubtitle.startSeconds;
-        const displayDurationMilliseconds = currentTimestamp - currentlyActiveLiveSubtitle.observedAt;
-
-        const completedEntry: SubtitleMemoryEntry = {
-          text: finishedSentence,
-          startSeconds,
-          endSeconds: videoElement.currentTime,
-        };
-        observedSubtitleHistory.unshift(completedEntry);
-        if (observedSubtitleHistory.length > 50) observedSubtitleHistory.pop();
-
-        currentlyActiveLiveSubtitle = {
-          text: liveCaptionText,
-          startSeconds: videoElement.currentTime,
-          observedAt: currentTimestamp,
-        };
-
-        if (
-          isShadowingModeActive &&
-          displayDurationMilliseconds >= 500 &&
-          finishedSentence.length >= 3 &&
-          finishedSentence !== lastShadowingSentenceText
-        ) {
-          lastShadowingSentenceText = finishedSentence;
-          triggerShadowingPause(completedEntry);
-        }
-      }
-    }
-  } else if (currentlyActiveLiveSubtitle) {
-    const finishedSentence = currentlyActiveLiveSubtitle.text;
-    const startSeconds = currentlyActiveLiveSubtitle.startSeconds;
-    const displayDurationMilliseconds = currentTimestamp - currentlyActiveLiveSubtitle.observedAt;
-
-    const completedEntry: SubtitleMemoryEntry = {
-      text: finishedSentence,
-      startSeconds,
-      endSeconds: videoElement.currentTime,
+  const request = requestPageTranscript(videoId, { allowOpeningPanel }).then((pageTranscript) => {
+    if (pendingTranscript?.videoId === videoId) pendingTranscript = null;
+    if (!pageTranscript || getVideoIdFromLocation() !== videoId) return null;
+    const { sentences, punctuated } = buildSentences(pageTranscript.segments);
+    if (sentences.length === 0) return null;
+    immersionTranscript = {
+      videoId,
+      languageCode: pageTranscript.languageCode,
+      punctuated,
+      sentences,
+      frequencies: countWordFrequencies(sentences, pageTranscript.languageCode),
     };
-    observedSubtitleHistory.unshift(completedEntry);
-    if (observedSubtitleHistory.length > 50) observedSubtitleHistory.pop();
-
-    currentlyActiveLiveSubtitle = null;
-
-    if (
-      isShadowingModeActive &&
-      displayDurationMilliseconds >= 500 &&
-      finishedSentence.length >= 3 &&
-      finishedSentence !== lastShadowingSentenceText
-    ) {
-      lastShadowingSentenceText = finishedSentence;
-      triggerShadowingPause(completedEntry);
-    }
-  }
+    return immersionTranscript;
+  });
+  pendingTranscript = { videoId, request };
+  return request;
 }
 
-function extractSentenceWords(sentence: string): string[] {
-  return sentence
-    .split(/\s+/)
-    .map((word) => word.trim())
-    .filter((word) => word.length > 0);
+function finishSentencePlayback(videoElement: HTMLVideoElement): void {
+  if (!sentencePlayback) return;
+  if (sentencePlayback.restoreRate !== null) videoElement.playbackRate = sentencePlayback.restoreRate;
+  sentencePlayback = null;
 }
 
-function cleanWordForCloze(rawWord: string): string {
-  return rawWord.replace(/^[.,/#!$%^&*;:{}=\-_`~()?"'«»]+|[.,/#!$%^&*;:{}=\-_`~()?"'«»]+$/g, "");
-}
-
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function pickTargetClozeWord(sentenceText: string): string {
-  const selection = window.getSelection()?.toString().trim();
-  if (selection && sentenceText.toLowerCase().includes(selection.toLowerCase())) {
-    return cleanWordForCloze(selection);
-  }
-
-  const cleanWords = sentenceText
-    .replace(/[.,/#!$%^&*;:{}=\-_`~()?"'«»]/g, " ")
-    .split(/\s+/)
-    .map((word) => cleanWordForCloze(word))
-    .filter((word) => word.length >= 4);
-
-  if (cleanWords.length > 0) {
-    cleanWords.sort((firstWord, secondWord) => secondWord.length - firstWord.length);
-    return cleanWords[0];
-  }
-
-  const firstWord = sentenceText.split(/\s+/)[0] || "word";
-  return cleanWordForCloze(firstWord);
-}
-
-function closeClozeCaptureModal(): void {
-  const existingModal = document.getElementById("study-harvester-cloze-modal");
-  if (existingModal) {
-    existingModal.remove();
-  }
-}
-
-function showClozeCaptureModal(
-  initialSentence: string,
-  initialTargetWord: string,
-  timestampSeconds: number
+function playSentence(
+  sentence: TranscriptSentence,
+  options: { rate?: number; pauseAtEnd?: boolean } = {}
 ): void {
-  closeClozeCaptureModal();
+  const videoElement = document.querySelector("video");
+  if (!videoElement) return;
 
-  const container = getTargetPlayerContainer();
+  finishSentencePlayback(videoElement);
+  videoElement.currentTime = sentence.startSeconds;
+  if (options.rate || options.pauseAtEnd) {
+    sentencePlayback = {
+      startSeconds: sentence.startSeconds,
+      // Sentence ends are interpolated from caption timing; a short tail avoids clipping the last word.
+      endSeconds: sentence.endSeconds + 0.3,
+      restoreRate: options.rate ? videoElement.playbackRate : null,
+      pauseAtEnd: Boolean(options.pauseAtEnd),
+    };
+    if (options.rate) videoElement.playbackRate = options.rate;
+  }
+  if (videoElement.paused) void videoElement.play();
+}
+
+function checkSentencePlayback(videoElement: HTMLVideoElement): void {
+  if (!sentencePlayback) return;
+  const { startSeconds, endSeconds, pauseAtEnd } = sentencePlayback;
+  if (videoElement.currentTime >= endSeconds) {
+    if (pauseAtEnd) videoElement.pause();
+    finishSentencePlayback(videoElement);
+  } else if (videoElement.currentTime < startSeconds - 0.5) {
+    finishSentencePlayback(videoElement);
+  }
+}
+
+async function replaySentence(slow: boolean): Promise<void> {
+  const videoElement = document.querySelector("video");
+  if (!videoElement) return;
+  const currentTime = videoElement.currentTime;
+  const loaded = await loadImmersionTranscript();
+  const rate = slow ? 0.75 : undefined;
+
+  if (!loaded) {
+    playSentence({ text: "", startSeconds: Math.max(0, currentTime - 4), endSeconds: currentTime }, { rate });
+    showImmersionToast(slow ? "Replaying the last 4s at 0.75×" : "Rewound 4s");
+    return;
+  }
+
+  const sentence = loaded.sentences[sentenceIndexAt(loaded.sentences, currentTime)];
+  playSentence(sentence, { rate });
+  showImmersionToast(`${slow ? "0.75× " : ""}“${truncateText(sentence.text, 60)}”`);
+}
+
+async function skipToNextSentence(): Promise<void> {
+  const videoElement = document.querySelector("video");
+  if (!videoElement) return;
+  const currentTime = videoElement.currentTime;
+  const loaded = await loadImmersionTranscript();
+  const nextSentence = loaded?.sentences.find((sentence) => sentence.startSeconds > currentTime + 0.3);
+
+  if (!nextSentence) {
+    videoElement.currentTime = currentTime + 5;
+    showImmersionToast("Skipped 5s");
+    return;
+  }
+  playSentence(nextSentence);
+  showImmersionToast(`“${truncateText(nextSentence.text, 60)}”`);
+}
+
+interface ClozeCaptureContext {
+  sentences: TranscriptSentence[];
+  index: number;
+  languageCode: string | null;
+  frequencies: Map<string, number>;
+  approximate: boolean;
+  preferredWord: string | null;
+  resumeOnClose: boolean;
+}
+
+function showClozeCaptureModal(capture: ClozeCaptureContext): void {
+  closeOpenClozeModal?.(false);
+
   const modalWrapper = document.createElement("div");
   modalWrapper.id = "study-harvester-cloze-modal";
-
-  let activeTargetWord = cleanWordForCloze(initialTargetWord);
-  const activeSentence = initialSentence;
-
   const cardElement = document.createElement("div");
   cardElement.className = "study-harvester-cloze-card";
+  cardElement.tabIndex = -1;
   modalWrapper.appendChild(cardElement);
 
-  const headerRow = document.createElement("div");
-  headerRow.className = "study-harvester-cloze-header";
+  let sentenceIndex = capture.index;
+  let tokens: WordToken[] = [];
+  let chosenToken: WordToken | null = null;
+  let preferredWord = capture.preferredWord?.toLocaleLowerCase() ?? null;
 
-  const titleBadge = document.createElement("div");
-  titleBadge.className = "study-harvester-cloze-title";
-  titleBadge.innerHTML = `<span>🗂️</span> STAGE CLOZEMASTER CARD`;
-  headerRow.appendChild(titleBadge);
+  const createElement = <Tag extends keyof HTMLElementTagNameMap>(
+    tagName: Tag,
+    className: string,
+    textContent = ""
+  ): HTMLElementTagNameMap[Tag] => {
+    const element = document.createElement(tagName);
+    element.className = className;
+    element.textContent = textContent;
+    return element;
+  };
 
-  const minutes = Math.floor(timestampSeconds / 60);
-  const seconds = Math.floor(timestampSeconds % 60);
-  const timeFormatted = `${minutes}:${seconds < 10 ? "0" : ""}${seconds}`;
-
-  const timePill = document.createElement("div");
-  timePill.className = "study-harvester-cloze-time";
-  timePill.textContent = `▶ ${timeFormatted}`;
+  const headerRow = createElement("div", "study-harvester-cloze-header");
+  headerRow.appendChild(createElement("div", "study-harvester-cloze-title", "Clozemaster card"));
+  const timePill = createElement("div", "study-harvester-cloze-time");
   headerRow.appendChild(timePill);
-
-  const closeButton = document.createElement("button");
-  closeButton.className = "study-harvester-cloze-close";
+  const closeButton = createElement("button", "study-harvester-cloze-close", "×");
   closeButton.type = "button";
-  closeButton.innerHTML = "&times;";
   closeButton.title = "Close (Esc)";
-  closeButton.addEventListener("click", () => {
-    closeClozeCaptureModal();
-    const videoElement = document.querySelector("video");
-    if (videoElement && videoElement.paused) void videoElement.play();
-  });
   headerRow.appendChild(closeButton);
-
   cardElement.appendChild(headerRow);
 
-  const instructionLabel = document.createElement("div");
-  instructionLabel.className = "study-harvester-cloze-label";
-  instructionLabel.textContent = "Click any word below to set as cloze blank {{...}}:";
-  cardElement.appendChild(instructionLabel);
+  const navigationRow = createElement("div", "study-harvester-cloze-nav");
+  const previousButton = createElement("button", "study-harvester-cloze-nav-btn", "‹ Previous");
+  previousButton.type = "button";
+  previousButton.title = "Previous sentence (←)";
+  const listenButton = createElement("button", "study-harvester-cloze-nav-btn", "▶ Listen");
+  listenButton.type = "button";
+  listenButton.title = "Play this sentence (Space)";
+  const nextButton = createElement("button", "study-harvester-cloze-nav-btn", "Next ›");
+  nextButton.type = "button";
+  nextButton.title = "Next sentence (→)";
+  navigationRow.append(previousButton, listenButton, nextButton);
+  cardElement.appendChild(navigationRow);
 
-  const chipsContainer = document.createElement("div");
-  chipsContainer.className = "study-harvester-chips-container";
+  if (capture.approximate) {
+    cardElement.appendChild(
+      createElement(
+        "div",
+        "study-harvester-cloze-note",
+        "These captions are auto-generated without punctuation, so sentence edges are a guess."
+      )
+    );
+  }
+
+  cardElement.appendChild(createElement("div", "study-harvester-cloze-label", "Click the word to blank out"));
+  const chipsContainer = createElement("div", "study-harvester-chips-container");
   cardElement.appendChild(chipsContainer);
-
-  const previewBox = document.createElement("div");
-  previewBox.className = "study-harvester-cloze-preview";
+  const previewBox = createElement("div", "study-harvester-cloze-preview");
   cardElement.appendChild(previewBox);
 
-  const translationGroup = document.createElement("div");
-  translationGroup.className = "study-harvester-input-group";
-  const translationLabel = document.createElement("label");
-  translationLabel.textContent = "Translation / Video Context:";
+  const translationGroup = createElement("label", "study-harvester-input-group");
+  translationGroup.appendChild(createElement("span", "", "Translation"));
   const translationInput = document.createElement("input");
   translationInput.type = "text";
-  translationInput.value = lastMetadata.title || document.title;
-  translationGroup.appendChild(translationLabel);
+  translationInput.placeholder = "Optional. Leave blank and an agent can add it in Clozemaster.";
   translationGroup.appendChild(translationInput);
   cardElement.appendChild(translationGroup);
 
-  const hintGroup = document.createElement("div");
-  hintGroup.className = "study-harvester-input-group";
-  const hintLabel = document.createElement("label");
-  hintLabel.textContent = "Hint (Channel / Notes):";
-  const hintInput = document.createElement("input");
-  hintInput.type = "text";
-  hintInput.value = lastMetadata.channelName || "";
-  hintGroup.appendChild(hintLabel);
-  hintGroup.appendChild(hintInput);
-  cardElement.appendChild(hintGroup);
+  const footerRow = createElement("div", "study-harvester-cloze-footer");
+  const cancelButton = createElement("button", "study-harvester-btn-cancel", "Cancel");
+  cancelButton.type = "button";
+  const saveButton = createElement("button", "study-harvester-btn-save", "Save card (Enter)");
+  saveButton.type = "button";
+  footerRow.append(cancelButton, saveButton);
+  cardElement.appendChild(footerRow);
 
-  const updateWordChipsAndPreview = () => {
-    chipsContainer.innerHTML = "";
-    const rawWords = extractSentenceWords(activeSentence);
+  const renderPreview = () => {
+    previewBox.replaceChildren();
+    const text = capture.sentences[sentenceIndex].text;
+    if (!chosenToken) {
+      previewBox.textContent = text;
+      return;
+    }
+    const blank = createElement("mark", "study-harvester-cloze-blank", chosenToken.text);
+    previewBox.append(
+      text.slice(0, chosenToken.index),
+      blank,
+      text.slice(chosenToken.index + chosenToken.text.length)
+    );
+  };
 
-    for (const rawWord of rawWords) {
-      const cleanedWord = cleanWordForCloze(rawWord);
-      const chipButton = document.createElement("button");
+  const renderChips = () => {
+    chipsContainer.replaceChildren();
+    for (const token of tokens) {
+      if (!token.isWord) continue;
+      const chipButton = createElement(
+        "button",
+        `study-harvester-word-chip${token === chosenToken ? " active" : ""}`,
+        token.text
+      );
       chipButton.type = "button";
-      chipButton.className = `study-harvester-word-chip ${
-        cleanedWord.toLowerCase() === activeTargetWord.toLowerCase() ? "active" : ""
-      }`;
-      chipButton.textContent = rawWord;
       chipButton.addEventListener("click", (clickEvent) => {
         clickEvent.stopPropagation();
-        if (cleanedWord) {
-          activeTargetWord = cleanedWord;
-          updateWordChipsAndPreview();
-        }
+        chosenToken = token;
+        renderChips();
+        renderPreview();
       });
       chipsContainer.appendChild(chipButton);
     }
-
-    const pattern = new RegExp(`\\b${escapeRegExp(activeTargetWord)}\\b`, "i");
-    const maskedText = activeSentence.replace(pattern, `{{${activeTargetWord}}}`);
-    previewBox.innerHTML = `
-      <span style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #e3aa50; font-weight: 700; display: block; margin-bottom: 4px;">Card Preview:</span>
-      <span style="color: #efe7da; font-weight: 500;">${
-        maskedText.includes("{{") ? maskedText : `{{${activeTargetWord}}} ${activeSentence}`
-      }</span>
-    `;
   };
 
-  updateWordChipsAndPreview();
+  const renderSentence = () => {
+    const sentence = capture.sentences[sentenceIndex];
+    tokens = segmentWords(sentence.text, capture.languageCode);
+    chosenToken =
+      (preferredWord && tokens.find((token) => token.isWord && token.text.toLocaleLowerCase() === preferredWord)) ||
+      pickClozeToken(tokens, capture.frequencies);
+    timePill.textContent = `▶ ${formatTimestamp(sentence.startSeconds)}`;
+    previousButton.disabled = sentenceIndex === 0;
+    nextButton.disabled = sentenceIndex === capture.sentences.length - 1;
+    listenButton.disabled = capture.sentences.length === 1 && sentence.endSeconds <= sentence.startSeconds;
+    renderChips();
+    renderPreview();
+  };
 
-  const footerRow = document.createElement("div");
-  footerRow.className = "study-harvester-cloze-footer";
+  const moveSentence = (step: number) => {
+    const nextIndex = sentenceIndex + step;
+    if (nextIndex < 0 || nextIndex >= capture.sentences.length) return;
+    sentenceIndex = nextIndex;
+    preferredWord = null;
+    renderSentence();
+  };
 
-  const cancelButton = document.createElement("button");
-  cancelButton.type = "button";
-  cancelButton.className = "study-harvester-btn-cancel";
-  cancelButton.textContent = "Cancel (Esc)";
-  cancelButton.addEventListener("click", () => {
-    closeClozeCaptureModal();
+  const listen = () => {
+    const sentence = capture.sentences[sentenceIndex];
+    if (sentence.endSeconds > sentence.startSeconds) playSentence(sentence, { pauseAtEnd: true });
+  };
+
+  const close = (resume: boolean) => {
+    modalWrapper.remove();
+    closeOpenClozeModal = null;
+    handleClozeModalKey = null;
     const videoElement = document.querySelector("video");
-    if (videoElement && videoElement.paused) void videoElement.play();
-  });
-  footerRow.appendChild(cancelButton);
+    if (videoElement) {
+      finishSentencePlayback(videoElement);
+      if (resume && videoElement.paused) void videoElement.play();
+    }
+  };
 
-  const saveButton = document.createElement("button");
-  saveButton.type = "button";
-  saveButton.className = "study-harvester-btn-save";
-  saveButton.textContent = "Stage Flashcard (Enter)";
-
-  const handleSave = async () => {
-    const pattern = new RegExp(`\\b${escapeRegExp(activeTargetWord)}\\b`, "i");
-    const masked = activeSentence.replace(pattern, `{{${activeTargetWord}}}`);
-    const finalSentence = masked.includes("{{") ? masked : `{{${activeTargetWord}}} ${activeSentence}`;
-
-    const stagedCard: StagedClozeCard = {
+  const save = async () => {
+    if (!chosenToken) {
+      showImmersionToast("Pick a word to blank out first");
+      return;
+    }
+    const sentence = capture.sentences[sentenceIndex];
+    const videoId = getVideoIdFromLocation();
+    const startSeconds = Math.floor(sentence.startSeconds);
+    const card: StagedClozeCard = {
       id: crypto.randomUUID(),
-      sentence: finalSentence,
-      targetWord: activeTargetWord,
-      translation: translationInput.value.trim() || lastMetadata.title || "YouTube Immersion",
-      hint: hintInput.value.trim() || lastMetadata.channelName,
-      videoId: lastMetadata.videoId,
+      sentence: maskSentence(sentence.text, chosenToken),
+      targetWord: chosenToken.text,
+      translation: translationInput.value.trim(),
+      notes: [lastMetadata.title, videoId ? `https://youtu.be/${videoId}?t=${startSeconds}` : ""]
+        .filter(Boolean)
+        .join(" · "),
+      language: capture.languageCode ?? lastMetadata.language ?? null,
+      videoId,
       videoTitle: lastMetadata.title,
-      timestampSeconds: Math.floor(timestampSeconds),
+      timestampSeconds: startSeconds,
       createdAt: Date.now(),
     };
 
     try {
-      await browser.runtime.sendMessage({
-        action: "stage-cloze-card",
-        card: stagedCard,
-      });
-      showImmersionToast(`✓ Staged cloze: «${activeTargetWord}» for Clozemaster`, "#48b788");
+      const response = (await browser.runtime.sendMessage({ action: "stage-cloze-card", card })) as
+        | { success?: boolean }
+        | undefined;
+      if (!response?.success) throw new Error("not saved");
+      showImmersionToast(`Saved «${card.targetWord}» for Clozemaster`);
+      close(capture.resumeOnClose);
     } catch {
-      showImmersionToast("Failed to save cloze card", "#e37050");
+      showImmersionToast("Couldn't save the card");
     }
-
-    closeClozeCaptureModal();
-    const videoElement = document.querySelector("video");
-    if (videoElement && videoElement.paused) void videoElement.play();
   };
 
-  saveButton.addEventListener("click", () => void handleSave());
-  footerRow.appendChild(saveButton);
-
-  cardElement.appendChild(footerRow);
-
-  modalWrapper.addEventListener("keydown", (keyboardEvent) => {
-    if (keyboardEvent.key === "Escape") {
-      keyboardEvent.preventDefault();
-      closeClozeCaptureModal();
-      const videoElement = document.querySelector("video");
-      if (videoElement && videoElement.paused) void videoElement.play();
-      return;
-    }
-    if (
-      keyboardEvent.key === "Enter" &&
-      keyboardEvent.target !== translationInput &&
-      keyboardEvent.target !== hintInput
-    ) {
-      keyboardEvent.preventDefault();
-      void handleSave();
-    }
+  closeButton.addEventListener("click", () => close(capture.resumeOnClose));
+  cancelButton.addEventListener("click", () => close(capture.resumeOnClose));
+  saveButton.addEventListener("click", () => void save());
+  previousButton.addEventListener("click", () => moveSentence(-1));
+  nextButton.addEventListener("click", () => moveSentence(1));
+  listenButton.addEventListener("click", listen);
+  modalWrapper.addEventListener("click", (clickEvent) => {
+    if (clickEvent.target === modalWrapper) close(capture.resumeOnClose);
   });
 
-  container.appendChild(modalWrapper);
+  closeOpenClozeModal = close;
+  handleClozeModalKey = (keyboardEvent) => {
+    if (keyboardEvent.key === "Escape") {
+      close(capture.resumeOnClose);
+      return true;
+    }
+    const inTextField = keyboardEvent.target === translationInput;
+    if (keyboardEvent.key === "Enter" && !keyboardEvent.isComposing) {
+      void save();
+      return true;
+    }
+    if (inTextField) return false;
+    if (keyboardEvent.key === "ArrowLeft") {
+      moveSentence(-1);
+      return true;
+    }
+    if (keyboardEvent.key === "ArrowRight") {
+      moveSentence(1);
+      return true;
+    }
+    if (keyboardEvent.code === "Space") {
+      listen();
+      return true;
+    }
+    return false;
+  };
+
+  renderSentence();
+  getTargetPlayerContainer().appendChild(modalWrapper);
+  cardElement.focus({ preventScroll: true });
 }
 
 async function triggerClozeCardCapture(): Promise<void> {
+  if (closeOpenClozeModal) return;
   const videoElement = document.querySelector("video");
-  const currentTime = videoElement ? videoElement.currentTime : 0;
+  const currentTime = videoElement?.currentTime ?? 0;
+  const wasPlaying = Boolean(videoElement && !videoElement.paused);
+  videoElement?.pause();
 
-  if (videoElement && !videoElement.paused) {
-    videoElement.pause();
+  const preferredWord = window.getSelection()?.toString().trim() || null;
+  const loaded = await loadImmersionTranscript(true);
+
+  if (loaded) {
+    showClozeCaptureModal({
+      sentences: loaded.sentences,
+      index: sentenceIndexAt(loaded.sentences, currentTime),
+      languageCode: loaded.languageCode,
+      frequencies: loaded.frequencies,
+      approximate: !loaded.punctuated,
+      preferredWord,
+      resumeOnClose: wasPlaying,
+    });
+    return;
   }
 
-  ensureSubtitlesEnabled();
-
-  let sentenceText = extractLiveCaptionText();
-  if (!sentenceText && observedSubtitleHistory.length > 0) {
-    sentenceText = observedSubtitleHistory[0].text;
+  const captionText = extractLiveCaptionText();
+  if (captionText) {
+    const sentences = [{ text: captionText, startSeconds: currentTime, endSeconds: currentTime }];
+    showClozeCaptureModal({
+      sentences,
+      index: 0,
+      languageCode: lastMetadata.language ?? null,
+      frequencies: countWordFrequencies(sentences),
+      approximate: true,
+      preferredWord,
+      resumeOnClose: wasPlaying,
+    });
+    return;
   }
 
-  if (!sentenceText) {
-    const { segment } = getActiveSubtitleSegment(currentTime);
-    if (segment?.text) {
-      sentenceText = segment.text;
-    }
-  }
-
-  if (!sentenceText) {
-    const selection = window.getSelection()?.toString().trim();
-    if (selection) {
-      sentenceText = selection;
-    }
-  }
-
-  if (!sentenceText) {
-    sentenceText = lastMetadata.title || document.title || "Immersion Sentence";
-  }
-
-  const targetWord = pickTargetClozeWord(sentenceText);
-  showClozeCaptureModal(sentenceText, targetWord, currentTime);
+  showImmersionToast("This video has no transcript to take a sentence from");
+  if (wasPlaying) void videoElement?.play();
 }
 
 async function checkMandalaStatusForCurrentPage(): Promise<void> {
@@ -1184,7 +775,7 @@ async function checkMandalaStatusForCurrentPage(): Promise<void> {
     const status = (await browser.runtime.sendMessage({
       action: "check-mandala-status",
       url: window.location.href,
-    })) as MandalaStatusResponse;
+    })) as MandalaStatus;
 
     if (status && typeof status === "object") {
       latestMandalaStatus = status;
@@ -1195,69 +786,78 @@ async function checkMandalaStatusForCurrentPage(): Promise<void> {
   }
 }
 
+function canonicalVideoUrl(): string {
+  const videoId = getVideoIdFromLocation();
+  if (!videoId) return window.location.href;
+  return window.location.pathname.startsWith("/shorts/")
+    ? `https://www.youtube.com/shorts/${videoId}`
+    : `https://www.youtube.com/watch?v=${videoId}`;
+}
+
+function pillarTitleAt(pillarIndex: number): string {
+  return (
+    latestMandalaStatus.pillars.find((pillar) => pillar.index === pillarIndex)?.title || `Pillar ${pillarIndex + 1}`
+  );
+}
+
 async function quickLogWatchedTimeToMandala(): Promise<void> {
   const watchedMinutes = Math.max(1, Math.floor(sessionWatchedSeconds / 60));
-  const linkId = latestMandalaStatus.matchedShelfItem?.linkId;
 
   try {
     const response = (await browser.runtime.sendMessage({
       action: "log-mandala-time",
       payload: {
+        url: window.location.href,
         minutes: watchedMinutes,
-        linkId,
         videoTitle: lastMetadata.title,
       },
-    })) as { success: boolean; queued: boolean; minutes: number };
+    })) as { success: boolean; queued?: boolean; actionText?: string; errorMessage?: string };
 
-    if (response?.success) {
-      sessionWatchedSeconds = 0;
-      updateImmersionHud();
-      showImmersionToast(
-        response.queued
-          ? `✓ Staged ${watchedMinutes} min for Mandala (syncs when open)`
-          : `✓ Logged ${watchedMinutes} min to Mandala!`,
-        "#48b788"
-      );
+    if (!response?.success) {
+      showImmersionToast(response?.errorMessage || "Could not log time to Mandala");
+      return;
     }
+    sessionWatchedSeconds = 0;
+    updateImmersionHud();
+    showImmersionToast(
+      response.queued
+        ? `Logged ${watchedMinutes} min. It reaches Mandala next time you open it.`
+        : `Logged ${watchedMinutes} min on “${truncateText(response.actionText || "", 40)}”`
+    );
   } catch {
-    showImmersionToast("Could not log time to Mandala", "#e37050");
+    showImmersionToast("Could not log time to Mandala");
   }
 }
 
 async function saveCurrentVideoToMandalaShelf(pillarIndex: number): Promise<void> {
+  const pillarTitle = pillarTitleAt(pillarIndex);
   try {
     const response = (await browser.runtime.sendMessage({
       action: "save-mandala-shelf-link",
       payload: {
         pillarIndex,
-        url: window.location.href,
+        url: canonicalVideoUrl(),
         title: lastMetadata.title || document.title,
         kind: "repeat",
       },
-    })) as { success: boolean; queued: boolean };
+    })) as { success: boolean; queued?: boolean; errorMessage?: string };
 
-    if (response?.success) {
-      const pillarTitle =
-        latestMandalaStatus.pillars.find((pillar) => pillar.index === pillarIndex)?.title ||
-        `Pillar ${pillarIndex + 1}`;
-
-      latestMandalaStatus.matchedShelfItem = {
-        pillarIndex,
-        pillarTitle,
-        linkId: "staged",
-        toolTitle: lastMetadata.title,
-      };
-
-      updateImmersionHud();
-      showImmersionToast(
-        response.queued
-          ? `✓ Staged on ${pillarTitle}'s shelf`
-          : `✓ Saved to ${pillarTitle}'s shelf!`,
-        "#48b788"
-      );
+    if (!response?.success) {
+      showImmersionToast(response?.errorMessage || "Failed to save to shelf");
+      return;
     }
+    latestMandalaStatus.savedPillarIndexes = [...new Set([...latestMandalaStatus.savedPillarIndexes, pillarIndex])].sort(
+      (first, second) => first - second
+    );
+    updateImmersionHud();
+    showImmersionToast(
+      response.queued
+        ? `Saved to ${pillarTitle}. It reaches Mandala next time you open it.`
+        : `Saved to ${pillarTitle}'s shelf`
+    );
+    void checkMandalaStatusForCurrentPage();
   } catch {
-    showImmersionToast("Failed to save to shelf", "#e37050");
+    showImmersionToast("Failed to save to shelf");
   }
 }
 
@@ -1269,170 +869,98 @@ function injectImmersionStyles(): void {
   styleElement.textContent = `
     #study-harvester-player-hud {
       position: absolute;
-      top: 14px;
-      right: 70px;
+      top: 12px;
+      right: 12px;
       display: flex;
       align-items: center;
-      gap: 6px;
-      z-index: 2147483600;
-      font-family: system-ui, -apple-system, sans-serif;
-      font-size: 12px;
-      color: #efe7da;
+      gap: 8px;
+      z-index: 60;
+      font-family: "YouTube Sans", Roboto, Arial, sans-serif;
+      color: #fff;
       user-select: none;
       pointer-events: auto;
+      transition: opacity 0.1s cubic-bezier(0.4, 0, 1, 1);
+    }
+    .ytp-autohide #study-harvester-player-hud:not(.is-open),
+    .ad-showing #study-harvester-player-hud {
+      opacity: 0;
+      pointer-events: none;
+      transition-duration: 0.5s;
+    }
+    .study-harvester-icon {
+      width: 18px;
+      height: 18px;
+      flex: none;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
     .study-harvester-hud-btn {
-      background-color: rgba(35, 31, 27, 0.92);
-      backdrop-filter: blur(8px);
-      color: #efe7da;
-      border: 1px solid rgba(239, 231, 218, 0.2);
-      padding: 6px 11px;
-      border-radius: 8px;
-      cursor: pointer;
       display: inline-flex;
       align-items: center;
-      gap: 5px;
-      font-weight: 500;
-      font-size: 11px;
-      transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+      gap: 6px;
+      height: 36px;
+      padding: 0 14px 0 10px;
+      border: none;
+      border-radius: 18px;
+      background-color: rgba(0, 0, 0, 0.6);
+      color: #fff;
+      font: 500 14px/1 "YouTube Sans", Roboto, Arial, sans-serif;
+      cursor: pointer;
     }
     .study-harvester-hud-btn:hover {
-      background-color: rgba(45, 40, 35, 0.98);
-      border-color: rgba(227, 170, 80, 0.55);
-      color: #ffffff;
-      transform: translateY(-1px);
-    }
-    .study-harvester-hud-btn.active {
-      background-color: rgba(72, 183, 136, 0.28);
-      border-color: #48b788;
-      color: #48b788;
-      font-weight: 700;
+      background-color: rgba(40, 40, 40, 0.8);
     }
     .study-harvester-shelf-popover {
       position: absolute;
-      top: calc(100% + 6px);
+      top: calc(100% + 8px);
       right: 0;
-      background-color: #231f1b;
-      border: 1px solid rgba(239, 231, 218, 0.2);
-      border-radius: 10px;
-      padding: 8px;
-      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.85);
+      min-width: 220px;
+      padding: 8px 0;
+      border-radius: 12px;
+      background-color: rgba(28, 28, 28, 0.9);
+      text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
       display: flex;
       flex-direction: column;
-      gap: 4px;
-      min-width: 220px;
-      z-index: 2147483610;
+    }
+    .study-harvester-shelf-header {
+      padding: 6px 16px 8px;
+      font: 500 13px Roboto, Arial, sans-serif;
+      color: rgba(255, 255, 255, 0.7);
+    }
+    .study-harvester-shelf-hint {
+      padding: 0 16px 8px;
+      font: 400 12px Roboto, Arial, sans-serif;
+      color: rgba(255, 255, 255, 0.7);
     }
     .study-harvester-pillar-item {
-      padding: 6px 10px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 11px;
-      color: #efe7da;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      height: 40px;
+      padding: 0 16px;
+      border: none;
+      background: transparent;
+      color: #eee;
+      font: 400 14px Roboto, Arial, sans-serif;
       text-align: left;
-      border: none;
-      background: transparent;
-      transition: background-color 0.12s ease;
-    }
-    .study-harvester-pillar-item:hover {
-      background-color: rgba(227, 170, 80, 0.22);
-      color: #ffffff;
-    }
-    #study-harvester-shadowing-hud {
-      position: absolute;
-      top: 32%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background-color: rgba(28, 24, 20, 0.96);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(72, 183, 136, 0.45);
-      border-radius: 16px;
-      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.9);
-      padding: 22px 28px;
-      min-width: 340px;
-      max-width: 580px;
-      text-align: center;
-      z-index: 2147483646;
-      color: #efe7da;
-      font-family: system-ui, -apple-system, sans-serif;
-      pointer-events: auto;
-    }
-    .study-harvester-shadowing-header {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      color: #48b788;
-      margin-bottom: 8px;
-      font-weight: 700;
-    }
-    .study-harvester-shadowing-sentence {
-      font-size: 16px;
-      font-weight: 500;
-      color: #efe7da;
-      margin-bottom: 14px;
-      font-style: italic;
-      line-height: 1.4;
-    }
-    .study-harvester-shadowing-timer-row {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      margin-bottom: 16px;
-    }
-    .study-harvester-shadowing-number {
-      font-size: 32px;
-      font-weight: 800;
-      color: #48b788;
-      font-variant-numeric: tabular-nums;
-    }
-    .study-harvester-shadowing-label {
-      font-size: 13px;
-      color: #a89e90;
-    }
-    .study-harvester-shadowing-actions {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-    }
-    .study-harvester-shadowing-btn-primary {
-      background-color: #48b788;
-      color: #10261b;
-      font-weight: 700;
-      padding: 7px 15px;
-      border-radius: 8px;
-      border: none;
       cursor: pointer;
-      font-size: 12px;
-      transition: background-color 0.15s ease;
     }
-    .study-harvester-shadowing-btn-primary:hover {
-      background-color: #58c998;
+    .study-harvester-pillar-item .study-harvester-icon {
+      width: 20px;
+      height: 20px;
+      opacity: 0.7;
     }
-    .study-harvester-shadowing-btn-secondary {
-      background-color: rgba(239, 231, 218, 0.1);
-      color: #efe7da;
-      border: 1px solid rgba(239, 231, 218, 0.2);
-      padding: 7px 14px;
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 12px;
-      transition: background-color 0.15s ease;
+    .study-harvester-pillar-item.saved {
+      cursor: default;
     }
-    .study-harvester-shadowing-btn-secondary:hover {
-      background-color: rgba(239, 231, 218, 0.18);
+    .study-harvester-pillar-item.saved .study-harvester-icon {
+      opacity: 1;
     }
-    .study-harvester-shadowing-btn-ghost {
-      background: transparent;
-      color: #a89e90;
-      border: none;
-      cursor: pointer;
-      font-size: 11px;
-      padding: 6px 10px;
-    }
-    .study-harvester-shadowing-btn-ghost:hover {
-      color: #efe7da;
+    .study-harvester-pillar-item:hover:not(:disabled) {
+      background-color: rgba(255, 255, 255, 0.1);
     }
     #study-harvester-cloze-modal {
       position: absolute;
@@ -1492,6 +1020,41 @@ function injectImmersionStyles(): void {
     .study-harvester-cloze-close:hover {
       color: #ffffff;
     }
+    .study-harvester-cloze-nav {
+      display: flex;
+      gap: 8px;
+    }
+    .study-harvester-cloze-nav-btn {
+      flex: 1;
+      background-color: rgba(239, 231, 218, 0.08);
+      border: 1px solid rgba(239, 231, 218, 0.16);
+      color: #efe7da;
+      padding: 6px 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .study-harvester-cloze-nav-btn:hover:not(:disabled) {
+      border-color: #e3aa50;
+    }
+    .study-harvester-cloze-nav-btn:disabled {
+      opacity: 0.35;
+      cursor: default;
+    }
+    .study-harvester-cloze-note {
+      font-size: 11px;
+      color: #e3aa50;
+    }
+    .study-harvester-cloze-blank {
+      background-color: #e3aa50;
+      color: #1a1612;
+      border-radius: 4px;
+      padding: 0 3px;
+      font-weight: 700;
+    }
+    .study-harvester-cloze-card:focus {
+      outline: none;
+    }
     .study-harvester-cloze-label {
       font-size: 11px;
       color: #a89e90;
@@ -1535,14 +1098,16 @@ function injectImmersionStyles(): void {
       border: 1px dashed rgba(227, 170, 80, 0.4);
       padding: 10px 14px;
       border-radius: 8px;
-      font-size: 13px;
+      font-size: 15px;
+      line-height: 1.5;
+      color: #efe7da;
     }
     .study-harvester-input-group {
       display: flex;
       flex-direction: column;
       gap: 5px;
     }
-    .study-harvester-input-group label {
+    .study-harvester-input-group span {
       font-size: 11px;
       color: #a89e90;
       text-transform: uppercase;
@@ -1597,23 +1162,18 @@ function injectImmersionStyles(): void {
     }
     #study-harvester-hud-toast {
       position: absolute;
-      bottom: 70px;
-      right: 24px;
-      background-color: #231f1b;
-      color: #efe7da;
-      padding: 12px 18px;
-      border-radius: 10px;
-      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.85);
-      font-size: 13px;
-      font-weight: 600;
-      letter-spacing: 0.02em;
-      font-family: system-ui, -apple-system, sans-serif;
-      z-index: 2147483647;
-      border: 1px solid rgba(239, 231, 218, 0.16);
-      border-left: 4px solid #e3aa50;
-      transition: opacity 0.22s ease-out, transform 0.22s ease-out;
+      left: 12px;
+      bottom: 64px;
+      max-width: min(480px, 70%);
+      padding: 10px 14px;
+      border-radius: 8px;
+      background-color: rgba(28, 28, 28, 0.9);
+      color: #fff;
+      font: 400 14px/20px Roboto, Arial, sans-serif;
+      z-index: 61;
+      transition: opacity 0.2s ease, transform 0.2s ease;
       opacity: 0;
-      transform: translateY(8px);
+      transform: translateY(4px);
       pointer-events: none;
     }
   `;
@@ -1625,6 +1185,38 @@ function removeImmersionHud(): void {
   if (existingHud) {
     existingHud.remove();
   }
+}
+
+const HUD_ICON_PATHS = {
+  shelf: "M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z",
+  clock: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zm0-13v4.5l3 2",
+  card: "M4 6h16v12H4zM8 12h3m3 0h2",
+  check: "M5 12.5l4.5 4.5L19 7",
+  plus: "M12 5v14M5 12h14",
+};
+
+function hudIcon(name: keyof typeof HUD_ICON_PATHS, filled = false): SVGSVGElement {
+  const svgNamespace = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNamespace, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.classList.add("study-harvester-icon");
+  const path = document.createElementNS(svgNamespace, "path");
+  path.setAttribute("d", HUD_ICON_PATHS[name]);
+  if (filled) path.setAttribute("fill", "currentColor");
+  svg.appendChild(path);
+  return svg;
+}
+
+function hudButton(icon: SVGSVGElement, label: string, title: string): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.className = "study-harvester-hud-btn";
+  button.type = "button";
+  button.title = title;
+  const text = document.createElement("span");
+  text.textContent = label;
+  button.append(icon, text);
+  return button;
 }
 
 function updateImmersionHud(): void {
@@ -1643,21 +1235,21 @@ function updateImmersionHud(): void {
     playerContainer.appendChild(hudContainer);
   }
 
-  const matchedShelf = latestMandalaStatus.matchedShelfItem;
+  const savedPillarIndexes = latestMandalaStatus.savedPillarIndexes;
   const watchedMinutes = Math.floor(sessionWatchedSeconds / 60);
 
-  hudContainer.innerHTML = "";
+  hudContainer.replaceChildren();
+  hudContainer.classList.toggle("is-open", isPillarPopoverOpen);
 
-  const shelfButton = document.createElement("button");
-  shelfButton.className = "study-harvester-hud-btn";
-  shelfButton.type = "button";
-  if (matchedShelf) {
-    shelfButton.innerHTML = `<span style="color:#48b788;">🌿</span> ${matchedShelf.pillarTitle}`;
-    shelfButton.title = `Saved on Mandala's ${matchedShelf.pillarTitle} shelf`;
-  } else {
-    shelfButton.innerHTML = `<span>+</span> Mandala Shelf`;
-    shelfButton.title = "Save this video to a Mandala pillar shelf";
-  }
+  const savedTitles = savedPillarIndexes.map(pillarTitleAt);
+  const shelfButton =
+    savedTitles.length > 0
+      ? hudButton(
+          hudIcon("shelf", true),
+          `${savedTitles[0]}${savedTitles.length > 1 ? ` +${savedTitles.length - 1}` : ""}`,
+          `On Mandala's shelves: ${savedTitles.join(", ")}`
+        )
+      : hudButton(hudIcon("shelf"), "Save", "Save this video to a Mandala pillar's shelf");
   shelfButton.addEventListener("click", (clickEvent) => {
     clickEvent.stopPropagation();
     isPillarPopoverOpen = !isPillarPopoverOpen;
@@ -1668,15 +1260,19 @@ function updateImmersionHud(): void {
   if (isPillarPopoverOpen) {
     const popover = document.createElement("div");
     popover.className = "study-harvester-shelf-popover";
+    popover.addEventListener("click", (clickEvent) => clickEvent.stopPropagation());
 
     const header = document.createElement("div");
-    header.style.fontSize = "10px";
-    header.style.textTransform = "uppercase";
-    header.style.letterSpacing = "0.08em";
-    header.style.color = "#e3aa50";
-    header.style.padding = "4px 8px";
-    header.textContent = "Save to Mandala Pillar";
+    header.className = "study-harvester-shelf-header";
+    header.textContent = "Save to shelf";
     popover.appendChild(header);
+
+    if (!latestMandalaStatus.connected && !latestMandalaStatus.cached) {
+      const hint = document.createElement("div");
+      hint.className = "study-harvester-shelf-hint";
+      hint.textContent = "Open Mandala once so your pillar names show here.";
+      popover.appendChild(hint);
+    }
 
     const pillars =
       latestMandalaStatus.pillars.length > 0
@@ -1688,12 +1284,16 @@ function updateImmersionHud(): void {
           }));
 
     for (const pillar of pillars) {
+      const isSaved = savedPillarIndexes.includes(pillar.index);
       const pillarButton = document.createElement("button");
-      pillarButton.className = "study-harvester-pillar-item";
+      pillarButton.className = `study-harvester-pillar-item${isSaved ? " saved" : ""}`;
       pillarButton.type = "button";
-      pillarButton.textContent = `${pillar.index + 1}. ${pillar.title}`;
-      pillarButton.addEventListener("click", (clickEvent) => {
-        clickEvent.stopPropagation();
+      const label = document.createElement("span");
+      label.textContent = pillar.title;
+      pillarButton.append(hudIcon(isSaved ? "check" : "plus"), label);
+      pillarButton.disabled = isSaved;
+      pillarButton.title = isSaved ? "Already on this shelf" : `Save to ${pillar.title}'s shelf`;
+      pillarButton.addEventListener("click", () => {
         isPillarPopoverOpen = false;
         void saveCurrentVideoToMandalaShelf(pillar.index);
       });
@@ -1703,12 +1303,12 @@ function updateImmersionHud(): void {
     hudContainer.appendChild(popover);
   }
 
-  if (watchedMinutes >= 1) {
-    const logTimeButton = document.createElement("button");
-    logTimeButton.className = "study-harvester-hud-btn";
-    logTimeButton.type = "button";
-    logTimeButton.innerHTML = `⏱️ Log ${watchedMinutes}m`;
-    logTimeButton.title = `Log ${watchedMinutes} minutes to Mandala chart`;
+  if (watchedMinutes >= 1 && savedPillarIndexes.length > 0) {
+    const logTimeButton = hudButton(
+      hudIcon("clock"),
+      `Log ${watchedMinutes} min`,
+      `Log ${watchedMinutes} min to ${pillarTitleAt(savedPillarIndexes[0])} in Mandala`
+    );
     logTimeButton.addEventListener("click", (clickEvent) => {
       clickEvent.stopPropagation();
       void quickLogWatchedTimeToMandala();
@@ -1716,22 +1316,11 @@ function updateImmersionHud(): void {
     hudContainer.appendChild(logTimeButton);
   }
 
-  const shadowingButton = document.createElement("button");
-  shadowingButton.className = `study-harvester-hud-btn ${isShadowingModeActive ? "active" : ""}`;
-  shadowingButton.type = "button";
-  shadowingButton.innerHTML = `🎙️ ${isShadowingModeActive ? "Shadowing ON" : "Shadow"}`;
-  shadowingButton.title = "Toggle Shadowing Mode (Shift + S): auto-pauses at end of each sentence";
-  shadowingButton.addEventListener("click", (clickEvent) => {
-    clickEvent.stopPropagation();
-    toggleShadowingMode();
-  });
-  hudContainer.appendChild(shadowingButton);
-
-  const clozeButton = document.createElement("button");
-  clozeButton.className = "study-harvester-hud-btn";
-  clozeButton.type = "button";
-  clozeButton.innerHTML = `🗂️ Cloze`;
-  clozeButton.title = "Capture current sentence into Clozemaster (Alt + C)";
+  const clozeButton = hudButton(
+    hudIcon("card"),
+    "Cloze",
+    "Make a Clozemaster card from the sentence just spoken (Alt+C)"
+  );
   clozeButton.addEventListener("click", (clickEvent) => {
     clickEvent.stopPropagation();
     void triggerClozeCardCapture();
@@ -1751,82 +1340,42 @@ function isEditableTarget(targetElement: EventTarget | null): boolean {
 }
 
 function handleGlobalKeydown(keyboardEvent: KeyboardEvent): void {
-  const clozeModal = document.getElementById("study-harvester-cloze-modal");
-  if (clozeModal) {
-    if (keyboardEvent.key === "Escape") {
+  if (handleClozeModalKey) {
+    if (handleClozeModalKey(keyboardEvent)) {
       keyboardEvent.preventDefault();
-      closeClozeCaptureModal();
-      const videoElement = document.querySelector("video");
-      if (videoElement && videoElement.paused) void videoElement.play();
+      keyboardEvent.stopPropagation();
+    } else if (!isEditableTarget(keyboardEvent.target)) {
+      // Keep YouTube's own shortcuts (seek, fullscreen, mute) from firing behind the open card.
+      keyboardEvent.stopPropagation();
     }
     return;
-  }
-
-  if (isShadowingPauseActive) {
-    if (keyboardEvent.code === "Space") {
-      keyboardEvent.preventDefault();
-      keyboardEvent.stopPropagation();
-      resumeFromShadowingPause();
-      return;
-    }
-    if (
-      keyboardEvent.code === "KeyA" &&
-      !keyboardEvent.ctrlKey &&
-      !keyboardEvent.altKey &&
-      !keyboardEvent.metaKey
-    ) {
-      keyboardEvent.preventDefault();
-      keyboardEvent.stopPropagation();
-      replayLastShadowingSentence();
-      return;
-    }
   }
 
   if (isEditableTarget(keyboardEvent.target)) {
     return;
   }
 
-  const isAltC =
-    keyboardEvent.altKey &&
-    (keyboardEvent.code === "KeyC" || keyboardEvent.key === "c" || keyboardEvent.key === "C");
-  if (isAltC) {
+  if (keyboardEvent.altKey && !keyboardEvent.ctrlKey && !keyboardEvent.metaKey && keyboardEvent.code === "KeyC") {
     keyboardEvent.preventDefault();
     keyboardEvent.stopPropagation();
     void triggerClozeCardCapture();
     return;
   }
 
-  const isShiftS =
-    keyboardEvent.shiftKey &&
-    (keyboardEvent.code === "KeyS" || keyboardEvent.key === "S" || keyboardEvent.key === "s");
-  if (isShiftS) {
-    keyboardEvent.preventDefault();
-    keyboardEvent.stopPropagation();
-    toggleShadowingMode();
+  if (keyboardEvent.ctrlKey || keyboardEvent.altKey || keyboardEvent.metaKey || keyboardEvent.shiftKey) {
     return;
   }
 
-  if (
-    !keyboardEvent.ctrlKey &&
-    !keyboardEvent.altKey &&
-    !keyboardEvent.metaKey &&
-    !keyboardEvent.shiftKey
-  ) {
-    if (keyboardEvent.code === "KeyA" || keyboardEvent.key === "a" || keyboardEvent.key === "A") {
-      keyboardEvent.preventDefault();
-      triggerSentenceReplay();
-      return;
-    }
-    if (keyboardEvent.code === "KeyS" || keyboardEvent.key === "s" || keyboardEvent.key === "S") {
-      keyboardEvent.preventDefault();
-      triggerSlowSentenceReplay();
-      return;
-    }
-    if (keyboardEvent.code === "KeyD" || keyboardEvent.key === "d" || keyboardEvent.key === "D") {
-      keyboardEvent.preventDefault();
-      triggerNextSentence();
-      return;
-    }
+  const sentenceActions: Record<string, () => Promise<void>> = {
+    KeyA: () => replaySentence(false),
+    KeyS: () => replaySentence(true),
+    KeyD: () => skipToNextSentence(),
+  };
+  const action = sentenceActions[keyboardEvent.code];
+  if (action) {
+    keyboardEvent.preventDefault();
+    keyboardEvent.stopPropagation();
+    void action();
   }
 }
 
@@ -1837,42 +1386,17 @@ function initializeWatchPageFeatures(context: {
   if (currentWatchVideoId !== videoId) {
     currentWatchVideoId = videoId;
     sessionWatchedSeconds = 0;
-    observedSubtitleHistory = [];
-    currentlyActiveLiveSubtitle = null;
-    lastShadowingSentenceText = "";
-    isShadowingPauseActive = false;
-    removeShadowingCountdownHud();
-    closeClozeCaptureModal();
+    sentencePlayback = null;
+    closeOpenClozeModal?.(false);
   }
 
   injectImmersionStyles();
-  ensureSubtitlesEnabled();
-  void fetchTranscriptSegmentsForActiveVideo();
+  void loadImmersionTranscript();
   void checkMandalaStatusForCurrentPage();
   void readMetadataFromDom().then((metadata) => {
     lastMetadata = metadata;
     updateImmersionHud();
   });
-
-  if (!captionObserver) {
-    captionObserver = new MutationObserver(() => {
-      trackLiveCaptionProgress();
-    });
-
-    const observerTarget =
-      document.getElementById("ytp-caption-window-container") ||
-      document.querySelector(".ytp-caption-window-container") ||
-      document.getElementById("movie_player") ||
-      document.body;
-
-    if (observerTarget) {
-      captionObserver.observe(observerTarget, {
-        childList: true,
-        subtree: true,
-        characterData: true,
-      });
-    }
-  }
 
   if (!watchedTimerInterval) {
     lastWatchTickTimestamp = Date.now();
@@ -1883,26 +1407,13 @@ function initializeWatchPageFeatures(context: {
       lastWatchTickTimestamp = currentTimestamp;
 
       if (videoElement && !videoElement.paused && elapsedMilliseconds > 0) {
+        const minutesBefore = Math.floor(sessionWatchedSeconds / 60);
         sessionWatchedSeconds += elapsedMilliseconds / 1000;
-        if (Math.floor(sessionWatchedSeconds) % 30 === 0) {
+        if (Math.floor(sessionWatchedSeconds / 60) !== minutesBefore) {
           updateImmersionHud();
         }
 
-        if (isSlowReplayActive && slowReplayTargetSegment) {
-          const targetEnd =
-            slowReplayTargetSegment.startSeconds +
-            Math.max(1, slowReplayTargetSegment.durationSeconds);
-          if (
-            videoElement.currentTime >= targetEnd ||
-            videoElement.currentTime < slowReplayTargetSegment.startSeconds
-          ) {
-            videoElement.playbackRate = originalPlaybackRate;
-            isSlowReplayActive = false;
-            slowReplayTargetSegment = null;
-          }
-        }
-
-        trackLiveCaptionProgress();
+        checkSentencePlayback(videoElement);
       }
     }, 100);
   }
@@ -1913,14 +1424,8 @@ function initializeWatchPageFeatures(context: {
 
 function teardownWatchPageFeatures(): void {
   removeImmersionHud();
-  removeShadowingCountdownHud();
-  closeClozeCaptureModal();
-  isShadowingModeActive = false;
-  isShadowingPauseActive = false;
-  if (shadowingCountdownTimer) {
-    clearInterval(shadowingCountdownTimer);
-    shadowingCountdownTimer = null;
-  }
+  closeOpenClozeModal?.(false);
+  sentencePlayback = null;
 }
 
 export default defineContentScript({
@@ -1930,6 +1435,10 @@ export default defineContentScript({
       "get-open-tabs-catalog": () => browser.runtime.sendMessage({ action: "get-open-tabs-catalog" }),
       "stage-focused-study-queue": (payload) =>
         browser.runtime.sendMessage({ action: "stage-focused-study-queue", payload }),
+      "clozemaster-list": (payload) =>
+        browser.runtime.sendMessage({ action: "clozemaster-remote", op: "list", payload }),
+      "clozemaster-add": (payload) =>
+        browser.runtime.sendMessage({ action: "clozemaster-remote", op: "add", payload }),
       "refine-language": (payload) => {
         const { detected, text, channelName, videoId } = payload as VideoChannel & {
           detected: DetectedLanguage;
@@ -1992,7 +1501,6 @@ export default defineContentScript({
     );
 
     context.addEventListener(window, "keydown", handleGlobalKeydown, { capture: true });
-    context.addEventListener(document, "keydown", handleGlobalKeydown, { capture: true });
 
     document.addEventListener("click", () => {
       if (isPillarPopoverOpen) {

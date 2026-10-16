@@ -10,6 +10,7 @@ import {
   type WebMcpToolDefinition,
 } from "../utils/webmcp";
 import { sendBridgeRequest } from "../utils/webmcpBridge";
+import { listSavedSessionsTool, openSavedSessionTool } from "../utils/sessionTools";
 
 export default defineContentScript({
   matches: [
@@ -132,6 +133,8 @@ export default defineContentScript({
     await Promise.all([
       registerWebMcpTool(getOpenTabsCatalogTool, abortController.signal),
       registerWebMcpTool(stageFocusedStudyQueueTool, abortController.signal),
+      registerWebMcpTool(listSavedSessionsTool, abortController.signal),
+      registerWebMcpTool(openSavedSessionTool, abortController.signal),
       registerWebMcpTool(getReadingListCatalogTool, abortController.signal),
       registerWebMcpTool(shelveAndClearReadingItemTool, abortController.signal),
     ]);

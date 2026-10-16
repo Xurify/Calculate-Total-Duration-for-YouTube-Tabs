@@ -20,6 +20,10 @@ import {
   type AddSentencesInput,
 } from "../utils/clozemasterTools";
 import { buildSentences, type TranscriptSegment } from "../utils/transcript";
+import { extractChaptersFromPlayerResponse } from "../utils/chapters";
+import { listSavedSessionsTool, openSavedSessionTool } from "../utils/sessionTools";
+import { CLEAR_STAGED_CARDS_INPUT_SCHEMA, type ClearStagedCardsInput } from "../utils/stagedCardTools";
+import type { StagedClozeCard } from "../utils/storage";
 import {
   getPlayerResponse as getPlayerResponseFromWindow,
   getVideoIdFromLocation as getVideoIdFromCurrentLocation,
@@ -111,7 +115,7 @@ export default defineContentScript({
     > = {
       name: "youtube_get_current_video",
       description:
-        "Returns comprehensive metadata and playback state for the currently active YouTube video or short, including duration, current time, remaining time, language, and volume.",
+        "Returns comprehensive metadata and playback state for the currently active YouTube video or short, including duration, current time, remaining time, language, volume, and its chapters with start times. Seek to a chapter with youtube_control_playback, or pass its start and end to youtube_get_transcript to read just that chapter.",
       annotations: {
         readOnlyHint: true,
         untrustedContentHint: true,
@@ -182,6 +186,7 @@ export default defineContentScript({
           currentTimeSeconds,
           remainingSeconds: isLive ? 0 : remainingSeconds,
           isLive,
+          chapters: extractChaptersFromPlayerResponse(playerResponse, isLive ? 0 : durationSeconds),
           language: detected.language,
           languageName: detected.languageName,
           availableLanguages: captionTracks.map((track) => ({
@@ -594,14 +599,120 @@ export default defineContentScript({
       execute: (inputArguments) => sendBridgeRequest("clozemaster-add", inputArguments),
     };
 
+    const clozemasterGetStagedCardsTool: WebMcpToolDefinition<{ language?: string }, unknown> = {
+      name: "clozemaster_get_staged_cards",
+      description:
+        "Returns the sentences the user captured from YouTube videos with Alt+C and has not yet sent to Clozemaster. Each card has an id, the sentence with its cloze word in {{ }}, a translation (empty when the user left it for you to write), the language code and the video it came from. Pass language to keep only one language. Send them with clozemaster_add_sentences, then pass their ids to clozemaster_clear_staged_cards. The first call from this page asks the user to allow it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          language: {
+            type: "string",
+            description: "Optional language code (e.g. 'sk') to return only cards in that language",
+          },
+        },
+      },
+      annotations: { readOnlyHint: true, untrustedContentHint: true },
+      execute: async (inputArguments) => {
+        const response = await sendBridgeRequest<Record<string, never>, { success: boolean; cards?: StagedClozeCard[]; errorMessage?: string }>(
+          "get-staged-cloze-cards",
+          {}
+        );
+        if (!response?.success || !Array.isArray(response.cards)) return response;
+        const languageFilter = inputArguments.language?.trim().toLowerCase();
+        const cards = response.cards.filter(
+          (card) => !languageFilter || (card.language ?? "").toLowerCase() === languageFilter
+        );
+        return {
+          success: true,
+          count: cards.length,
+          cards: cards.map((card) => ({
+            id: card.id,
+            sentence: card.sentence,
+            targetWord: card.targetWord,
+            translation: card.translation,
+            hint: card.hint,
+            notes: card.notes,
+            language: card.language ?? null,
+            videoId: card.videoId,
+            videoTitle: card.videoTitle,
+            timestampSeconds: card.timestampSeconds,
+            createdAt: card.createdAt,
+          })),
+        };
+      },
+    };
+
+    const clozemasterClearStagedCardsTool: WebMcpToolDefinition<ClearStagedCardsInput, unknown> = {
+      name: "clozemaster_clear_staged_cards",
+      description:
+        "Removes captured sentences from the Alt+C queue after clozemaster_add_sentences has added them. Pass the ids from clozemaster_get_staged_cards; with no ids the whole queue is cleared. The user must approve this in a separate window before anything is removed.",
+      inputSchema: CLEAR_STAGED_CARDS_INPUT_SCHEMA,
+      annotations: { readOnlyHint: false, destructiveHint: true },
+      execute: (inputArguments) => sendBridgeRequest("clear-staged-cloze-cards", { ids: inputArguments.ids }),
+    };
+
+    const mandalaGetStatusTool: WebMcpToolDefinition<Record<string, unknown>, unknown> = {
+      name: "mandala_get_status",
+      description:
+        "Returns the user's Mandala Method pillars (index and title) and which of them already hold the current video on their shelf (savedPillarIndexes). Works from the extension's cache when no Mandala tab is open. Call it before mandala_save_video_to_shelf to pick a pillarIndex. The first call from this page asks the user to allow it.",
+      annotations: { readOnlyHint: true, untrustedContentHint: true },
+      execute: () => sendBridgeRequest("mandala-status", {}),
+    };
+
+    const mandalaSaveToShelfTool: WebMcpToolDefinition<{ pillarIndex: number; kind?: "repeat" | "once" }, unknown> = {
+      name: "mandala_save_video_to_shelf",
+      description:
+        "Saves the current video to the shelf of one Mandala pillar, so watch time can be logged against that pillar's action. Pass pillarIndex from mandala_get_status. When no Mandala tab is open the link is queued and reaches Mandala the next time the user opens it. The user must approve this in a separate window.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          pillarIndex: { type: "number", description: "Index of the pillar (0 to 7), from mandala_get_status" },
+          kind: {
+            type: "string",
+            enum: ["repeat", "once"],
+            description: '"repeat" (default) for a resource to come back to, "once" for a one-time item',
+          },
+        },
+        required: ["pillarIndex"],
+      },
+      annotations: { readOnlyHint: false },
+      execute: (inputArguments) =>
+        sendBridgeRequest("mandala-save", { pillarIndex: inputArguments.pillarIndex, kind: inputArguments.kind }),
+    };
+
+    const mandalaLogWatchTimeTool: WebMcpToolDefinition<{ minutes?: number }, unknown> = {
+      name: "mandala_log_watch_time",
+      description:
+        "Logs watch time for the current video against its Mandala pillar action. Without minutes it logs the time watched in this tab since the video opened, the same amount the in-player HUD shows. The video must already be on a pillar's shelf (see mandala_save_video_to_shelf). The user must approve this in a separate window.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          minutes: {
+            type: "number",
+            description: "Minutes to log. Omit to log the time watched in this tab.",
+          },
+        },
+      },
+      annotations: { readOnlyHint: false },
+      execute: (inputArguments) => sendBridgeRequest("mandala-log", { minutes: inputArguments.minutes }),
+    };
+
     await Promise.all([
       registerWebMcpTool(getActiveVideoDetailsTool, abortController.signal),
       registerWebMcpTool(getVideoTranscriptTool, abortController.signal),
       registerWebMcpTool(controlPlaybackTool, abortController.signal),
       registerWebMcpTool(getOpenTabsCatalogTool, abortController.signal),
       registerWebMcpTool(stageFocusedStudyQueueTool, abortController.signal),
+      registerWebMcpTool(listSavedSessionsTool, abortController.signal),
+      registerWebMcpTool(openSavedSessionTool, abortController.signal),
       registerWebMcpTool(clozemasterListCollectionsTool, abortController.signal),
       registerWebMcpTool(clozemasterAddSentencesTool, abortController.signal),
+      registerWebMcpTool(clozemasterGetStagedCardsTool, abortController.signal),
+      registerWebMcpTool(clozemasterClearStagedCardsTool, abortController.signal),
+      registerWebMcpTool(mandalaGetStatusTool, abortController.signal),
+      registerWebMcpTool(mandalaSaveToShelfTool, abortController.signal),
+      registerWebMcpTool(mandalaLogWatchTimeTool, abortController.signal),
     ]);
   },
 });

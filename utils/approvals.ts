@@ -120,9 +120,20 @@ export async function requestApproval(request: ApprovalRequest): Promise<boolean
  * Asks once per page document; later reads from the same document reuse the grant.
  * YouTube navigates as an SPA, so one grant covers a YouTube tab until it reloads.
  */
+const READ_GRANT_SUBJECTS = {
+  "open-tabs": "open tabs",
+  "reading-list": "the Reading List",
+  "clozemaster-collections": "Clozemaster collections",
+  "staged-cards": "captured sentences",
+  "mandala-status": "Mandala pillars",
+  "saved-sessions": "saved sessions",
+} as const;
+
+export type ReadGrantScope = keyof typeof READ_GRANT_SUBJECTS;
+
 export async function ensureReadGrant(
   sender: Sender,
-  scope: "open-tabs" | "reading-list" | "clozemaster-collections",
+  scope: ReadGrantScope,
   request: ApprovalRequest
 ): Promise<void> {
   if (isExtensionPageSender(sender)) return;
@@ -132,8 +143,7 @@ export async function ensureReadGrant(
   if (readGrants.has(grantKey)) return;
 
   if (!(await requestApproval(request))) {
-    const shared = { "open-tabs": "open tabs", "reading-list": "the Reading List", "clozemaster-collections": "Clozemaster collections" };
-    throw new Error(`The user declined to share ${shared[scope]} with this page.`);
+    throw new Error(`The user declined to share ${READ_GRANT_SUBJECTS[scope]} with this page.`);
   }
   readGrants.add(grantKey);
 }

@@ -1447,6 +1447,51 @@ export default defineContentScript({
         browser.runtime.sendMessage({ action: "clozemaster-remote", op: "list", payload }),
       "clozemaster-add": (payload) =>
         browser.runtime.sendMessage({ action: "clozemaster-remote", op: "add", payload }),
+      "get-staged-cloze-cards": () => browser.runtime.sendMessage({ action: "get-staged-cloze-cards" }),
+      "clear-staged-cloze-cards": (payload) =>
+        browser.runtime.sendMessage({
+          action: "clear-staged-cloze-cards",
+          ids: (payload as { ids?: unknown })?.ids,
+        }),
+      "get-saved-sessions": () => browser.runtime.sendMessage({ action: "get-saved-sessions" }),
+      "open-saved-session": (payload) => browser.runtime.sendMessage({ action: "open-saved-session", payload }),
+      "mandala-status": () =>
+        browser.runtime.sendMessage({ action: "mandala-remote", op: "status", payload: { url: window.location.href } }),
+      "mandala-save": async (payload) => {
+        const { pillarIndex, kind } = (payload ?? {}) as { pillarIndex?: unknown; kind?: unknown };
+        const response = (await browser.runtime.sendMessage({
+          action: "mandala-remote",
+          op: "save",
+          payload: { pillarIndex, kind, url: canonicalVideoUrl(), title: lastMetadata.title || document.title },
+        })) as { success?: boolean } | undefined;
+        if (response?.success) void checkMandalaStatusForCurrentPage();
+        return response;
+      },
+      "mandala-log": async (payload) => {
+        const requestedMinutes = (payload as { minutes?: unknown } | undefined)?.minutes;
+        const fromThisTab = requestedMinutes === undefined || requestedMinutes === null;
+        const watchedMinutes = Math.floor(sessionWatchedSeconds / 60);
+        if (fromThisTab && watchedMinutes < 1) {
+          return {
+            success: false,
+            errorMessage: "Less than a minute of this video has been watched in this tab. Pass minutes to log a specific amount.",
+          };
+        }
+        const response = (await browser.runtime.sendMessage({
+          action: "mandala-remote",
+          op: "log",
+          payload: {
+            url: window.location.href,
+            minutes: fromThisTab ? watchedMinutes : requestedMinutes,
+            videoTitle: lastMetadata.title,
+          },
+        })) as { success?: boolean } | undefined;
+        if (response?.success && fromThisTab) {
+          sessionWatchedSeconds = 0;
+          updateImmersionHud();
+        }
+        return response;
+      },
       "refine-language": (payload) => {
         const { detected, text, channelName, videoId } = payload as VideoChannel & {
           detected: DetectedLanguage;

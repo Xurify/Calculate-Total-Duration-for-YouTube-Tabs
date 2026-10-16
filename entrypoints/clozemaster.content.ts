@@ -8,6 +8,7 @@ interface StagedClozeCollection {
   collectionName: string;
   timestamp: number;
   cards: Array<{
+    id: string;
     sentence: string;
     targetWord: string;
     translation: string;
@@ -17,6 +18,8 @@ interface StagedClozeCollection {
   }>;
   tsvContent: string;
 }
+
+const HARVEST_COLLECTION_NAME = "YouTube Immersion";
 
 function convertCardsToTsv(cards: StagedClozeCard[]): string {
   const lines = cards
@@ -33,8 +36,6 @@ function convertCardsToTsv(cards: StagedClozeCard[]): string {
 }
 
 function syncCardsToClozemasterLocalStorage(cards: StagedClozeCard[]): void {
-  if (cards.length === 0) return;
-
   try {
     let stagedCollections: StagedClozeCollection[] = [];
     const rawStaged = window.localStorage.getItem(CLOZEMASTER_HARVEST_STORAGE_KEY);
@@ -42,12 +43,24 @@ function syncCardsToClozemasterLocalStorage(cards: StagedClozeCard[]): void {
       stagedCollections = JSON.parse(rawStaged) as StagedClozeCollection[];
     }
 
-    const collectionName = "YouTube Immersion";
+    const collectionName = HARVEST_COLLECTION_NAME;
     const existingIndex = stagedCollections.findIndex(
       (collection) => collection.collectionName === collectionName
     );
 
+    if (cards.length === 0) {
+      if (existingIndex < 0) return;
+      stagedCollections.splice(existingIndex, 1);
+      if (stagedCollections.length === 0) {
+        window.localStorage.removeItem(CLOZEMASTER_HARVEST_STORAGE_KEY);
+      } else {
+        window.localStorage.setItem(CLOZEMASTER_HARVEST_STORAGE_KEY, JSON.stringify(stagedCollections));
+      }
+      return;
+    }
+
     const formattedCards = cards.map((card) => ({
+      id: card.id,
       sentence: card.sentence,
       targetWord: card.targetWord,
       translation: card.translation,
@@ -84,6 +97,11 @@ export default defineContentScript({
     registerBridgeListener({
       "find-clozemaster-collection-urls": () =>
         browser.runtime.sendMessage({ action: "find-clozemaster-collection-urls" }),
+      "clear-staged-cloze-cards": (payload) =>
+        browser.runtime.sendMessage({
+          action: "clear-staged-cloze-cards",
+          ids: (payload as { ids?: unknown })?.ids,
+        }),
     });
 
     const initialCards = await loadStagedClozeCards();
@@ -101,7 +119,10 @@ export default defineContentScript({
         );
         return true;
       }
-      if (runtimeMessage.action === "new-cloze-card" && runtimeMessage.card) {
+      if (
+        (runtimeMessage.action === "new-cloze-card" && runtimeMessage.card) ||
+        runtimeMessage.action === "staged-cloze-cards-changed"
+      ) {
         void loadStagedClozeCards().then((updatedCards) => {
           syncCardsToClozemasterLocalStorage(updatedCards);
           sendResponse({ success: true, count: updatedCards.length });

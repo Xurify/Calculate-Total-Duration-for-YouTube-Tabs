@@ -383,6 +383,8 @@ export default defineContentScript({
       "get-open-tabs-catalog": () => browser.runtime.sendMessage({ action: "get-open-tabs-catalog" }),
       "stage-focused-study-queue": (payload) =>
         browser.runtime.sendMessage({ action: "stage-focused-study-queue", payload }),
+      "get-saved-sessions": () => browser.runtime.sendMessage({ action: "get-saved-sessions" }),
+      "open-saved-session": (payload) => browser.runtime.sendMessage({ action: "open-saved-session", payload }),
       "get-reading-list-catalog": () =>
         browser.runtime.sendMessage({ action: "get-reading-list-catalog" }),
       "shelve-and-clear-reading-item": (payload) =>

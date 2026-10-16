@@ -15,6 +15,7 @@ import {
   PENDING_MANDALA_LOGS_KEY,
   PENDING_MANDALA_SHELF_LINKS_KEY,
   type CachedMetadata,
+  type VideoChapter,
   type SavedSessionTab,
   type UserPrefs,
   type StagedClozeCard,
@@ -27,6 +28,7 @@ import {
   languageTextFromPlayerResponse,
   type DetectedLanguage,
 } from "../utils/captionLanguage";
+import { extractChaptersFromPlayerResponse } from "../utils/chapters";
 import { resolveVideoLanguage } from "../utils/channelLanguage";
 import { getVideoIdFromUrl, isYoutubeWatchOrShortsUrl } from "../utils/format";
 import { queryReadingList, removeReadingListItemById } from "../utils/readingList";
@@ -1276,6 +1278,7 @@ function parseMetadataFromHtml(html: string): {
   detectedLanguage: DetectedLanguage;
   languageText: string;
   uiLanguage: string | null;
+  chapters: VideoChapter[];
 } {
   let duration = 0;
   let title = "";
@@ -1284,6 +1287,7 @@ function parseMetadataFromHtml(html: string): {
   let syncedVideoId: string | null = null;
   let detectedLanguage: DetectedLanguage = { language: null, languageName: null };
   let languageText = "";
+  let chapters: VideoChapter[] = [];
 
   const playerResponseMatch =
     html.match(/var ytInitialPlayerResponse\s*=\s*({.+?});/s) ||
@@ -1308,6 +1312,7 @@ function parseMetadataFromHtml(html: string): {
 
       detectedLanguage = detectLanguageFromPlayerResponse(playerResponse);
       languageText = languageTextFromPlayerResponse(playerResponse);
+      chapters = extractChaptersFromPlayerResponse(playerResponse, isLive ? 0 : duration);
     } catch (_) {}
   }
   if (duration === 0) {
@@ -1332,6 +1337,7 @@ function parseMetadataFromHtml(html: string): {
     detectedLanguage,
     languageText,
     uiLanguage: html.match(/<html[^>]*\slang="([^"]+)"/)?.[1] ?? null,
+    chapters,
   };
 }
 
@@ -1361,6 +1367,7 @@ async function fetchOneTab(tab: TabToSync): Promise<boolean> {
       detectedLanguage,
       languageText,
       uiLanguage,
+      chapters,
     } = parseMetadataFromHtml(html);
     const { language, languageName } = await resolveVideoLanguage(
       detectedLanguage,
@@ -1378,6 +1385,7 @@ async function fetchOneTab(tab: TabToSync): Promise<boolean> {
         videoId: syncedVideoId ?? undefined,
         language,
         languageName,
+        chapters: chapters.length > 0 ? chapters : undefined,
       };
       pendingCacheUpdates.set(normalizedUrl, { url: tab.url, metadata });
       scheduleFlush();

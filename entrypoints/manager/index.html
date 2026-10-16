@@ -20,6 +20,7 @@
         <button type="button" id="nav-reading-list" class="sidebar-item nav-pill" data-sidebar-type="reading-list">
           Reading list <span id="reading-list-badge" class="nav-badge">0</span>
         </button>
+        <button type="button" id="nav-time" class="sidebar-item nav-pill" data-sidebar-type="time">Time</button>
       </nav>
       <div class="flex-1"></div>
       <div class="relative group w-72">
@@ -141,6 +142,8 @@
         </div>
         <!-- Paints the last known rail, heading and time bar before tabs load, so nothing jumps. -->
         <script src="/desk-init.js"></script>
+
+        <section id="time-panel" class="hidden flex-col gap-6 px-8 py-6 overflow-y-auto custom-scrollbar min-h-0" aria-busy="true"></section>
 
         <section id="sessions-panel" class="hidden flex-col gap-5 px-8 py-6 overflow-y-auto custom-scrollbar min-h-0">
           <div class="flex items-center gap-3">

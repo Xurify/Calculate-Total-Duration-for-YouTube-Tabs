@@ -35,6 +35,30 @@ import {
   isExtensionPageSender,
   requestApproval,
 } from "../utils/approvals";
+import { isMandalaUrl, SiteTracker } from "../utils/siteTracker";
+import {
+  loadSiteRules,
+  loadTimeTrackingPrefs,
+  removeSiteRule,
+  saveTimeTrackingPrefs,
+  summarize,
+  upsertSiteRule,
+  wholeMinutes,
+  type SiteRule,
+  type TimeTrackingPrefs,
+} from "../utils/timeLog";
+import { getLiveTabSections } from "../utils/storage";
+
+/** Tells every open Mandala tab there is time to take; the tab asks for it and posts it to the page. */
+async function notifyMandalaTabsOfPendingTime(): Promise<void> {
+  const tabs = await browser.tabs.query({});
+  for (const tab of tabs) {
+    if (tab.id === undefined || !isMandalaUrl(tab.url)) continue;
+    void browser.tabs.sendMessage(tab.id, { action: "flush-time-log" }).catch(() => {});
+  }
+}
+
+const siteTracker = new SiteTracker(() => void notifyMandalaTabsOfPendingTime());
 
 const BATCH_FLUSH_MS = 80;
 let pendingCacheUpdates = new Map<string, { url: string; metadata: Omit<CachedMetadata, "timestamp"> }>();
@@ -101,8 +125,89 @@ async function clearMetadataCacheInStore(): Promise<void> {
 }
 
 export default defineBackground(() => {
+  siteTracker.start();
+
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (handleApprovalPageMessage(message, sender, sendResponse)) {
+      return true;
+    }
+
+    if (message.action === "get-time-summary") {
+      const days = typeof message.days === "number" && message.days > 0 ? Math.min(90, Math.floor(message.days)) : 7;
+      void Promise.all([siteTracker.entries(), loadTimeTrackingPrefs(), loadSiteRules(), loadCachedMandalaSummary(), getLiveTabSections()])
+        .then(([entries, prefs, rules, mandala, piles]) => sendResponse({ summary: summarize(entries, days), prefs, rules, mandala, piles }))
+        .catch((error) => sendResponse({ errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "get-current-site") {
+      const tabId = typeof message.tabId === "number" ? message.tabId : undefined;
+      void siteTracker
+        .describeTab(tabId, message.url as string | undefined)
+        .then((site) => sendResponse(site))
+        .catch((error) => sendResponse({ match: null, todayMinutes: 0, runningSeconds: 0, errorMessage: String(error) }));
+      return true;
+    }
+
+    if (message.action === "set-site-rule") {
+      void upsertSiteRule(message.rule as Omit<SiteRule, "id" | "createdAt"> & { id?: string })
+        .then((rule) => siteTracker.retrySkipped().then(() => sendResponse({ success: true, rule })))
+        .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "remove-site-rule") {
+      void removeSiteRule(message.id as string)
+        .then(() => sendResponse({ success: true }))
+        .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "set-time-tracking-prefs") {
+      void saveTimeTrackingPrefs(message.prefs as TimeTrackingPrefs)
+        .then(() => sendResponse({ success: true }))
+        .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "clear-time-log") {
+      void siteTracker
+        .clear()
+        .then(() => sendResponse({ success: true }))
+        .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "export-time-log") {
+      void siteTracker
+        .entries()
+        .then((entries) => sendResponse({ json: JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), entries }, null, 2) }))
+        .catch((error) => sendResponse({ errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    // Only the Mandala page takes time out of the log, and only it reports what landed.
+    if (message.action === "get-pending-time-entries") {
+      if (!isMandalaUrl(sender.url)) {
+        sendResponse({ entries: [] });
+        return true;
+      }
+      void siteTracker
+        .pending()
+        .then((entries) => sendResponse({ entries: entries.map((entry) => ({ ...entry, minutes: wholeMinutes(entry) })) }))
+        .catch(() => sendResponse({ entries: [] }));
+      return true;
+    }
+
+    if (message.action === "mark-time-entries-synced") {
+      if (!isMandalaUrl(sender.url)) {
+        sendResponse({ success: false });
+        return true;
+      }
+      void siteTracker
+        .markSynced((message.logged as string[]) ?? [], (message.known as string[]) ?? [], (message.skipped as { id: string; reason: string }[]) ?? [])
+        .then(() => sendResponse({ success: true }))
+        .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
       return true;
     }
 
@@ -263,7 +368,10 @@ export default defineBackground(() => {
 
     if (message.action === "check-mandala-status") {
       void handleCheckMandalaStatus(message.url as string)
-        .then((result) => sendResponse(result))
+        .then(async (result) => {
+          const site = await siteTracker.describeTab(sender.tab?.id, message.url as string);
+          sendResponse({ ...result, autoLogged: site.match !== null });
+        })
         .catch((error) =>
           sendResponse({
             connected: false,

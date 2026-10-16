@@ -38,6 +38,8 @@ import {
   type StoreState,
 } from "../../utils/store";
 import { formatTime, formatCompact, formatDurationWords, formatOffset, parseTimeParam, getVideoIdFromUrl, normalizeText, isYoutubeWatchOrShortsUrl } from "../../utils/format";
+import { pillarColor, type SiteRule, type TimeTrackingPrefs } from "../../utils/timeLog";
+import { actionOptionsHtml, formatMinutesWords, pillarChoices, pillarOptionsHtml, pillarTitleOf, type TimeSummaryResponse } from "../../utils/timeUi";
 import {
   detectLanguageFromPlayerResponse,
   languageTextFromPlayerResponse,
@@ -75,6 +77,7 @@ let selectedTabIds = new Set<number>();
 let isReadingListView = false;
 /** Top-nav "Saved sessions" view: lists sessions instead of the board. */
 let isSessionsView = false;
+let isTimeView = false;
 let savedSessionsCount = 0;
 let readingListItems: ReadingListItem[] = [];
 let selectedPlaybackSpeed = 1.0;
@@ -2138,16 +2141,17 @@ function renderSidebar() {
 
 function syncTopNavState(): void {
   const states: [string, boolean][] = [
-    ["nav-desk", !isReadingListView && !isSessionsView && selectedSession == null],
+    ["nav-desk", !isReadingListView && !isSessionsView && !isTimeView && selectedSession == null],
     ["nav-reading-list", isReadingListView],
     ["nav-sessions", isSessionsView || selectedSession != null],
+    ["nav-time", isTimeView],
   ];
   for (const [id, active] of states) {
     const element = document.getElementById(id);
     element?.classList.toggle("bg-surface-hover", active);
     element?.classList.toggle("text-text-primary", active);
   }
-  document.getElementById("windows-block")?.classList.toggle("hidden", isReadingListView || isSessionsView || selectedSession != null);
+  document.getElementById("windows-block")?.classList.toggle("hidden", isReadingListView || isSessionsView || isTimeView || selectedSession != null);
 }
 
 function setDeskHero(options: { kicker: string; title: string; value: string; suffix: string }): void {
@@ -2907,16 +2911,31 @@ function renderMain() {
   const viewToolbar = document.getElementById("view-toolbar");
 
   syncTopNavState();
-  if (!isReadingListView && !isSessionsView) pruneStaleFacets();
+  if (!isReadingListView && !isSessionsView && !isTimeView) pruneStaleFacets();
   renderFacetRail();
   renderTimeBar();
   renderFacetCrumb();
   renderPlanner();
-  container.classList.toggle("hidden", isSessionsView);
+  container.classList.toggle("hidden", isSessionsView || isTimeView);
 
   const sessionsPanel = document.getElementById("sessions-panel");
   sessionsPanel?.classList.toggle("hidden", !isSessionsView);
   sessionsPanel?.classList.toggle("flex", isSessionsView);
+
+  const timePanel = document.getElementById("time-panel");
+  timePanel?.classList.toggle("hidden", !isTimeView);
+  timePanel?.classList.toggle("flex", isTimeView);
+  document.getElementById("time-bar-skeleton")?.classList.toggle("hidden", isTimeView);
+
+  if (isTimeView) {
+    if (viewToolbar) viewToolbar.classList.add("hidden");
+    headerTitle.innerText = "where the time went";
+    headerStats.innerText = "Time on pages that count for a Mandala pillar. Nothing else is kept.";
+    setDeskHero({ kicker: "Time", title: "", value: "…", suffix: "" });
+    lastTabListFingerprint = "";
+    void renderTimePanel();
+    return;
+  }
 
   if (isSessionsView) {
     if (viewToolbar) viewToolbar.classList.add("hidden");
@@ -3322,7 +3341,7 @@ let lastFacetRailHtml = "";
 function renderFacetRail(): void {
   const rail = document.getElementById("facet-rail");
   if (!rail) return;
-  const live = !isReadingListView && !isSessionsView && selectedSession == null;
+  const live = !isReadingListView && !isSessionsView && !isTimeView && selectedSession == null;
   const session = selectedSession != null && !isSessionsView && !isReadingListView;
   rail.classList.toggle("hidden", !live && !session);
   if (!live && !session) return;
@@ -3366,7 +3385,7 @@ function saveDeskSnapshot(): void {
 
 function writeDeskSnapshot(): void {
   deskSnapshotTimeout = null;
-  if (hasAnyFacet() || currentWindowId !== "all" || searchQuery || selectedSession || isReadingListView || isSessionsView) return;
+  if (hasAnyFacet() || currentWindowId !== "all" || searchQuery || selectedSession || isReadingListView || isSessionsView || isTimeView) return;
   const html = (id: string) => document.getElementById(id)?.innerHTML ?? "";
   const text = (id: string) => document.getElementById(id)?.textContent ?? "";
   const visible = (id: string) => !document.getElementById(id)?.classList.contains("hidden");
@@ -3428,7 +3447,7 @@ function renderTimeBar(): void {
   const bar = document.getElementById("time-bar");
   const rest = document.getElementById("time-bar-rest");
   if (!bar) return;
-  const live = !isReadingListView && !isSessionsView && selectedSession == null;
+  const live = !isReadingListView && !isSessionsView && !isTimeView && selectedSession == null;
   const session = selectedSession != null && !isSessionsView && !isReadingListView;
   bar.classList.toggle("hidden", !live && !session);
   rest?.classList.toggle("hidden", !live && !session);
@@ -3526,7 +3545,7 @@ function renderPlanner(): void {
   const summary = document.getElementById("plan-summary");
   if (!planner || !startButton || !summary) return;
 
-  const live = !isReadingListView && !isSessionsView && selectedSession == null;
+  const live = !isReadingListView && !isSessionsView && !isTimeView && selectedSession == null;
   planner.classList.toggle("hidden", !live);
   planner.classList.toggle("flex", live);
   if (!live) {
@@ -4696,6 +4715,19 @@ function setupListeners() {
     const item = (event.target as HTMLElement).closest(".sidebar-item");
     if (!item) return;
     const type = item.getAttribute("data-sidebar-type");
+    if (type === "time") {
+      isTimeView = true;
+      isSessionsView = false;
+      isReadingListView = false;
+      selectedSession = null;
+      selectedSessionTabUrls.clear();
+      selectedTabIds.clear();
+      updateSelectionUI();
+      refreshSavedSessionsSidebar();
+      render();
+      return;
+    }
+    isTimeView = false;
     if (type === "sessions") {
       isSessionsView = true;
       isReadingListView = false;
@@ -5718,6 +5750,284 @@ function setupListeners() {
   });
 }
 
+/* ───────────────────────── Time: where the week went ───────────────────────── */
+
+let timeRange: 7 | 30 = 7;
+let lastTimeResponse: TimeSummaryResponse | null = null;
+let timePanelWired = false;
+
+const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
+
+function dayLetter(key: string): string {
+  const [year, month, day] = key.split("-").map(Number);
+  return DAY_LETTERS[new Date(year, month - 1, day).getDay()];
+}
+
+function timeAgoWords(timestamp: number): string {
+  const minutes = Math.floor((Date.now() - timestamp) / 60_000);
+  if (minutes < 2) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "yesterday" : `${days} days ago`;
+}
+
+async function renderTimePanel(): Promise<void> {
+  const panel = document.getElementById("time-panel");
+  if (!panel) return;
+  wireTimePanel(panel);
+  let data: TimeSummaryResponse;
+  try {
+    data = (await browser.runtime.sendMessage({ action: "get-time-summary", days: timeRange })) as TimeSummaryResponse;
+    if (!data || data.errorMessage) throw new Error(data?.errorMessage || "No answer");
+  } catch (error) {
+    panel.innerHTML = `<p class="text-sm text-text-muted m-0">Could not read the time log: ${escapeHtml(error instanceof Error ? error.message : String(error))}</p>`;
+    panel.setAttribute("aria-busy", "false");
+    return;
+  }
+  if (!isTimeView) return;
+  lastTimeResponse = data;
+  const { summary, prefs, rules, mandala, piles } = data;
+  const totalSeconds = summary.total.active + summary.total.passive;
+  setDeskHero({
+    kicker: "Time",
+    title: "",
+    value: totalSeconds > 0 ? formatMinutesWords(totalSeconds) : "0 min",
+    suffix: timeRange === 7 ? " this week" : " in 30 days",
+  });
+
+  const peak = Math.max(60, ...summary.days.map((day) => day.active + day.passive));
+  const daysHtml = summary.days
+    .map((day) => {
+      const total = day.active + day.passive;
+      const activeHeight = Math.round((day.active / peak) * 100);
+      const passiveHeight = Math.round((day.passive / peak) * 100);
+      return `<div class="flex flex-col items-center gap-1.5 min-w-0" title="${escapeHtml(day.key)}: ${formatMinutesWords(day.active)} active${day.passive > 0 ? `, ${formatMinutesWords(day.passive)} in the background` : ""}">
+        <div class="w-full h-24 flex flex-col justify-end rounded-md bg-surface-elevated overflow-hidden">
+          <div class="w-full bg-accent/35" style="height:${passiveHeight}%"></div>
+          <div class="w-full bg-accent" style="height:${activeHeight}%"></div>
+        </div>
+        <span class="text-[11px] text-text-muted tabular-nums">${timeRange === 7 ? dayLetter(day.key) : day.key.slice(8)}</span>
+        <span class="text-[11px] text-text-secondary tabular-nums">${total > 0 ? formatMinutesWords(total) : "·"}</span>
+      </div>`;
+    })
+    .join("");
+
+  const pillarRows = summary.byPillar
+    .map((totals, pillarIndex) => ({ pillarIndex, ...totals, total: totals.active + totals.passive }))
+    .filter((row) => row.total > 0)
+    .sort((first, second) => second.total - first.total);
+  const longest = pillarRows[0]?.total ?? 1;
+  const pillarsHtml = pillarRows.length
+    ? pillarRows
+        .map(
+          (row) => `<li class="grid grid-cols-[minmax(0,12rem)_minmax(0,1fr)_auto] items-center gap-3 text-sm">
+            <span class="truncate font-medium text-text-primary flex items-center gap-2"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:${pillarColor(row.pillarIndex)}"></span>${escapeHtml(pillarTitleOf(mandala, row.pillarIndex))}</span>
+            <span class="h-2 rounded-full bg-surface-elevated overflow-hidden flex"><span class="h-full" style="width:${Math.max(2, (row.active / longest) * 100)}%;background:${pillarColor(row.pillarIndex)}"></span><span class="h-full opacity-40" style="width:${(row.passive / longest) * 100}%;background:${pillarColor(row.pillarIndex)}"></span></span>
+            <span class="text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(row.active)}${row.passive > 0 ? ` <span class="text-text-muted">+ ${formatMinutesWords(row.passive)}</span>` : ""}</span>
+          </li>`
+        )
+        .join("")
+    : `<li class="text-sm text-text-muted">Nothing counted yet. Open a page that is on a Mandala shelf, or give a site a pillar from the popup.</li>`;
+
+  const sitesHtml = summary.bySite.length
+    ? summary.bySite
+        .map((site) => {
+          const rule = rules.find((each) => each.kind === "host" && (site.host === each.pattern || site.host.endsWith(`.${each.pattern}`)));
+          return `<tr class="border-t border-border/60">
+            <td class="py-2 pr-3 text-sm text-text-primary truncate max-w-[18rem]" title="${escapeHtml(site.host)}">${escapeHtml(site.host)}</td>
+            <td class="py-2 pr-3"><select class="time-site-pillar h-8 px-2 rounded-md border border-border bg-surface-elevated text-xs text-text-primary" data-host="${escapeHtml(site.host)}" data-rule-id="${escapeHtml(rule?.id ?? "")}" aria-label="Pillar for ${escapeHtml(site.host)}">${pillarOptionsHtml(mandala, site.pillarIndex)}</select></td>
+            <td class="py-2 pr-3 text-sm text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(site.active)}</td>
+            <td class="py-2 pr-3 text-sm text-text-muted tabular-nums whitespace-nowrap">${site.passive > 0 ? formatMinutesWords(site.passive) : "·"}</td>
+            <td class="py-2 pr-3 text-xs text-text-muted whitespace-nowrap">${timeAgoWords(site.lastAt)}</td>
+            <td class="py-2 text-right">${rule ? `<button type="button" class="time-rule-remove chip h-7 px-2.5 text-xs chip--danger" data-rule-id="${escapeHtml(rule.id)}">Stop counting</button>` : ""}</td>
+          </tr>`;
+        })
+        .join("")
+    : `<tr><td colspan="6" class="py-3 text-sm text-text-muted">No sites yet.</td></tr>`;
+
+  const pagesHtml = summary.byPage
+    .slice(0, 12)
+    .map(
+      (page) => `<li class="flex items-center gap-3 min-w-0 text-sm">
+        <span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:${pillarColor(page.pillarIndex)}"></span>
+        <a href="${escapeHtml(page.url)}" target="_blank" rel="noopener noreferrer" class="flex-1 min-w-0 truncate text-text-primary no-underline hover:text-accent" title="${escapeHtml(page.url)}">${escapeHtml(page.title || page.url)}</a>
+        <span class="text-xs text-text-muted truncate max-w-[10rem]">${escapeHtml(page.host)}</span>
+        <span class="text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(page.active + page.passive)}</span>
+      </li>`
+    )
+    .join("");
+
+  const pileRows = (piles?.sections ?? [])
+    .map((section) => {
+      const rule = rules.find((each) => each.kind === "pile" && each.pattern === section.id);
+      return `<li class="flex items-center gap-3 text-sm">
+        <span class="flex-1 min-w-0 truncate text-text-primary">${section.emoji ? `${escapeHtml(section.emoji)} ` : ""}${escapeHtml(section.name)}</span>
+        <select class="time-pile-pillar h-8 px-2 rounded-md border border-border bg-surface-elevated text-xs text-text-primary" data-section-id="${escapeHtml(section.id)}" data-section-name="${escapeHtml(section.name)}" data-rule-id="${escapeHtml(rule?.id ?? "")}" aria-label="Pillar for the pile ${escapeHtml(section.name)}">
+          <option value=""${rule ? "" : " selected"}>Not counted</option>${pillarOptionsHtml(mandala, rule?.pillarIndex ?? null)}
+        </select>
+        <select class="time-pile-action h-8 px-2 rounded-md border border-border bg-surface-elevated text-xs text-text-primary${rule ? "" : " invisible"}" data-section-id="${escapeHtml(section.id)}" aria-label="Action for the pile ${escapeHtml(section.name)}">${actionOptionsHtml(mandala, rule?.pillarIndex ?? 0, rule?.actionId)}</select>
+      </li>`;
+    })
+    .join("");
+
+  const prefixRules = rules.filter((rule) => rule.kind === "prefix");
+  const prefixHtml = prefixRules.length
+    ? prefixRules
+        .map(
+          (rule) => `<li class="flex items-center gap-3 text-sm">
+            <span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:${pillarColor(rule.pillarIndex)}"></span>
+            <span class="flex-1 min-w-0 truncate text-text-primary" title="${escapeHtml(rule.pattern)}">${escapeHtml(rule.label || rule.pattern)}</span>
+            <span class="text-xs text-text-muted">${escapeHtml(pillarTitleOf(mandala, rule.pillarIndex))}</span>
+            <button type="button" class="time-rule-remove chip h-7 px-2.5 text-xs chip--danger" data-rule-id="${escapeHtml(rule.id)}">Stop counting</button>
+          </li>`
+        )
+        .join("")
+    : "";
+
+  const pendingHtml =
+    summary.pendingMinutes > 0
+      ? `<div class="flex items-center gap-3 rounded-[10px] border border-border bg-surface-elevated px-4 py-3 text-sm text-text-secondary"><span class="flex-1">${summary.pendingMinutes} min waiting to reach Mandala. It lands next time Mandala is open.</span><button type="button" id="time-open-mandala" class="chip h-8 text-xs">Open Mandala</button></div>`
+      : "";
+
+  const noPillars = !mandala || pillarChoices(mandala).every((pillar) => !mandala.pillars.find((each) => each.index === pillar.index)?.named);
+
+  panel.innerHTML = `
+    ${pendingHtml}
+    ${noPillars ? `<div class="rounded-[10px] border border-border bg-surface-elevated px-4 py-3 text-sm text-text-secondary">Open Mandala once so your pillar names and actions show here. Rules made before that point at pillars by number.</div>` : ""}
+    <section class="flex flex-col gap-3">
+      <div class="flex items-center gap-3">
+        <h2 class="font-display text-[22px] font-medium m-0 flex-1">By day</h2>
+        <span class="inline-flex gap-0.5 p-0.5 rounded-full border border-border bg-surface" role="group" aria-label="Range">
+          <button type="button" class="time-range budget-chip" data-days="7" aria-pressed="${timeRange === 7}">7 days</button>
+          <button type="button" class="time-range budget-chip" data-days="30" aria-pressed="${timeRange === 30}">30 days</button>
+        </span>
+      </div>
+      <div class="grid gap-1.5" style="grid-template-columns: repeat(${summary.days.length}, minmax(0, 1fr))">${daysHtml}</div>
+      <p class="text-xs text-text-muted m-0">Solid is active: the tab in front while you were at the keyboard. Light is in the background: a tab making sound elsewhere, or while you were away. ${formatMinutesWords(summary.total.active)} active, ${formatMinutesWords(summary.total.passive)} in the background.</p>
+    </section>
+    <section class="flex flex-col gap-3">
+      <h2 class="font-display text-[22px] font-medium m-0">By pillar</h2>
+      <ul class="m-0 p-0 list-none flex flex-col gap-2">${pillarsHtml}</ul>
+    </section>
+    <section class="flex flex-col gap-3">
+      <h2 class="font-display text-[22px] font-medium m-0">Sites</h2>
+      <table class="w-full border-collapse"><thead><tr class="text-[11px] uppercase tracking-[0.1em] text-text-muted text-left"><th class="font-semibold pb-1 pr-3">Site</th><th class="font-semibold pb-1 pr-3">Counts for</th><th class="font-semibold pb-1 pr-3">Active</th><th class="font-semibold pb-1 pr-3">Background</th><th class="font-semibold pb-1 pr-3">Last</th><th></th></tr></thead><tbody>${sitesHtml}</tbody></table>
+      ${prefixHtml ? `<h3 class="text-sm font-semibold text-text-secondary m-0 mt-2">Pages counted on their own</h3><ul class="m-0 p-0 list-none flex flex-col gap-2">${prefixHtml}</ul>` : ""}
+    </section>
+    ${pagesHtml ? `<section class="flex flex-col gap-3"><h2 class="font-display text-[22px] font-medium m-0">Pages</h2><ul class="m-0 p-0 list-none flex flex-col gap-2">${pagesHtml}</ul></section>` : ""}
+    <section class="flex flex-col gap-3">
+      <h2 class="font-display text-[22px] font-medium m-0">Piles</h2>
+      <p class="text-xs text-text-muted m-0">A pile that counts for a pillar sends every video in it to Mandala, without saving each one to a shelf.</p>
+      ${pileRows ? `<ul class="m-0 p-0 list-none flex flex-col gap-2">${pileRows}</ul>` : `<p class="text-sm text-text-muted m-0">No piles on the desk yet.</p>`}
+    </section>
+    <section class="flex flex-col gap-3 pb-6">
+      <h2 class="font-display text-[22px] font-medium m-0">Tracking</h2>
+      <div class="flex flex-wrap items-center gap-3">
+        <label class="flex items-center gap-2 text-sm text-text-primary cursor-pointer"><input type="checkbox" id="time-enabled" class="w-4 h-4 accent-accent"${prefs.enabled ? " checked" : ""} /> Measure time on pages</label>
+        <label class="flex items-center gap-2 text-sm text-text-secondary">Away after
+          <select id="time-idle" class="h-8 px-2 rounded-md border border-border bg-surface-elevated text-xs text-text-primary">
+            ${[30, 60, 120, 300].map((seconds) => `<option value="${seconds}"${prefs.idleSeconds === seconds ? " selected" : ""}>${seconds < 60 ? `${seconds} s` : `${seconds / 60} min`}</option>`).join("")}
+          </select>
+          without input
+        </label>
+        <span class="flex-1"></span>
+        <button type="button" id="time-export" class="chip h-8 text-xs">Export JSON</button>
+        <button type="button" id="time-clear" class="chip h-8 text-xs chip--danger">Delete all time data</button>
+      </div>
+      <p class="text-xs text-text-muted m-0">Everything stays in this browser. Only pages that count for a pillar are kept, for 90 days. Mandala gets whole minutes and the page's shelf link, never the page itself.</p>
+    </section>
+  `;
+  panel.setAttribute("aria-busy", "false");
+}
+
+function wireTimePanel(panel: HTMLElement): void {
+  if (timePanelWired) return;
+  timePanelWired = true;
+
+  const saveRule = async (rule: Omit<SiteRule, "id" | "createdAt"> & { id?: string }) => {
+    await browser.runtime.sendMessage({ action: "set-site-rule", rule });
+    await renderTimePanel();
+  };
+
+  panel.addEventListener("click", async (event) => {
+    const target = event.target as HTMLElement;
+    const range = target.closest<HTMLElement>(".time-range");
+    if (range) {
+      timeRange = range.dataset.days === "30" ? 30 : 7;
+      await renderTimePanel();
+      return;
+    }
+    const remove = target.closest<HTMLElement>(".time-rule-remove");
+    if (remove?.dataset.ruleId) {
+      await browser.runtime.sendMessage({ action: "remove-site-rule", id: remove.dataset.ruleId });
+      await renderTimePanel();
+      return;
+    }
+    if (target.closest("#time-open-mandala")) {
+      await browser.tabs.create({ url: "https://mandalamethod.vercel.app/" });
+      return;
+    }
+    if (target.closest("#time-export")) {
+      const response = (await browser.runtime.sendMessage({ action: "export-time-log" })) as { json?: string };
+      if (!response?.json) return;
+      const blob = new Blob([response.json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `study-harvester-time-${new Date().toISOString().slice(0, 10)}.json`;
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return;
+    }
+    if (target.closest("#time-clear")) {
+      const confirmed = await showConfirm({
+        title: "Delete all time data",
+        message: "Delete every measured minute from this browser? Minutes that already reached Mandala stay there.",
+        confirmLabel: "Delete",
+        confirmDanger: true,
+      });
+      if (confirmed) {
+        await browser.runtime.sendMessage({ action: "clear-time-log" });
+        await renderTimePanel();
+      }
+    }
+  });
+
+  panel.addEventListener("change", async (event) => {
+    const target = event.target as HTMLElement;
+    if (target.id === "time-enabled" || target.id === "time-idle") {
+      const enabled = (panel.querySelector<HTMLInputElement>("#time-enabled")?.checked ?? true) as boolean;
+      const idleSeconds = Number(panel.querySelector<HTMLSelectElement>("#time-idle")?.value ?? 60);
+      const prefs: TimeTrackingPrefs = { enabled, idleSeconds };
+      await browser.runtime.sendMessage({ action: "set-time-tracking-prefs", prefs });
+      return;
+    }
+    const sitePillar = target.closest<HTMLSelectElement>(".time-site-pillar");
+    if (sitePillar?.dataset.host) {
+      await saveRule({ id: sitePillar.dataset.ruleId || undefined, kind: "host", pattern: sitePillar.dataset.host, label: sitePillar.dataset.host, pillarIndex: Number(sitePillar.value) });
+      return;
+    }
+    const pilePillar = target.closest<HTMLSelectElement>(".time-pile-pillar");
+    if (pilePillar?.dataset.sectionId) {
+      if (!pilePillar.value) {
+        if (pilePillar.dataset.ruleId) await browser.runtime.sendMessage({ action: "remove-site-rule", id: pilePillar.dataset.ruleId });
+        await renderTimePanel();
+        return;
+      }
+      await saveRule({ id: pilePillar.dataset.ruleId || undefined, kind: "pile", pattern: pilePillar.dataset.sectionId, label: pilePillar.dataset.sectionName ?? "", pillarIndex: Number(pilePillar.value) });
+      return;
+    }
+    const pileAction = target.closest<HTMLSelectElement>(".time-pile-action");
+    if (pileAction?.dataset.sectionId) {
+      const rule = lastTimeResponse?.rules.find((each) => each.kind === "pile" && each.pattern === pileAction.dataset.sectionId);
+      if (!rule) return;
+      await saveRule({ ...rule, actionId: pileAction.value || undefined });
+    }
+  });
+}
+
 function render() {
   if (renderTimeout != null) clearTimeout(renderTimeout);
   renderTimeout = setTimeout(() => {
@@ -5742,6 +6052,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const urlParameters = new URLSearchParams(window.location.search);
   if (urlParameters.get("view") === "reading-list") {
     isReadingListView = true;
+  }
+  if (urlParameters.get("view") === "time") {
+    isTimeView = true;
   }
   void loadReadingList();
   void loadLanguageOverrides().then((overrides) => {

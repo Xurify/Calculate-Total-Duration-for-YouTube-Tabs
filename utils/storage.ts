@@ -22,12 +22,20 @@ export interface StagedClozeCard {
   createdAt: number;
 }
 
+export interface CachedMandalaAction {
+  id: string;
+  text: string;
+  kind?: string;
+}
+
 export interface CachedMandalaPillar {
   index: number;
   title: string;
   /** False when the pillar is still blank in Mandala and `title` is a placeholder. */
   named?: boolean;
   actionCount: number;
+  /** The pillar's written lines, so a site rule can name one. */
+  actions?: CachedMandalaAction[];
 }
 
 export interface CachedMandalaShelfLink {
@@ -59,6 +67,8 @@ export interface PendingMandalaTimeLog {
 export interface MandalaStatus {
   connected: boolean;
   cached: boolean;
+  /** True when a rule or a shelf link already sends this page's time to Mandala on its own. */
+  autoLogged?: boolean;
   activeChartTitle?: string;
   /** Pillars the person has named, or all eight when none are named yet. */
   pillars: CachedMandalaPillar[];

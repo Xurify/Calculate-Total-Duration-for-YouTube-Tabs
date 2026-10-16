@@ -7,7 +7,9 @@ import {
   registerWebMcpTool,
   type WebMcpToolDefinition,
 } from "../utils/webmcp";
+import { sendBridgeRequest } from "../utils/webmcpBridge";
 import {
+  ClozemasterError,
   addCardsToCollection,
   createCollection,
   listMyCollections,
@@ -16,6 +18,48 @@ import {
 } from "../utils/clozemasterApi";
 
 const MAX_CARDS_PER_CALL = 50;
+
+interface VisitedCollectionUrl {
+  url: string;
+  languagePair: string;
+  slug: string;
+  title: string;
+  lastVisitTime: number;
+}
+
+/** Machine-readable failure: `reason` to branch on, `instruction` to show the person. */
+async function failure(error: unknown) {
+  if (!(error instanceof ClozemasterError)) {
+    return {
+      success: false,
+      reason: "request_failed",
+      errorMessage: error instanceof Error ? error.message : String(error),
+      instruction: "Reload the Clozemaster page and try again.",
+    };
+  }
+  const recentCollectionUrls =
+    error.reason === "wrong_view"
+      ? await sendBridgeRequest<Record<string, never>, VisitedCollectionUrl[]>("find-clozemaster-collection-urls", {}).catch(
+          () => []
+        )
+      : [];
+  return {
+    success: false,
+    reason: error.reason,
+    errorMessage: error.message,
+    instruction: error.instruction,
+    ...(recentCollectionUrls.length > 0
+      ? {
+          recentCollectionUrls: recentCollectionUrls.map(({ url, languagePair, slug, title }) => ({
+            url,
+            languagePair,
+            slug,
+            title,
+          })),
+        }
+      : {}),
+  };
+}
 
 interface StagedClozeCollection {
   collectionName: string;
@@ -149,7 +193,7 @@ export default defineContentScript({
     const listCollectionsTool: WebMcpToolDefinition<Record<string, unknown>, unknown> = {
       name: "list_clozemaster_collections",
       description:
-        "Lists the user's own Clozemaster collections for the language currently open in Clozemaster, with their IDs and sentence counts. Use it to pick a collection before add_sentences_to_clozemaster_collection.",
+        "Lists the user's own Clozemaster collections for the language open in Clozemaster, with their IDs, slugs, play URLs and sentence counts. Use it to pick a collection before add_sentences_to_clozemaster_collection. Works from any page of that language, including settings and play views. On failure it returns reason (signed_out, pro_required, wrong_view or request_failed) and an instruction to show the user; wrong_view also lists collection play URLs from the user's history.",
       annotations: {
         readOnlyHint: true,
         untrustedContentHint: true,
@@ -159,16 +203,22 @@ export default defineContentScript({
           const collections = await listMyCollections();
           return {
             success: true,
-            collections: collections.map(({ id, name, numSentences }) => ({ id, name, numSentences })),
+            collections: collections.map(({ id, slug, name, numSentences, playUrl }) => ({
+              id,
+              slug,
+              name,
+              numSentences,
+              playUrl,
+            })),
           };
         } catch (error) {
-          return { success: false, errorMessage: error instanceof Error ? error.message : String(error) };
+          return await failure(error);
         }
       },
     };
 
     const addSentencesTool: WebMcpToolDefinition<
-      { collectionId?: number; collectionName?: string; cards: ClozeCardInput[] },
+      { collectionId?: number | string; collectionName?: string; cards: ClozeCardInput[] },
       unknown
     > = {
       name: "add_sentences_to_clozemaster_collection",
@@ -178,8 +228,8 @@ export default defineContentScript({
         type: "object",
         properties: {
           collectionId: {
-            type: "number",
-            description: "ID of an existing collection, from list_clozemaster_collections",
+            type: ["number", "string"],
+            description: "ID or slug of an existing collection, from list_clozemaster_collections",
           },
           collectionName: {
             type: "string",
@@ -233,10 +283,18 @@ export default defineContentScript({
           let collection: ClozemasterCollection | undefined;
           let created = false;
 
-          if (typeof inputArguments.collectionId === "number") {
-            collection = collections.find((candidate) => candidate.id === inputArguments.collectionId);
+          const requestedId = inputArguments.collectionId;
+          if (requestedId !== undefined && requestedId !== "") {
+            collection = collections.find(
+              (candidate) => String(candidate.id) === String(requestedId) || candidate.slug === String(requestedId)
+            );
             if (!collection) {
-              return { success: false, errorMessage: `No collection of yours has ID ${inputArguments.collectionId}.` };
+              return {
+                success: false,
+                reason: "not_found",
+                errorMessage: `No collection of yours has ID ${requestedId}.`,
+                instruction: "Call list_clozemaster_collections and use one of the IDs it returns.",
+              };
             }
           } else if (requestedName) {
             collection = collections.find(
@@ -260,7 +318,7 @@ export default defineContentScript({
             results,
           };
         } catch (error) {
-          return { success: false, errorMessage: error instanceof Error ? error.message : String(error) };
+          return await failure(error);
         }
       },
     };

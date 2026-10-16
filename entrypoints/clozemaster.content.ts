@@ -1,4 +1,5 @@
 import { loadStagedClozeCards, type StagedClozeCard } from "../utils/storage";
+import { registerBridgeListener } from "../utils/webmcpBridge";
 
 const CLOZEMASTER_HARVEST_STORAGE_KEY = "clozemaster_staged_harvest";
 
@@ -79,6 +80,11 @@ function syncCardsToClozemasterLocalStorage(cards: StagedClozeCard[]): void {
 export default defineContentScript({
   matches: ["*://*.clozemaster.com/*"],
   async main() {
+    registerBridgeListener({
+      "find-clozemaster-collection-urls": () =>
+        browser.runtime.sendMessage({ action: "find-clozemaster-collection-urls" }),
+    });
+
     const initialCards = await loadStagedClozeCards();
     syncCardsToClozemasterLocalStorage(initialCards);
 

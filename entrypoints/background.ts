@@ -240,6 +240,13 @@ export default defineBackground(() => {
       return true;
     }
 
+    if (message.action === "find-clozemaster-collection-urls") {
+      void findClozemasterCollectionUrls()
+        .then((result) => sendResponse(result))
+        .catch(() => sendResponse([]));
+      return true;
+    }
+
     if (message.action === "check-mandala-status") {
       void handleCheckMandalaStatus(message.url as string)
         .then((result) => sendResponse(result))
@@ -358,6 +365,24 @@ async function broadcastToClozemasterTabs(messagePayload: unknown): Promise<void
       void browser.tabs.sendMessage(clozemasterTab.id, messagePayload).catch(() => {});
     }
   }
+}
+
+const CLOZEMASTER_PLAY_URL = /^https:\/\/www\.clozemaster\.com\/l\/([a-z]{3}-[a-z]{3})\/collections\/([^/?#]+)\/play(?:[?#]|$)/i;
+
+/** Only collection play URLs the person actually visited; nothing else from history leaves here. */
+async function findClozemasterCollectionUrls(limit = 10) {
+  const items = await browser.history.search({ text: "clozemaster.com/l/", startTime: 0, maxResults: 1000 });
+  const bySlug = new Map<string, { url: string; languagePair: string; slug: string; title: string; lastVisitTime: number }>();
+  for (const item of items) {
+    const match = item.url?.match(CLOZEMASTER_PLAY_URL);
+    if (!item.url || !match) continue;
+    const slug = decodeURIComponent(match[2]);
+    const lastVisitTime = item.lastVisitTime ?? 0;
+    const existing = bySlug.get(slug);
+    if (existing && existing.lastVisitTime >= lastVisitTime) continue;
+    bySlug.set(slug, { url: item.url, languagePair: match[1].toLowerCase(), slug, title: item.title ?? "", lastVisitTime });
+  }
+  return [...bySlug.values()].sort((first, second) => second.lastVisitTime - first.lastVisitTime).slice(0, limit);
 }
 
 async function handleCheckMandalaStatus(rawUrl: string): Promise<MandalaStatus> {

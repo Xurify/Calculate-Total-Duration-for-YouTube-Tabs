@@ -123,6 +123,8 @@ interface PageState {
   collectionsUrl: string | null;
   /** DashboardV5 keeps collectionsUrl out of its props and loads it from this JSON endpoint. */
   languagePairingUrl: string | null;
+  /** The query DashboardV5 sends with languagePairingUrl, built from its own props. */
+  languagePairingQuery: string;
   isSignedIn: boolean | null;
   isPro: boolean | null;
   dashboardPath: string | null;
@@ -136,6 +138,15 @@ function readPageState(root: ParentNode, pathname: string): PageState {
   const allProps = readReactProps(root);
   const collectionsUrl = propValue(allProps, "collectionsUrl");
   const languagePairingUrl = propValue(allProps, "languagePairingUrl");
+  const query = new URLSearchParams();
+  for (const [prop, param] of [
+    ["includeCefr", "include_cefr"],
+    ["includeDiscover", "include_discover"],
+    ["includeFastTrackV2Collections", "include_fast_track_v2_collections"],
+  ]) {
+    const value = propValue(allProps, prop);
+    if (value !== undefined) query.set(param, String(value));
+  }
   const isSignedIn = propValue(allProps, "isSignedIn");
   const isPro = propValue(allProps, "isPro");
   const webUrl = propValue(allProps, "languagePairingWebUrl");
@@ -146,6 +157,7 @@ function readPageState(root: ParentNode, pathname: string): PageState {
   return {
     collectionsUrl: typeof collectionsUrl === "string" ? collectionsUrl : null,
     languagePairingUrl: typeof languagePairingUrl === "string" ? languagePairingUrl : null,
+    languagePairingQuery: query.toString(),
     isSignedIn: typeof isSignedIn === "boolean" ? isSignedIn : null,
     isPro: typeof isPro === "boolean" ? isPro : null,
     dashboardPath,
@@ -164,7 +176,10 @@ async function fromLanguagePairing(
 ): Promise<{ collectionsUrl: string; isPro: boolean | null } | null> {
   if (state.collectionsUrl) return { collectionsUrl: state.collectionsUrl, isPro: state.isPro };
   if (!state.languagePairingUrl) return null;
-  const response = await fetch(state.languagePairingUrl, { credentials: "same-origin", headers: requestHeaders() }).catch(
+  const url = state.languagePairingQuery
+    ? `${state.languagePairingUrl}${state.languagePairingUrl.includes("?") ? "&" : "?"}${state.languagePairingQuery}`
+    : state.languagePairingUrl;
+  const response = await fetch(url, { credentials: "same-origin", headers: requestHeaders() }).catch(
     () => null
   );
   if (response?.status === 401) {

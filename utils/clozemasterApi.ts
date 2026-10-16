@@ -121,6 +121,8 @@ function propValue(allProps: unknown[], key: string): unknown {
 
 interface PageState {
   collectionsUrl: string | null;
+  /** DashboardV5 keeps collectionsUrl out of its props and loads it from this JSON endpoint. */
+  languagePairingUrl: string | null;
   isSignedIn: boolean | null;
   isPro: boolean | null;
   dashboardPath: string | null;
@@ -133,6 +135,7 @@ function languagePairFromPath(pathname: string): string | null {
 function readPageState(root: ParentNode, pathname: string): PageState {
   const allProps = readReactProps(root);
   const collectionsUrl = propValue(allProps, "collectionsUrl");
+  const languagePairingUrl = propValue(allProps, "languagePairingUrl");
   const isSignedIn = propValue(allProps, "isSignedIn");
   const isPro = propValue(allProps, "isPro");
   const webUrl = propValue(allProps, "languagePairingWebUrl");
@@ -142,6 +145,7 @@ function readPageState(root: ParentNode, pathname: string): PageState {
   else if (pair) dashboardPath = `/l/${pair}`;
   return {
     collectionsUrl: typeof collectionsUrl === "string" ? collectionsUrl : null,
+    languagePairingUrl: typeof languagePairingUrl === "string" ? languagePairingUrl : null,
     isSignedIn: typeof isSignedIn === "boolean" ? isSignedIn : null,
     isPro: typeof isPro === "boolean" ? isPro : null,
     dashboardPath,
@@ -154,13 +158,37 @@ function looksSignedOut(root: Document): boolean {
 
 const SIGN_IN_INSTRUCTION = "Sign in at https://www.clozemaster.com/login, then open your language's dashboard and try again.";
 
+/** The same request DashboardV5 makes on load; its languagePairing carries collectionsUrl. */
+async function fromLanguagePairing(
+  state: PageState
+): Promise<{ collectionsUrl: string; isPro: boolean | null } | null> {
+  if (state.collectionsUrl) return { collectionsUrl: state.collectionsUrl, isPro: state.isPro };
+  if (!state.languagePairingUrl) return null;
+  const response = await fetch(state.languagePairingUrl, { credentials: "same-origin", headers: requestHeaders() }).catch(
+    () => null
+  );
+  if (response?.status === 401) {
+    throw new ClozemasterError("signed_out", "You're not signed in to Clozemaster.", SIGN_IN_INSTRUCTION);
+  }
+  if (!response?.ok) return null;
+  const data = (await response.json().catch(() => null)) as {
+    languagePairing?: { collectionsUrl?: string };
+    user?: { isPro?: boolean };
+  } | null;
+  const collectionsUrl = data?.languagePairing?.collectionsUrl;
+  if (typeof collectionsUrl !== "string") return null;
+  const isPro = data?.user?.isPro;
+  return { collectionsUrl, isPro: typeof isPro === "boolean" ? isPro : state.isPro };
+}
+
 interface VisitedCollectionUrl {
   url: string;
   languagePair: string;
 }
 
 /**
- * Finds the collections endpoint. Settings and play views can lack it, so this falls back to
+ * Finds the collections endpoint: in the page props, or through the languagePairingUrl the
+ * dashboard loads it from. Settings and play views can lack both, so this falls back to
  * pages Clozemaster itself links to (the language dashboard and its collections tab) and to
  * collection play pages from the person's history, fetching each and reading its props.
  * Nothing is navigated to, and only a page that actually carries the endpoint counts.
@@ -170,7 +198,8 @@ async function resolveCollectionsUrl(): Promise<{ collectionsUrl: string; isPro:
   if (here.isSignedIn === false || (here.isSignedIn === null && looksSignedOut(document))) {
     throw new ClozemasterError("signed_out", "You're not signed in to Clozemaster.", SIGN_IN_INSTRUCTION);
   }
-  if (here.collectionsUrl) return { collectionsUrl: here.collectionsUrl, isPro: here.isPro };
+  const fromHere = await fromLanguagePairing(here);
+  if (fromHere) return fromHere;
 
   const candidates: string[] = [];
   if (here.dashboardPath) candidates.push(here.dashboardPath, `${here.dashboardPath}?tab=collections`);
@@ -199,7 +228,8 @@ async function resolveCollectionsUrl(): Promise<{ collectionsUrl: string; isPro:
     if (there.isSignedIn === false) {
       throw new ClozemasterError("signed_out", "You're not signed in to Clozemaster.", SIGN_IN_INSTRUCTION);
     }
-    if (there.collectionsUrl) return { collectionsUrl: there.collectionsUrl, isPro: there.isPro ?? here.isPro };
+    const fromThere = await fromLanguagePairing(there);
+    if (fromThere) return { collectionsUrl: fromThere.collectionsUrl, isPro: fromThere.isPro ?? here.isPro };
   }
 
   const where = here.dashboardPath

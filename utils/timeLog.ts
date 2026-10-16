@@ -405,3 +405,41 @@ export function summarize(entries: readonly TimeEntry[], days = 7, now: number =
     pendingMinutes,
   };
 }
+
+export interface TimeReport {
+  days: number;
+  from: string;
+  to: string;
+  activeMinutes: number;
+  passiveMinutes: number;
+  /** Whole minutes closed in the log that have not reached Mandala yet. */
+  waitingForMandalaMinutes: number;
+  byDay: { date: string; activeMinutes: number; passiveMinutes: number }[];
+  byPillar: { pillar: number; name: string; activeMinutes: number; passiveMinutes: number }[];
+  bySite: { host: string; pillar: number; name: string; activeMinutes: number; passiveMinutes: number; lastAt: string }[];
+}
+
+/** The summary as an agent on the Mandala page reads it: whole minutes, pillar names, no page addresses. */
+export function timeReport(summary: TimeSummary, days: number, pillarName: (pillarIndex: number) => string): TimeReport {
+  const minutes = (seconds: number) => Math.floor(seconds / 60);
+  return {
+    days,
+    from: summary.days[0]?.key ?? "",
+    to: summary.days[summary.days.length - 1]?.key ?? "",
+    activeMinutes: minutes(summary.total.active),
+    passiveMinutes: minutes(summary.total.passive),
+    waitingForMandalaMinutes: summary.pendingMinutes,
+    byDay: summary.days.map((day) => ({ date: day.key, activeMinutes: minutes(day.active), passiveMinutes: minutes(day.passive) })),
+    byPillar: summary.byPillar
+      .map((totals, pillar) => ({ pillar, name: pillarName(pillar), activeMinutes: minutes(totals.active), passiveMinutes: minutes(totals.passive) }))
+      .filter((row) => row.activeMinutes + row.passiveMinutes > 0),
+    bySite: summary.bySite.map((site) => ({
+      host: site.host,
+      pillar: site.pillarIndex,
+      name: pillarName(site.pillarIndex),
+      activeMinutes: minutes(site.active),
+      passiveMinutes: minutes(site.passive),
+      lastAt: new Date(site.lastAt).toISOString(),
+    })),
+  };
+}

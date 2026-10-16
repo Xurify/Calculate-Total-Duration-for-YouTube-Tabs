@@ -122,7 +122,7 @@ export async function requestApproval(request: ApprovalRequest): Promise<boolean
  */
 export async function ensureReadGrant(
   sender: Sender,
-  scope: "open-tabs" | "reading-list" | "clozemaster-collections",
+  scope: "open-tabs" | "reading-list" | "clozemaster-collections" | "time-report",
   request: ApprovalRequest
 ): Promise<void> {
   if (isExtensionPageSender(sender)) return;
@@ -132,7 +132,12 @@ export async function ensureReadGrant(
   if (readGrants.has(grantKey)) return;
 
   if (!(await requestApproval(request))) {
-    const shared = { "open-tabs": "open tabs", "reading-list": "the Reading List", "clozemaster-collections": "Clozemaster collections" };
+    const shared = {
+      "open-tabs": "open tabs",
+      "reading-list": "the Reading List",
+      "clozemaster-collections": "Clozemaster collections",
+      "time-report": "where their time went",
+    };
     throw new Error(`The user declined to share ${shared[scope]} with this page.`);
   }
   readGrants.add(grantKey);

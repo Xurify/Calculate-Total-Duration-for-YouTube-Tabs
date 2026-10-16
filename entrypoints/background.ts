@@ -42,6 +42,7 @@ import {
   removeSiteRule,
   saveTimeTrackingPrefs,
   summarize,
+  timeReport,
   upsertSiteRule,
   wholeMinutes,
   type SiteRule,
@@ -137,6 +138,31 @@ export default defineBackground(() => {
       void Promise.all([siteTracker.entries(), loadTimeTrackingPrefs(), loadSiteRules(), loadCachedMandalaSummary(), getLiveTabSections()])
         .then(([entries, prefs, rules, mandala, piles]) => sendResponse({ summary: summarize(entries, days), prefs, rules, mandala, piles }))
         .catch((error) => sendResponse({ errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "get-time-report") {
+      const payload = (message.payload ?? {}) as { days?: number };
+      const days = payload.days === 30 ? 30 : 7;
+      void ensureReadGrant(
+        sender,
+        "time-report",
+        buildApprovalRequest(sender, {
+          title: "Share where your time went?",
+          summary:
+            "This page wants the minutes you spent on pages that count for a Mandala pillar, by day, pillar and site, for the last 30 days. No page addresses, only sites.",
+          confirmLabel: "Share time",
+          destructive: false,
+        })
+      )
+        .then(() => Promise.all([siteTracker.entries(), loadCachedMandalaSummary()]))
+        .then(([entries, mandala]) =>
+          sendResponse({
+            success: true,
+            report: timeReport(summarize(entries, days), days, (pillarIndex) => mandala?.pillars.find((pillar) => pillar.index === pillarIndex)?.title || `Pillar ${pillarIndex + 1}`),
+          })
+        )
+        .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
       return true;
     }
 

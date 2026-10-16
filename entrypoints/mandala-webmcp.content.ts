@@ -129,7 +129,28 @@ export default defineContentScript({
       },
     };
 
+    const getTimeReportTool: WebMcpToolDefinition<{ days?: number }, unknown> = {
+      name: "harvester_time_report",
+      description:
+        "Where the person's time on pages went, as the Study Harvester extension measured it: minutes by day, by Mandala pillar and by site, for the last 7 or 30 days. Active minutes were in front of the page; passive minutes were a page making sound in the background, or while the person was away. Read it beside progress to see whether a pillar's time was real attention. The first call from this page opens an approval window, so the user must allow it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          days: { type: "integer", enum: [7, 30], description: "7 (this week, the default) or 30." },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+        untrustedContentHint: true,
+      },
+      execute: async (inputArguments) => {
+        const days = inputArguments?.days === 30 ? 30 : 7;
+        return await sendBridgeRequest("get-time-report", { days });
+      },
+    };
+
     await Promise.all([
+      registerWebMcpTool(getTimeReportTool, abortController.signal),
       registerWebMcpTool(getOpenTabsCatalogTool, abortController.signal),
       registerWebMcpTool(stageFocusedStudyQueueTool, abortController.signal),
       registerWebMcpTool(getReadingListCatalogTool, abortController.signal),

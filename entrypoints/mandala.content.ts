@@ -385,6 +385,7 @@ export default defineContentScript({
         browser.runtime.sendMessage({ action: "stage-focused-study-queue", payload }),
       "get-reading-list-catalog": () =>
         browser.runtime.sendMessage({ action: "get-reading-list-catalog" }),
+      "get-time-report": (payload) => browser.runtime.sendMessage({ action: "get-time-report", payload }),
       "shelve-and-clear-reading-item": (payload) =>
         browser.runtime.sendMessage({
           action: "shelve-and-clear-reading-item",

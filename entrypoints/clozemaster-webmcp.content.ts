@@ -114,7 +114,7 @@ export default defineContentScript({
     > = {
       name: "get_clozemaster_session_summary",
       description:
-        "Extracts the current Clozemaster study session context, including language pair, reviews ready count, active sentence, and the sentences the user captured from YouTube with Alt+C (capturedCards), which can be sent to add_sentences_to_clozemaster_collection.",
+        "Extracts the current Clozemaster study session context, including language pair, reviews ready count, active sentence, and the sentences the user captured from YouTube with Alt+C (capturedCards). Each captured card has its language code and a source note; send only the ones in the language open in Clozemaster to add_sentences_to_clozemaster_collection, and write a translation for any card whose translation is empty.",
       annotations: {
         readOnlyHint: true,
         untrustedContentHint: true,

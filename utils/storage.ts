@@ -11,8 +11,11 @@ export interface StagedClozeCard {
   id: string;
   sentence: string;
   targetWord: string;
+  /** Empty when the user left it for an agent to fill in. */
   translation: string;
   hint?: string;
+  notes?: string;
+  language?: string | null;
   videoId: string | null;
   videoTitle: string;
   timestampSeconds: number;
@@ -22,6 +25,8 @@ export interface StagedClozeCard {
 export interface CachedMandalaPillar {
   index: number;
   title: string;
+  /** False when the pillar is still blank in Mandala and `title` is a placeholder. */
+  named?: boolean;
   actionCount: number;
 }
 
@@ -31,6 +36,7 @@ export interface CachedMandalaShelfLink {
   title: string;
   url: string;
   kind?: string;
+  action?: string;
 }
 
 export interface CachedMandalaSummary {
@@ -41,13 +47,53 @@ export interface CachedMandalaSummary {
   lastUpdatedAt: number;
 }
 
+/** Logged against the shelf link for `url` once a Mandala tab is open to resolve its action. */
 export interface PendingMandalaTimeLog {
   id: string;
-  actionId?: string;
+  url?: string;
   minutes: number;
-  linkId?: string;
   videoTitle: string;
   timestamp: number;
+}
+
+export interface MandalaStatus {
+  connected: boolean;
+  cached: boolean;
+  activeChartTitle?: string;
+  /** Pillars the person has named, or all eight when none are named yet. */
+  pillars: CachedMandalaPillar[];
+  /** Every pillar whose shelf already holds this video. */
+  savedPillarIndexes: number[];
+}
+
+export function shelfLinksForVideo(
+  shelfLinks: CachedMandalaShelfLink[],
+  rawUrl: string
+): CachedMandalaShelfLink[] {
+  const normalizedTargetUrl = normalizeYoutubeUrl(rawUrl);
+  const targetVideoId = getVideoIdFromUrl(normalizedTargetUrl);
+  return shelfLinks.filter((link) => {
+    const normalizedLinkUrl = normalizeYoutubeUrl(link.url);
+    if (normalizedLinkUrl === normalizedTargetUrl) return true;
+    const linkVideoId = getVideoIdFromUrl(normalizedLinkUrl);
+    return Boolean(targetVideoId && linkVideoId && targetVideoId === linkVideoId);
+  });
+}
+
+export function mandalaStatusFor(
+  summary: CachedMandalaSummary,
+  rawUrl: string,
+  source: { connected: boolean; cached: boolean }
+): MandalaStatus {
+  const namedPillars = summary.pillars.filter((pillar) => pillar.named);
+  return {
+    ...source,
+    activeChartTitle: summary.activeChartTitle,
+    pillars: namedPillars.length > 0 ? namedPillars : summary.pillars,
+    savedPillarIndexes: [...new Set(shelfLinksForVideo(summary.shelfLinks, rawUrl).map((link) => link.pillarIndex))].sort(
+      (first, second) => first - second
+    ),
+  };
 }
 
 export interface PendingMandalaShelfLink {

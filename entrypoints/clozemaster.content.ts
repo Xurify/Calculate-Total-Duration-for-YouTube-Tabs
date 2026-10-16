@@ -10,13 +10,15 @@ interface StagedClozeCollection {
     targetWord: string;
     translation: string;
     hint?: string;
+    notes?: string;
+    language?: string | null;
   }>;
   tsvContent: string;
 }
 
 function convertCardsToTsv(cards: StagedClozeCard[]): string {
   const lines = cards
-    .filter((card) => Boolean(card && card.sentence && card.targetWord && card.translation))
+    .filter((card) => Boolean(card && card.sentence && card.targetWord))
     .map((card) => {
       const sanitizedSentence = (card.sentence || "").replace(/\r?\n|\r|\t/g, " ").trim();
       const sanitizedTranslation = (card.translation || "").replace(/\r?\n|\r|\t/g, " ").trim();
@@ -48,6 +50,8 @@ function syncCardsToClozemasterLocalStorage(cards: StagedClozeCard[]): void {
       targetWord: card.targetWord,
       translation: card.translation,
       hint: card.hint,
+      notes: card.notes,
+      language: card.language,
     }));
 
     const newCollection: StagedClozeCollection = {

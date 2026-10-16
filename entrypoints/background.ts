@@ -3,6 +3,10 @@ import {
   normalizeYoutubeUrl,
   saveSession,
   loadCachedMandalaSummary,
+  saveCachedMandalaSummary,
+  mandalaStatusFor,
+  shelfLinksForVideo,
+  type MandalaStatus,
   saveStagedClozeCard,
   loadStagedClozeCards,
   clearStagedClozeCards,
@@ -269,14 +273,7 @@ export default defineBackground(() => {
     }
 
     if (message.action === "log-mandala-time") {
-      void handleLogMandalaTime(
-        message.payload as {
-          actionId?: string;
-          minutes: number;
-          linkId?: string;
-          videoTitle: string;
-        }
-      )
+      void handleLogMandalaTime(message.payload as { url: string; minutes: number; videoTitle: string })
         .then((result) => sendResponse(result))
         .catch((error) =>
           sendResponse({
@@ -363,14 +360,14 @@ async function broadcastToClozemasterTabs(messagePayload: unknown): Promise<void
   }
 }
 
-async function handleCheckMandalaStatus(rawUrl: string) {
+async function handleCheckMandalaStatus(rawUrl: string): Promise<MandalaStatus> {
   const mandalaTab = await findMandalaTab();
   if (mandalaTab && mandalaTab.id !== undefined) {
     try {
-      const tabResponse = await browser.tabs.sendMessage(mandalaTab.id, {
+      const tabResponse = (await browser.tabs.sendMessage(mandalaTab.id, {
         action: "query-mandala-shelves",
         url: rawUrl,
-      });
+      })) as MandalaStatus | undefined;
       if (tabResponse && typeof tabResponse === "object") {
         return tabResponse;
       }
@@ -381,41 +378,9 @@ async function handleCheckMandalaStatus(rawUrl: string) {
 
   const cachedSummary = await loadCachedMandalaSummary();
   if (!cachedSummary) {
-    return {
-      connected: false,
-      cached: false,
-      pillars: [],
-    };
+    return { connected: false, cached: false, pillars: [], savedPillarIndexes: [] };
   }
-
-  const normalizedTargetUrl = normalizeYoutubeUrl(rawUrl);
-  const targetVideoId = getVideoIdFromUrl(normalizedTargetUrl);
-
-  const matchedLink = cachedSummary.shelfLinks.find((link) => {
-    const linkNormalized = normalizeYoutubeUrl(link.url);
-    if (linkNormalized === normalizedTargetUrl) return true;
-    const linkVideoId = getVideoIdFromUrl(linkNormalized);
-    return Boolean(targetVideoId && linkVideoId && targetVideoId === linkVideoId);
-  });
-
-  const matchedPillar = matchedLink
-    ? cachedSummary.pillars.find((pillar) => pillar.index === matchedLink.pillarIndex)
-    : undefined;
-
-  return {
-    connected: false,
-    cached: true,
-    activeChartTitle: cachedSummary.activeChartTitle,
-    matchedShelfItem: matchedLink
-      ? {
-          pillarIndex: matchedLink.pillarIndex,
-          pillarTitle: matchedPillar?.title || `Pillar ${matchedLink.pillarIndex + 1}`,
-          linkId: matchedLink.id,
-          toolTitle: matchedLink.title,
-        }
-      : undefined,
-    pillars: cachedSummary.pillars,
-  };
+  return mandalaStatusFor(cachedSummary, rawUrl, { connected: false, cached: true });
 }
 
 async function handleSaveMandalaShelfLink(payload: {
@@ -427,11 +392,12 @@ async function handleSaveMandalaShelfLink(payload: {
   const mandalaTab = await findMandalaTab();
   if (mandalaTab && mandalaTab.id !== undefined) {
     try {
-      const tabResponse = await browser.tabs.sendMessage(mandalaTab.id, {
+      const tabResponse = (await browser.tabs.sendMessage(mandalaTab.id, {
         action: "add-shelf-link",
         ...payload,
-      });
-      return { success: true, queued: false, tabResponse };
+      })) as { success?: boolean; errorMessage?: string } | undefined;
+      if (tabResponse?.success) return { success: true, queued: false };
+      if (tabResponse) return { success: false, errorMessage: tabResponse.errorMessage };
     } catch {
       // Tab communication failed; fall through to queued write
     }
@@ -451,35 +417,46 @@ async function handleSaveMandalaShelfLink(payload: {
     [PENDING_MANDALA_SHELF_LINKS_KEY]: [...existingQueue, newEntry],
   });
 
+  // Until the Mandala tab flushes the queue, the cache is what the player reads its shelves from.
+  const cachedSummary = await loadCachedMandalaSummary();
+  if (cachedSummary) {
+    await saveCachedMandalaSummary({
+      ...cachedSummary,
+      shelfLinks: [
+        ...cachedSummary.shelfLinks,
+        { id: newEntry.id, pillarIndex: payload.pillarIndex, title: payload.title, url: payload.url, kind: payload.kind },
+      ],
+    });
+  }
+
   return { success: true, queued: true };
 }
 
-async function handleLogMandalaTime(payload: {
-  actionId?: string;
-  minutes: number;
-  linkId?: string;
-  videoTitle: string;
-}) {
+async function handleLogMandalaTime(payload: { url: string; minutes: number; videoTitle: string }) {
   const mandalaTab = await findMandalaTab();
   if (mandalaTab && mandalaTab.id !== undefined) {
     try {
-      const tabResponse = await browser.tabs.sendMessage(mandalaTab.id, {
+      const tabResponse = (await browser.tabs.sendMessage(mandalaTab.id, {
         action: "log-time",
         ...payload,
-      });
-      return { success: true, queued: false, tabResponse };
+      })) as { success?: boolean; errorMessage?: string; actionText?: string; pillarTitle?: string } | undefined;
+      if (tabResponse) return { ...tabResponse, success: Boolean(tabResponse.success), queued: false, minutes: payload.minutes };
     } catch {
       // Tab communication failed; fall through to queued write
     }
+  }
+
+  const cachedSummary = await loadCachedMandalaSummary();
+  if (cachedSummary && shelfLinksForVideo(cachedSummary.shelfLinks, payload.url).length === 0) {
+    return { success: false, errorMessage: "Save this video to a pillar first" };
   }
 
   const pendingData = await browser.storage.local.get(PENDING_MANDALA_LOGS_KEY);
   const existingQueue = (pendingData[PENDING_MANDALA_LOGS_KEY] as PendingMandalaTimeLog[]) || [];
   const newEntry: PendingMandalaTimeLog = {
     id: crypto.randomUUID(),
-    actionId: payload.actionId,
+    url: payload.url,
     minutes: payload.minutes,
-    linkId: payload.linkId,
     videoTitle: payload.videoTitle,
     timestamp: Date.now(),
   };

@@ -1,6 +1,6 @@
 /**
- * YouTube WebMCP Content Script (runs in MAIN world).
- * Registers tools on document.modelContext for browser AI agents.
+ * YouTube MAIN-world content script. Serves transcripts to the isolated content script
+ * and, where WebMCP is available, registers tools on document.modelContext for AI agents.
  */
 import {
   isWebMcpSupported,
@@ -10,37 +10,18 @@ import {
 import {
   detectLanguageFromPlayerResponse,
   languageTextFromPlayerResponse,
-  normalizeLanguageCode,
   type DetectedLanguage,
 } from "../utils/captionLanguage";
 import { sendBridgeRequest } from "../utils/webmcpBridge";
-
-interface PlayerCaptionTrack {
-  baseUrl: string;
-  name?: { simpleText?: string; runs?: Array<{ text: string }> };
-  vssId?: string;
-  languageCode: string;
-  kind?: string;
-  isTranslatable?: boolean;
-}
-
-interface PlayerResponseCaptionContainer {
-  captionTracks?: PlayerCaptionTrack[];
-}
-
-interface PlayerResponseData {
-  videoDetails?: {
-    videoId?: string;
-    title?: string;
-    author?: string;
-    isLive?: boolean;
-    lengthSeconds?: string;
-    shortDescription?: string;
-  };
-  captions?: {
-    playerCaptionsTracklistRenderer?: PlayerResponseCaptionContainer;
-  };
-}
+import { buildSentences, type TranscriptSegment } from "../utils/transcript";
+import {
+  getPlayerResponse as getPlayerResponseFromWindow,
+  getVideoIdFromLocation as getVideoIdFromCurrentLocation,
+  loadTranscript,
+  parseDurationText,
+  serveTranscriptRequests,
+  type PlayerResponseData,
+} from "../utils/youtubeTranscript";
 
 function showHarvesterToast(messageText: string) {
   const existingToast = document.getElementById("webmcp-harvester-toast");
@@ -105,259 +86,13 @@ function getMoviePlayerElement(): MoviePlayerElement | null {
   return document.getElementById("movie_player") as MoviePlayerElement | null;
 }
 
-function getVideoIdFromCurrentLocation(): string | null {
-  try {
-    const pathname = window.location.pathname;
-    const search = window.location.search;
-    if (pathname.startsWith("/shorts/")) {
-      const match = pathname.match(/\/shorts\/([^/?]+)/);
-      return match ? match[1] : null;
-    }
-    if (pathname === "/watch" && search) {
-      const searchParameters = new URLSearchParams(search);
-      return searchParameters.get("v");
-    }
-  } catch {
-    // Ignore URL parse failures
-  }
-  return null;
-}
-
-function getPlayerResponseFromWindow(expectedVideoId?: string | null): PlayerResponseData | null {
-  const moviePlayer = getMoviePlayerElement();
-  if (typeof moviePlayer?.getPlayerResponse === "function") {
-    try {
-      const response = moviePlayer.getPlayerResponse();
-      if (response?.videoDetails) {
-        if (!expectedVideoId || response.videoDetails.videoId === expectedVideoId) {
-          return response;
-        }
-      }
-    } catch {
-      // Continue fallback search
-    }
-  }
-
-  const windowWithPlayerResponse = window as unknown as {
-    ytInitialPlayerResponse?: PlayerResponseData;
-  };
-  if (windowWithPlayerResponse.ytInitialPlayerResponse?.videoDetails) {
-    if (
-      !expectedVideoId ||
-      windowWithPlayerResponse.ytInitialPlayerResponse.videoDetails.videoId === expectedVideoId
-    ) {
-      return windowWithPlayerResponse.ytInitialPlayerResponse;
-    }
-  }
-
-  for (const scriptElement of document.querySelectorAll("script:not([src])")) {
-    const scriptContent = scriptElement.textContent;
-    if (!scriptContent || !scriptContent.includes("ytInitialPlayerResponse")) {
-      continue;
-    }
-    const match =
-      scriptContent.match(/var ytInitialPlayerResponse\s*=\s*({.+?});/s) ||
-      scriptContent.match(/window\["ytInitialPlayerResponse"\]\s*=\s*({.+?});/s);
-    if (match) {
-      try {
-        const parsedResponse = JSON.parse(match[1]) as PlayerResponseData;
-        if (!expectedVideoId || parsedResponse.videoDetails?.videoId === expectedVideoId) {
-          return parsedResponse;
-        }
-      } catch {
-        // Continue searching
-      }
-    }
-  }
-
-  return null;
-}
-
-function parseDurationText(text: string): number {
-  const parts = text.trim().split(":").map((part) => parseInt(part, 10) || 0);
-  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  if (parts.length === 2) return parts[0] * 60 + parts[1];
-  if (parts.length === 1) return parts[0];
-  return 0;
-}
-
-interface TranscriptSegment {
-  startSeconds: number;
-  durationSeconds: number;
-  text: string;
-}
-
-interface Json3CaptionPayload {
-  events?: Array<{
-    tStartMs?: number;
-    dDurationMs?: number;
-    segs?: Array<{
-      utf8?: string;
-    }>;
-  }>;
-}
-
-function decodeHtmlEntities(encodedText: string): string {
-  return encodedText
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_fullMatch, charCodeString) => String.fromCharCode(Number(charCodeString)))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_fullMatch, hexCodeString) =>
-      String.fromCharCode(parseInt(hexCodeString, 16))
-    );
-}
-
-async function fetchTranscriptSegments(
-  baseUrl: string
-): Promise<TranscriptSegment[]> {
-  const segments: TranscriptSegment[] = [];
-
-  try {
-    const jsonResponse = await fetch(`${baseUrl}&fmt=json3`);
-    if (jsonResponse.ok) {
-      const jsonData = (await jsonResponse.json()) as Json3CaptionPayload;
-      if (Array.isArray(jsonData.events)) {
-        for (const captionEvent of jsonData.events) {
-          const startSeconds = (captionEvent.tStartMs ?? 0) / 1000;
-          const durationSeconds = (captionEvent.dDurationMs ?? 0) / 1000;
-          const text = (captionEvent.segs ?? [])
-            .map((segment) => segment.utf8 ?? "")
-            .join("")
-            .trim();
-          if (text) {
-            segments.push({ startSeconds, durationSeconds, text });
-          }
-        }
-        if (segments.length > 0) {
-          return segments;
-        }
-      }
-    }
-  } catch {
-    // Fall back to XML parsing
-  }
-
-  try {
-    const xmlResponse = await fetch(baseUrl);
-    const xmlText = await xmlResponse.text();
-    const textTagRegex = /<text\s+start="([\d.]+)"(?:\s+dur="([\d.]+)")?[^>]*>([\s\S]*?)<\/text>/gi;
-    let match: RegExpExecArray | null;
-    while ((match = textTagRegex.exec(xmlText)) !== null) {
-      const startSeconds = parseFloat(match[1]) || 0;
-      const durationSeconds = match[2] ? parseFloat(match[2]) || 0 : 0;
-      const rawText = match[3].replace(/<[^>]+>/g, "").trim();
-      const text = decodeHtmlEntities(rawText);
-      if (text) {
-        segments.push({ startSeconds, durationSeconds, text });
-      }
-    }
-  } catch (error) {
-    console.warn("[WebMCP] Failed to fetch or parse transcript XML:", error);
-  }
-
-  return segments;
-}
-
-function readYtcfg(key: string): unknown {
-  const ytcfg = (window as unknown as { ytcfg?: { get?: (name: string) => unknown } }).ytcfg;
-  try {
-    return ytcfg?.get?.(key);
-  } catch {
-    return undefined;
-  }
-}
-
-function protobufVarint(value: number): number[] {
-  const bytes: number[] = [];
-  while (value > 127) {
-    bytes.push((value & 127) | 128);
-    value >>>= 7;
-  }
-  bytes.push(value);
-  return bytes;
-}
-
-function protobufBytesField(fieldNumber: number, bytes: number[]): number[] {
-  return [...protobufVarint((fieldNumber << 3) | 2), ...protobufVarint(bytes.length), ...bytes];
-}
-
-/**
- * Rebuilds the params the "Show transcript" button sends to get_panel:
- * field 149 { 1: videoId, 3: 1, 6: caption vssId such as ".et" or "a.et" }.
- * Captured from YouTube's own request in October 2026.
- */
-function buildTranscriptPanelParams(videoId: string, vssId?: string): string {
-  const encoder = new TextEncoder();
-  let inner = [...protobufBytesField(1, [...encoder.encode(videoId)]), 0x18, 1];
-  if (vssId) inner = [...inner, ...protobufBytesField(6, [...encoder.encode(vssId)])];
-  return btoa(String.fromCharCode(...protobufBytesField(149, inner)));
-}
-
-function collectTranscriptSegmentModels(node: unknown, found: Array<{ simpleText?: string; timestamp?: string }>) {
-  if (!node || typeof node !== "object") return;
-  if (Array.isArray(node)) {
-    for (const child of node) collectTranscriptSegmentModels(child, found);
-    return;
-  }
-  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
-    if (key === "transcriptSegmentViewModel" && value && typeof value === "object") {
-      found.push(value as { simpleText?: string; timestamp?: string });
-    } else {
-      collectTranscriptSegmentModels(value, found);
-    }
-  }
-}
-
-/** Same request the "Show transcript" panel makes, so the text is the track itself, never a translation. */
-async function fetchPanelTranscript(videoId: string, vssId?: string): Promise<TranscriptSegment[]> {
-  const context = readYtcfg("INNERTUBE_CONTEXT");
-  if (!context) return [];
-
-  try {
-    const response = await fetch("/youtubei/v1/get_panel?prettyPrint=false", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Youtube-Client-Name": String(readYtcfg("INNERTUBE_CONTEXT_CLIENT_NAME") ?? "1"),
-        "X-Youtube-Client-Version": String(readYtcfg("INNERTUBE_CLIENT_VERSION") ?? ""),
-      },
-      body: JSON.stringify({
-        context,
-        panelId: "PAmodern_transcript_view",
-        params: buildTranscriptPanelParams(videoId, vssId),
-      }),
-    });
-    if (!response.ok) return [];
-
-    const models: Array<{ simpleText?: string; timestamp?: string }> = [];
-    collectTranscriptSegmentModels(await response.json(), models);
-    const segments = models
-      .map((model) => ({
-        startSeconds: parseDurationText(model.timestamp ?? "0"),
-        durationSeconds: 0,
-        text: (model.simpleText ?? "").trim(),
-      }))
-      .filter((segment) => segment.text);
-    segments.forEach((segment, index) => {
-      const next = segments[index + 1];
-      if (next) segment.durationSeconds = Math.max(0, next.startSeconds - segment.startSeconds);
-    });
-    return segments;
-  } catch {
-    return [];
-  }
-}
-
 export default defineContentScript({
   matches: ["*://*.youtube.com/*"],
   world: "MAIN",
   runAt: "document_idle",
   async main() {
+    serveTranscriptRequests();
+
     if (!isWebMcpSupported()) {
       return;
     }
@@ -458,12 +193,12 @@ export default defineContentScript({
     };
 
     const getVideoTranscriptTool: WebMcpToolDefinition<
-      { targetLanguageCode?: string; startSeconds?: number; endSeconds?: number },
+      { targetLanguageCode?: string; startSeconds?: number; endSeconds?: number; unit?: "sentence" | "caption" },
       unknown
     > = {
       name: "get_video_transcript",
       description:
-        "Extracts timestamped transcript segments for the current YouTube video in its original language, from the same source as YouTube's \"Show transcript\" panel (never auto-translated). Useful for language study, generating cloze review cards, and active recall exercises.",
+        "Extracts the timestamped transcript of the current YouTube video in its original language, from the same source as YouTube's \"Show transcript\" panel (never auto-translated). By default segments are whole sentences, rebuilt from the caption lines, which is what cloze cards and active recall need; pass unit \"caption\" for the raw caption lines.",
       inputSchema: {
         type: "object",
         properties: {
@@ -478,6 +213,11 @@ export default defineContentScript({
           endSeconds: {
             type: "number",
             description: "Optional end time in seconds to restrict transcript extract",
+          },
+          unit: {
+            type: "string",
+            enum: ["sentence", "caption"],
+            description: "\"sentence\" (default) for whole sentences, \"caption\" for the caption lines as YouTube shows them",
           },
         },
       },
@@ -501,58 +241,23 @@ export default defineContentScript({
           };
         }
 
-        const requestedCode = inputArguments.targetLanguageCode
-          ? normalizeLanguageCode(inputArguments.targetLanguageCode)
-          : null;
-        const requestedTrack = requestedCode
-          ? captionTracks.find((track) => normalizeLanguageCode(track.languageCode) === requestedCode)
-          : undefined;
-        const spokenCode = detectLanguageFromPlayerResponse(playerResponse).language;
+        const { track, source, segments: captionSegments } = await loadTranscript(
+          videoId,
+          playerResponse,
+          inputArguments.targetLanguageCode,
+          { allowOpeningPanel: true }
+        );
 
-        const spokenTracks = spokenCode
-          ? captionTracks.filter(
-              (track) => normalizeLanguageCode(track.languageCode) === normalizeLanguageCode(spokenCode)
-            )
-          : [];
-        const selectedTrack: PlayerCaptionTrack | undefined =
-          requestedTrack ??
-          spokenTracks.find((track) => track.kind !== "asr") ??
-          spokenTracks[0] ??
-          captionTracks.find((track) => track.kind !== "asr") ??
-          captionTracks[0];
-        let segmentsToFilter: TranscriptSegment[] = [];
-        let source: "transcript-panel" | "caption-track" | "transcript-dom" = "transcript-panel";
-
-        if (videoId && selectedTrack) {
-          segmentsToFilter = await fetchPanelTranscript(videoId, selectedTrack.vssId);
-        }
-
-        if (segmentsToFilter.length === 0 && selectedTrack) {
-          source = "caption-track";
-          segmentsToFilter = await fetchTranscriptSegments(selectedTrack.baseUrl);
-        }
-
-        if (segmentsToFilter.length === 0) {
-          source = "transcript-dom";
-          const domSegmentElements = document.querySelectorAll(
-            "ytd-transcript-segment-renderer, transcript-segment-view-model"
-          );
-          const domSegments: TranscriptSegment[] = [];
-          domSegmentElements.forEach((element) => {
-            const timestampText =
-              element.querySelector(".segment-timestamp, .ytwTranscriptSegmentViewModelTimestamp")
-                ?.textContent?.trim() || "";
-            const segmentText =
-              element.querySelector(".segment-text, .ytAttributedStringHost")?.textContent?.trim() || "";
-            if (segmentText) {
-              domSegments.push({
-                startSeconds: parseDurationText(timestampText),
-                durationSeconds: 0,
-                text: segmentText,
-              });
-            }
-          });
-          segmentsToFilter = domSegments;
+        let punctuated: boolean | undefined;
+        let segmentsToFilter: TranscriptSegment[] = captionSegments;
+        if (inputArguments.unit !== "caption") {
+          const built = buildSentences(captionSegments);
+          punctuated = built.punctuated;
+          segmentsToFilter = built.sentences.map((sentence) => ({
+            startSeconds: Math.round(sentence.startSeconds * 10) / 10,
+            durationSeconds: Math.round((sentence.endSeconds - sentence.startSeconds) * 10) / 10,
+            text: sentence.text,
+          }));
         }
 
         const filteredSegments = segmentsToFilter.filter((segment) => {
@@ -586,10 +291,14 @@ export default defineContentScript({
         return {
           videoId,
           available: true,
-          languageCode: selectedTrack?.languageCode ?? null,
-          languageName: selectedTrack?.name?.simpleText ?? selectedTrack?.languageCode ?? null,
-          isAutoGenerated: selectedTrack?.kind === "asr",
+          languageCode: track?.languageCode ?? null,
+          languageName: track?.name?.simpleText ?? track?.languageCode ?? null,
+          isAutoGenerated: track?.kind === "asr",
           source,
+          unit: inputArguments.unit === "caption" ? "caption" : "sentence",
+          ...(punctuated === false
+            ? { note: "These captions have no punctuation, so sentence boundaries are approximate." }
+            : {}),
           segmentsCount: filteredSegments.length,
           segments: filteredSegments,
           fullText,

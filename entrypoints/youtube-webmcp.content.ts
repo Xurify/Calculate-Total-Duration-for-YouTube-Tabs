@@ -602,7 +602,7 @@ export default defineContentScript({
     const clozemasterGetStagedCardsTool: WebMcpToolDefinition<{ language?: string }, unknown> = {
       name: "clozemaster_get_staged_cards",
       description:
-        "Returns the sentences the user captured from YouTube videos with Alt+C and has not yet sent to Clozemaster. Each card has an id, the sentence with its cloze word in {{ }}, a translation (empty when the user left it for you to write), the language code and the video it came from. Pass language to keep only one language. Send them with clozemaster_add_sentences, then pass their ids to clozemaster_clear_staged_cards. The first call from this page asks the user to allow it.",
+        "Returns the sentences the user captured from YouTube videos with the Cloze button and has not yet sent to Clozemaster. Each card has an id, the sentence with its cloze word in {{ }}, a translation (empty when the user left it for you to write), the language code and the video it came from. Pass language to keep only one language. Send them with clozemaster_add_sentences, then pass their ids to clozemaster_clear_staged_cards. The first call from this page asks the user to allow it.",
       inputSchema: {
         type: "object",
         properties: {
@@ -646,7 +646,7 @@ export default defineContentScript({
     const clozemasterClearStagedCardsTool: WebMcpToolDefinition<ClearStagedCardsInput, unknown> = {
       name: "clozemaster_clear_staged_cards",
       description:
-        "Removes captured sentences from the Alt+C queue after clozemaster_add_sentences has added them. Pass the ids from clozemaster_get_staged_cards; with no ids the whole queue is cleared. The user must approve this in a separate window before anything is removed.",
+        "Removes captured sentences from the capture queue after clozemaster_add_sentences has added them. Pass the ids from clozemaster_get_staged_cards; with no ids the whole queue is cleared. The user must approve this in a separate window before anything is removed.",
       inputSchema: CLEAR_STAGED_CARDS_INPUT_SCHEMA,
       annotations: { readOnlyHint: false, destructiveHint: true },
       execute: (inputArguments) => sendBridgeRequest("clear-staged-cloze-cards", { ids: inputArguments.ids }),

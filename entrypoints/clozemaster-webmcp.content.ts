@@ -123,7 +123,7 @@ export default defineContentScript({
     > = {
       name: "clozemaster_get_session",
       description:
-        "Extracts the current Clozemaster study session context, including language pair, reviews ready count, active sentence, and the sentences the user captured from YouTube with Alt+C (capturedCards). Each captured card has an id, its language code and a source note; send only the ones in the language open in Clozemaster to clozemaster_add_sentences, and write a translation for any card whose translation is empty. Once they are added, pass their ids to clozemaster_clear_staged_cards so they are not offered again.",
+        "Extracts the current Clozemaster study session context, including language pair, reviews ready count, active sentence, and the sentences the user captured from YouTube with the Cloze button (capturedCards). Each captured card has an id, its language code and a source note; send only the ones in the language open in Clozemaster to clozemaster_add_sentences, and write a translation for any card whose translation is empty. Once they are added, pass their ids to clozemaster_clear_staged_cards so they are not offered again.",
       annotations: {
         readOnlyHint: true,
         untrustedContentHint: true,
@@ -190,7 +190,7 @@ export default defineContentScript({
     const clearStagedCardsTool: WebMcpToolDefinition<ClearStagedCardsInput, unknown> = {
       name: "clozemaster_clear_staged_cards",
       description:
-        "Removes sentences from the queue the user captured on YouTube with Alt+C, after clozemaster_add_sentences has added them. Pass the ids from capturedCards in clozemaster_get_session; with no ids the whole queue is cleared. The user must approve this in a separate window before anything is removed.",
+        "Removes sentences from the queue the user captured on YouTube with the Cloze button, after clozemaster_add_sentences has added them. Pass the ids from capturedCards in clozemaster_get_session; with no ids the whole queue is cleared. The user must approve this in a separate window before anything is removed.",
       inputSchema: CLEAR_STAGED_CARDS_INPUT_SCHEMA,
       annotations: { readOnlyHint: false, destructiveHint: true },
       execute: (inputArguments) => sendBridgeRequest("clear-staged-cloze-cards", { ids: inputArguments.ids }),

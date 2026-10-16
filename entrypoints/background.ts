@@ -440,7 +440,7 @@ export default defineBackground(() => {
         buildApprovalRequest(sender, {
           title: "Share your captured sentences?",
           summary:
-            "This page wants the sentences you captured from YouTube with Alt+C, with their translations and notes.",
+            "This page wants the sentences you captured from YouTube with the Cloze button, with their translations and notes.",
           confirmLabel: "Share sentences",
           destructive: false,
         })
@@ -535,7 +535,7 @@ async function clearStagedCards(rawIds: unknown, sender: Browser.runtime.Message
       buildApprovalRequest(sender, {
         title: `Remove ${targetCards.length} captured ${targetCards.length === 1 ? "sentence" : "sentences"}?`,
         summary:
-          "This page wants to remove these sentences from the queue you captured with Alt+C. Do this once they are in Clozemaster; they cannot be brought back.",
+          "This page wants to remove these sentences from the queue you captured with the Cloze button. Do this once they are in Clozemaster; they cannot be brought back.",
         items: targetCards.map((card) => card.sentence),
         confirmLabel: "Remove sentences",
         destructive: true,

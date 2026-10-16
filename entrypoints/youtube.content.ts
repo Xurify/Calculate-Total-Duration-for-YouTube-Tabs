@@ -1123,8 +1123,8 @@ function injectImmersionStyles(): void {
     }
     .study-harvester-cloze-word {
       display: inline;
-      margin: 0 -4px;
-      padding: 1px 4px;
+      margin: 0 -1px;
+      padding: 1px 3px;
       border: none;
       border-radius: 6px;
       background: transparent;
@@ -1142,7 +1142,6 @@ function injectImmersionStyles(): void {
       background-color: var(--sh-accent);
       color: #1a1410;
       font-weight: 600;
-      box-shadow: 0 0 0 3px rgba(240, 182, 90, 0.2);
     }
     .study-harvester-cloze-toolbar {
       display: flex;

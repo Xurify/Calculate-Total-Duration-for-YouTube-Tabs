@@ -523,33 +523,17 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
   };
 
   const headerRow = createElement("div", "study-harvester-cloze-header");
-  const titleElement = createElement("div", "study-harvester-cloze-title");
-  titleElement.append(hudIcon("sparkle", true), document.createTextNode("Clozemaster card"));
-  headerRow.appendChild(titleElement);
-  const timePill = createElement("div", "study-harvester-cloze-time");
-  headerRow.appendChild(timePill);
+  const headingBlock = createElement("div", "study-harvester-cloze-heading");
+  headingBlock.appendChild(createElement("div", "study-harvester-cloze-title", "New cloze card"));
+  const sourceLine = createElement("div", "study-harvester-cloze-source");
+  headingBlock.appendChild(sourceLine);
+  headerRow.appendChild(headingBlock);
   const closeButton = createElement("button", "study-harvester-cloze-close");
   closeButton.appendChild(hudIcon("close"));
   closeButton.type = "button";
   closeButton.title = "Close";
   headerRow.appendChild(closeButton);
   cardElement.appendChild(headerRow);
-
-  const navigationRow = createElement("div", "study-harvester-cloze-nav");
-  const previousButton = createElement("button", "study-harvester-cloze-nav-btn");
-  previousButton.append(hudIcon("previous"), document.createTextNode("Previous"));
-  previousButton.type = "button";
-  previousButton.title = "Previous sentence";
-  const listenButton = createElement("button", "study-harvester-cloze-nav-btn is-primary");
-  listenButton.append(hudIcon("play", true), document.createTextNode("Listen"));
-  listenButton.type = "button";
-  listenButton.title = "Play this sentence";
-  const nextButton = createElement("button", "study-harvester-cloze-nav-btn");
-  nextButton.append(document.createTextNode("Next"), hudIcon("next"));
-  nextButton.type = "button";
-  nextButton.title = "Next sentence";
-  navigationRow.append(previousButton, listenButton, nextButton);
-  cardElement.appendChild(navigationRow);
 
   if (capture.approximate) {
     cardElement.appendChild(
@@ -561,11 +545,28 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
     );
   }
 
-  cardElement.appendChild(createElement("div", "study-harvester-cloze-label", "Pick the word to blank out"));
-  const chipsContainer = createElement("div", "study-harvester-chips-container");
-  cardElement.appendChild(chipsContainer);
-  const previewBox = createElement("div", "study-harvester-cloze-preview");
-  cardElement.appendChild(previewBox);
+  const sentenceBox = createElement("div", "study-harvester-cloze-sentence");
+  cardElement.appendChild(sentenceBox);
+
+  const toolbarRow = createElement("div", "study-harvester-cloze-toolbar");
+  const navigationGroup = createElement("div", "study-harvester-cloze-nav");
+  const previousButton = createElement("button", "study-harvester-cloze-nav-btn");
+  previousButton.appendChild(hudIcon("previous"));
+  previousButton.type = "button";
+  previousButton.title = "Previous sentence";
+  const listenButton = createElement("button", "study-harvester-cloze-nav-btn is-listen");
+  const listenTime = createElement("span", "");
+  listenButton.append(hudIcon("play", true), document.createTextNode("Listen"), listenTime);
+  listenButton.type = "button";
+  listenButton.title = "Play this sentence";
+  const nextButton = createElement("button", "study-harvester-cloze-nav-btn");
+  nextButton.appendChild(hudIcon("next"));
+  nextButton.type = "button";
+  nextButton.title = "Next sentence";
+  navigationGroup.append(previousButton, listenButton, nextButton);
+  const answerLine = createElement("div", "study-harvester-cloze-answer");
+  toolbarRow.append(navigationGroup, answerLine);
+  cardElement.appendChild(toolbarRow);
 
   const translationGroup = createElement("label", "study-harvester-input-group");
   translationGroup.appendChild(createElement("span", "", "Translation"));
@@ -578,45 +579,46 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
   const footerRow = createElement("div", "study-harvester-cloze-footer");
   const cancelButton = createElement("button", "study-harvester-btn-cancel", "Cancel");
   cancelButton.type = "button";
-  const saveButton = createElement("button", "study-harvester-btn-save");
-  saveButton.append(hudIcon("sparkle", true), document.createTextNode("Save card"));
+  const saveButton = createElement("button", "study-harvester-btn-save", "Save card");
   saveButton.type = "button";
   footerRow.append(cancelButton, saveButton);
   cardElement.appendChild(footerRow);
 
-  const renderPreview = () => {
-    previewBox.replaceChildren();
-    const text = capture.sentences[sentenceIndex].text;
+  const renderAnswer = () => {
+    answerLine.replaceChildren();
     if (!chosenToken) {
-      previewBox.textContent = text;
+      answerLine.textContent = "Tap a word to blank it out";
       return;
     }
-    const blank = createElement("mark", "study-harvester-cloze-blank", chosenToken.text);
-    previewBox.append(
-      text.slice(0, chosenToken.index),
-      blank,
-      text.slice(chosenToken.index + chosenToken.text.length)
+    answerLine.append(
+      createElement("span", "study-harvester-cloze-answer-label", "Answer"),
+      createElement("span", "study-harvester-cloze-answer-word", chosenToken.text)
     );
   };
 
-  const renderChips = () => {
-    chipsContainer.replaceChildren();
+  const renderSentenceText = () => {
+    sentenceBox.replaceChildren();
+    const text = capture.sentences[sentenceIndex].text;
+    let cursor = 0;
     for (const token of tokens) {
       if (!token.isWord) continue;
-      const chipButton = createElement(
+      if (token.index > cursor) sentenceBox.append(text.slice(cursor, token.index));
+      const wordButton = createElement(
         "button",
-        `study-harvester-word-chip${token === chosenToken ? " active" : ""}`,
+        `study-harvester-cloze-word${token === chosenToken ? " is-blank" : ""}`,
         token.text
       );
-      chipButton.type = "button";
-      chipButton.addEventListener("click", (clickEvent) => {
+      wordButton.type = "button";
+      wordButton.addEventListener("click", (clickEvent) => {
         clickEvent.stopPropagation();
         chosenToken = token;
-        renderChips();
-        renderPreview();
+        renderSentenceText();
+        renderAnswer();
       });
-      chipsContainer.appendChild(chipButton);
+      sentenceBox.appendChild(wordButton);
+      cursor = token.index + token.text.length;
     }
+    if (cursor < text.length) sentenceBox.append(text.slice(cursor));
   };
 
   const renderSentence = () => {
@@ -625,12 +627,14 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
     chosenToken =
       (preferredWord && tokens.find((token) => token.isWord && token.text.toLocaleLowerCase() === preferredWord)) ||
       pickClozeToken(tokens, capture.frequencies);
-    timePill.textContent = formatTimestamp(sentence.startSeconds);
+    const position = `${sentenceIndex + 1} of ${capture.sentences.length}`;
+    sourceLine.textContent = lastMetadata.title ? `${truncateText(lastMetadata.title, 48)} · ${position}` : position;
+    listenTime.textContent = formatTimestamp(sentence.startSeconds);
     previousButton.disabled = sentenceIndex === 0;
     nextButton.disabled = sentenceIndex === capture.sentences.length - 1;
     listenButton.disabled = capture.sentences.length === 1 && sentence.endSeconds <= sentence.startSeconds;
-    renderChips();
-    renderPreview();
+    renderSentenceText();
+    renderAnswer();
   };
 
   const moveSentence = (step: number) => {
@@ -866,8 +870,6 @@ function injectImmersionStyles(): void {
       --sh-glass-strong: rgba(14, 12, 11, 0.86);
       --sh-line: rgba(255, 255, 255, 0.1);
       --sh-accent: #f0b65a;
-      --sh-accent-2: #ff8f70;
-      --sh-gradient: linear-gradient(120deg, var(--sh-accent), var(--sh-accent-2));
       position: absolute;
       top: 12px;
       right: 12px;
@@ -931,13 +933,13 @@ function injectImmersionStyles(): void {
     }
     .study-harvester-hud-btn.is-accent {
       border-color: transparent;
-      background: var(--sh-gradient);
+      background-color: var(--sh-accent);
       color: #1a1410;
       font-weight: 600;
       box-shadow: 0 8px 24px -8px rgba(240, 182, 90, 0.7);
     }
     .study-harvester-hud-btn.is-accent:hover:not(:disabled) {
-      background: var(--sh-gradient);
+      background-color: var(--sh-accent);
       filter: brightness(1.06);
     }
     .study-harvester-shelf-popover {
@@ -1006,8 +1008,6 @@ function injectImmersionStyles(): void {
       --sh-muted: rgba(244, 239, 230, 0.58);
       --sh-line: rgba(255, 255, 255, 0.1);
       --sh-accent: #f0b65a;
-      --sh-accent-2: #ff8f70;
-      --sh-gradient: linear-gradient(120deg, var(--sh-accent), var(--sh-accent-2));
       position: absolute;
       inset: 0;
       background: radial-gradient(120% 90% at 50% 0%, rgba(240, 182, 90, 0.12), transparent 60%),
@@ -1044,7 +1044,7 @@ function injectImmersionStyles(): void {
       inset: -1px;
       border-radius: 23px;
       padding: 1px;
-      background: linear-gradient(135deg, rgba(240, 182, 90, 0.6), rgba(255, 143, 112, 0.1) 40%, rgba(255, 255, 255, 0.04) 70%, rgba(240, 182, 90, 0.35));
+      background: linear-gradient(135deg, rgba(240, 182, 90, 0.55), rgba(255, 255, 255, 0.05) 45%, rgba(255, 255, 255, 0.05) 65%, rgba(240, 182, 90, 0.3));
       -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
       mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
       -webkit-mask-composite: xor;
@@ -1056,39 +1056,35 @@ function injectImmersionStyles(): void {
     }
     .study-harvester-cloze-header {
       display: flex;
-      align-items: center;
-      gap: 10px;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .study-harvester-cloze-heading {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 0;
     }
     .study-harvester-cloze-title {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 14px;
+      font-size: 15px;
       font-weight: 600;
       letter-spacing: 0.01em;
     }
-    .study-harvester-cloze-title .study-harvester-icon {
-      width: 16px;
-      height: 16px;
-      stroke: none;
-      color: var(--sh-accent);
-    }
-    .study-harvester-cloze-time {
-      margin-left: auto;
-      padding: 3px 9px;
-      border-radius: 999px;
-      border: 1px solid var(--sh-line);
-      background: rgba(255, 255, 255, 0.04);
-      font-size: 11px;
+    .study-harvester-cloze-source {
+      font-size: 12px;
       color: var(--sh-muted);
-      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .study-harvester-cloze-close {
+      margin-left: auto;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       width: 30px;
       height: 30px;
+      flex: none;
       border-radius: 999px;
       background: transparent;
       border: none;
@@ -1104,47 +1100,6 @@ function injectImmersionStyles(): void {
       background-color: rgba(255, 255, 255, 0.08);
       color: var(--sh-ink);
     }
-    .study-harvester-cloze-nav {
-      display: flex;
-      gap: 8px;
-    }
-    .study-harvester-cloze-nav-btn {
-      flex: 1;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      height: 36px;
-      padding: 0 12px;
-      border-radius: 12px;
-      border: 1px solid var(--sh-line);
-      background-color: rgba(255, 255, 255, 0.04);
-      color: var(--sh-ink);
-      font: 500 13px "YouTube Sans", Roboto, system-ui, sans-serif;
-      cursor: pointer;
-      transition: background-color 0.15s ease, border-color 0.15s ease;
-    }
-    .study-harvester-cloze-nav-btn .study-harvester-icon {
-      width: 16px;
-      height: 16px;
-    }
-    .study-harvester-cloze-nav-btn:hover:not(:disabled) {
-      background-color: rgba(255, 255, 255, 0.09);
-      border-color: rgba(255, 255, 255, 0.2);
-    }
-    .study-harvester-cloze-nav-btn.is-primary {
-      color: var(--sh-accent);
-      border-color: rgba(240, 182, 90, 0.35);
-      background-color: rgba(240, 182, 90, 0.1);
-    }
-    .study-harvester-cloze-nav-btn.is-primary:hover:not(:disabled) {
-      background-color: rgba(240, 182, 90, 0.18);
-      border-color: rgba(240, 182, 90, 0.6);
-    }
-    .study-harvester-cloze-nav-btn:disabled {
-      opacity: 0.35;
-      cursor: default;
-    }
     .study-harvester-cloze-note {
       padding: 8px 12px;
       border-radius: 10px;
@@ -1154,64 +1109,111 @@ function injectImmersionStyles(): void {
       line-height: 1.4;
       color: var(--sh-accent);
     }
-    .study-harvester-cloze-label {
+    .study-harvester-cloze-sentence {
+      padding: 18px 18px 16px;
+      border-radius: 16px;
+      border: 1px solid var(--sh-line);
+      background: rgba(0, 0, 0, 0.28);
+      font-size: 20px;
+      line-height: 1.7;
+      color: var(--sh-ink);
+      max-height: 200px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    .study-harvester-cloze-word {
+      display: inline;
+      margin: 0 -4px;
+      padding: 1px 4px;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      line-height: inherit;
+      cursor: pointer;
+      transition: background-color 0.12s ease, color 0.12s ease;
+    }
+    .study-harvester-cloze-word:hover {
+      background-color: rgba(240, 182, 90, 0.16);
+      color: var(--sh-accent);
+    }
+    .study-harvester-cloze-word.is-blank {
+      background-color: var(--sh-accent);
+      color: #1a1410;
+      font-weight: 600;
+      box-shadow: 0 0 0 3px rgba(240, 182, 90, 0.2);
+    }
+    .study-harvester-cloze-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .study-harvester-cloze-nav {
+      display: inline-flex;
+      gap: 4px;
+      padding: 3px;
+      border-radius: 12px;
+      border: 1px solid var(--sh-line);
+      background: rgba(255, 255, 255, 0.04);
+    }
+    .study-harvester-cloze-nav-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      height: 32px;
+      min-width: 32px;
+      padding: 0 8px;
+      border-radius: 9px;
+      border: none;
+      background: transparent;
+      color: var(--sh-ink);
+      font: 500 13px "YouTube Sans", Roboto, system-ui, sans-serif;
+      cursor: pointer;
+      transition: background-color 0.15s ease;
+    }
+    .study-harvester-cloze-nav-btn .study-harvester-icon {
+      width: 16px;
+      height: 16px;
+    }
+    .study-harvester-cloze-nav-btn:hover:not(:disabled) {
+      background-color: rgba(255, 255, 255, 0.09);
+    }
+    .study-harvester-cloze-nav-btn.is-listen {
+      padding: 0 12px;
+      color: var(--sh-accent);
+    }
+    .study-harvester-cloze-nav-btn.is-listen span {
+      color: var(--sh-muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .study-harvester-cloze-nav-btn:disabled {
+      opacity: 0.35;
+      cursor: default;
+    }
+    .study-harvester-cloze-answer {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--sh-muted);
+    }
+    .study-harvester-cloze-answer-label {
       font-size: 11px;
       font-weight: 600;
       letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: var(--sh-muted);
-      margin-bottom: -6px;
     }
-    .study-harvester-chips-container {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      padding: 12px;
-      border-radius: 14px;
-      border: 1px solid var(--sh-line);
-      background: rgba(0, 0, 0, 0.28);
-      max-height: 132px;
-      overflow-y: auto;
-    }
-    .study-harvester-word-chip {
-      padding: 6px 11px;
+    .study-harvester-cloze-answer-word {
+      padding: 3px 10px;
       border-radius: 999px;
-      border: 1px solid var(--sh-line);
-      background-color: rgba(255, 255, 255, 0.05);
-      color: var(--sh-ink);
-      font: 500 13px "YouTube Sans", Roboto, system-ui, sans-serif;
-      cursor: pointer;
-      transition: background-color 0.12s ease, border-color 0.12s ease, transform 0.12s ease, box-shadow 0.12s ease;
-    }
-    .study-harvester-word-chip:hover {
-      background-color: rgba(240, 182, 90, 0.14);
-      border-color: rgba(240, 182, 90, 0.5);
-      transform: translateY(-1px);
-    }
-    .study-harvester-word-chip.active {
-      background: var(--sh-gradient);
-      border-color: transparent;
-      color: #1a1410;
+      border: 1px solid rgba(240, 182, 90, 0.4);
+      background: rgba(240, 182, 90, 0.1);
+      color: var(--sh-accent);
       font-weight: 600;
-      box-shadow: 0 6px 18px -6px rgba(240, 182, 90, 0.8);
-    }
-    .study-harvester-cloze-preview {
-      padding: 14px 16px;
-      border-radius: 14px;
-      border: 1px solid var(--sh-line);
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
-      font-size: 16px;
-      line-height: 1.55;
-      color: var(--sh-ink);
-    }
-    .study-harvester-cloze-blank {
-      display: inline-block;
-      padding: 0 7px;
-      border-radius: 7px;
-      background: var(--sh-gradient);
-      color: #1a1410;
-      font-weight: 600;
-      box-shadow: 0 0 0 3px rgba(240, 182, 90, 0.18);
     }
     .study-harvester-input-group {
       display: flex;
@@ -1249,7 +1251,7 @@ function injectImmersionStyles(): void {
       justify-content: flex-end;
       align-items: center;
       gap: 10px;
-      margin-top: 4px;
+      margin-top: 2px;
     }
     .study-harvester-btn-cancel {
       height: 38px;
@@ -1267,24 +1269,16 @@ function injectImmersionStyles(): void {
       border-color: rgba(255, 255, 255, 0.25);
     }
     .study-harvester-btn-save {
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
       height: 38px;
-      padding: 0 18px;
+      padding: 0 20px;
       border-radius: 12px;
       border: none;
-      background: var(--sh-gradient);
+      background: var(--sh-accent);
       color: #1a1410;
       font: 600 13px "YouTube Sans", Roboto, system-ui, sans-serif;
       cursor: pointer;
-      box-shadow: 0 10px 28px -10px rgba(240, 182, 90, 0.8);
+      box-shadow: 0 10px 28px -12px rgba(240, 182, 90, 0.9);
       transition: filter 0.15s ease, transform 0.15s ease;
-    }
-    .study-harvester-btn-save .study-harvester-icon {
-      width: 15px;
-      height: 15px;
-      stroke: none;
     }
     .study-harvester-btn-save:hover {
       filter: brightness(1.06);
@@ -1332,7 +1326,6 @@ const HUD_ICON_PATHS = {
   next: "M9 6l6 6-6 6",
   replay: "M4 12a8 8 0 1 0 2.3-5.6M4 4v5h5",
   skip: "M5 5l9 7-9 7zM18 5v14",
-  sparkle: "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z",
 };
 
 function hudIcon(name: keyof typeof HUD_ICON_PATHS, filled = false): SVGSVGElement {
@@ -1481,7 +1474,7 @@ function updateImmersionHud(): void {
   hudContainer.append(replayButton, skipButton);
 
   const clozeButton = hudButton(
-    hudIcon("sparkle", true),
+    hudIcon("card"),
     "Cloze",
     "Make a Clozemaster card from the sentence just spoken"
   );

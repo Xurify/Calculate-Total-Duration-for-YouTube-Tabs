@@ -523,11 +523,9 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
   };
 
   const headerRow = createElement("div", "study-harvester-cloze-header");
-  const headingBlock = createElement("div", "study-harvester-cloze-heading");
-  headingBlock.appendChild(createElement("div", "study-harvester-cloze-title", "New cloze card"));
-  const sourceLine = createElement("div", "study-harvester-cloze-source");
-  headingBlock.appendChild(sourceLine);
-  headerRow.appendChild(headingBlock);
+  headerRow.appendChild(createElement("span", "study-harvester-cloze-kicker", "Cloze card"));
+  const sourceLine = createElement("span", "study-harvester-cloze-source");
+  headerRow.appendChild(sourceLine);
   const closeButton = createElement("button", "study-harvester-cloze-close");
   closeButton.appendChild(hudIcon("close"));
   closeButton.type = "button";
@@ -535,18 +533,18 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
   headerRow.appendChild(closeButton);
   cardElement.appendChild(headerRow);
 
+  const sentenceBox = createElement("div", "study-harvester-cloze-sentence");
+  cardElement.appendChild(sentenceBox);
+
   if (capture.approximate) {
     cardElement.appendChild(
       createElement(
         "div",
         "study-harvester-cloze-note",
-        "These captions are auto-generated without punctuation, so sentence edges are a guess."
+        "Auto-generated captions without punctuation: the sentence edges are a guess."
       )
     );
   }
-
-  const sentenceBox = createElement("div", "study-harvester-cloze-sentence");
-  cardElement.appendChild(sentenceBox);
 
   const toolbarRow = createElement("div", "study-harvester-cloze-toolbar");
   const navigationGroup = createElement("div", "study-harvester-cloze-nav");
@@ -556,7 +554,7 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
   previousButton.title = "Previous sentence";
   const listenButton = createElement("button", "study-harvester-cloze-nav-btn is-listen");
   const listenTime = createElement("span", "");
-  listenButton.append(hudIcon("play", true), document.createTextNode("Listen"), listenTime);
+  listenButton.append(hudIcon("play", true), listenTime);
   listenButton.type = "button";
   listenButton.title = "Play this sentence";
   const nextButton = createElement("button", "study-harvester-cloze-nav-btn");
@@ -564,25 +562,17 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
   nextButton.type = "button";
   nextButton.title = "Next sentence";
   navigationGroup.append(previousButton, listenButton, nextButton);
-  const answerLine = createElement("div", "study-harvester-cloze-answer");
-  toolbarRow.append(navigationGroup, answerLine);
-  cardElement.appendChild(toolbarRow);
-
-  const translationGroup = createElement("label", "study-harvester-input-group");
-  translationGroup.appendChild(createElement("span", "", "Translation"));
+  const answerLine = createElement("div", "study-harvester-cloze-pick");
   const translationInput = document.createElement("input");
   translationInput.type = "text";
-  translationInput.placeholder = "Optional. Leave it blank and an AI agent fills it in later.";
-  translationGroup.appendChild(translationInput);
-  cardElement.appendChild(translationGroup);
-
-  const footerRow = createElement("div", "study-harvester-cloze-footer");
-  const cancelButton = createElement("button", "study-harvester-btn-cancel", "Cancel");
-  cancelButton.type = "button";
+  translationInput.className = "study-harvester-cloze-translation";
+  translationInput.placeholder = "Translation (optional)";
+  translationInput.title = "Leave it blank and an AI agent can fill it in later.";
+  translationInput.setAttribute("aria-label", "Translation");
   const saveButton = createElement("button", "study-harvester-btn-save", "Save card");
   saveButton.type = "button";
-  footerRow.append(cancelButton, saveButton);
-  cardElement.appendChild(footerRow);
+  toolbarRow.append(navigationGroup, answerLine, translationInput, saveButton);
+  cardElement.appendChild(toolbarRow);
 
   const renderAnswer = () => {
     answerLine.replaceChildren();
@@ -591,8 +581,8 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
       return;
     }
     answerLine.append(
-      createElement("span", "study-harvester-cloze-answer-label", "Answer"),
-      createElement("span", "study-harvester-cloze-answer-word", chosenToken.text)
+      createElement("span", "study-harvester-cloze-pick-label", "Cloze"),
+      createElement("span", "study-harvester-cloze-pick-word", chosenToken.text)
     );
   };
 
@@ -697,7 +687,6 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
   };
 
   closeButton.addEventListener("click", () => close(capture.resumeOnClose));
-  cancelButton.addEventListener("click", () => close(capture.resumeOnClose));
   saveButton.addEventListener("click", () => void save());
   previousButton.addEventListener("click", () => moveSentence(-1));
   nextButton.addEventListener("click", () => moveSentence(1));
@@ -1010,80 +999,67 @@ function injectImmersionStyles(): void {
       --sh-accent: #f0b65a;
       position: absolute;
       inset: 0;
-      background: radial-gradient(120% 90% at 50% 0%, rgba(240, 182, 90, 0.12), transparent 60%),
-        rgba(10, 9, 8, 0.72);
-      backdrop-filter: blur(16px) saturate(120%);
-      -webkit-backdrop-filter: blur(16px) saturate(120%);
+      background: linear-gradient(180deg, rgba(10, 9, 8, 0.2) 0%, rgba(10, 9, 8, 0.55) 55%, rgba(10, 9, 8, 0.85) 100%);
       z-index: 2147483645;
       display: flex;
-      align-items: center;
+      align-items: flex-end;
       justify-content: center;
-      padding: 20px;
+      padding: 16px;
       box-sizing: border-box;
       pointer-events: auto;
       font-family: "YouTube Sans", Roboto, system-ui, sans-serif;
     }
     .study-harvester-cloze-card {
-      position: relative;
       width: 100%;
-      max-width: 560px;
-      padding: 22px 24px 20px;
-      border-radius: 22px;
-      background: linear-gradient(160deg, rgba(34, 30, 27, 0.92), rgba(18, 16, 15, 0.96));
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 1), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      max-width: 920px;
+      padding: 14px 20px 16px;
+      border-radius: 18px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background-color: rgba(16, 14, 13, 0.82);
+      backdrop-filter: blur(18px) saturate(140%);
+      -webkit-backdrop-filter: blur(18px) saturate(140%);
+      box-shadow: 0 24px 60px -24px rgba(0, 0, 0, 1), inset 0 1px 0 rgba(255, 255, 255, 0.06);
       color: var(--sh-ink);
       display: flex;
       flex-direction: column;
-      gap: 14px;
+      gap: 10px;
       animation: study-harvester-rise 0.22s ease-out;
-    }
-    .study-harvester-cloze-card::before {
-      content: "";
-      position: absolute;
-      inset: -1px;
-      border-radius: 23px;
-      padding: 1px;
-      background: linear-gradient(135deg, rgba(240, 182, 90, 0.55), rgba(255, 255, 255, 0.05) 45%, rgba(255, 255, 255, 0.05) 65%, rgba(240, 182, 90, 0.3));
-      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-      mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-      -webkit-mask-composite: xor;
-      mask-composite: exclude;
-      pointer-events: none;
     }
     .study-harvester-cloze-card:focus {
       outline: none;
     }
     .study-harvester-cloze-header {
       display: flex;
-      align-items: flex-start;
-      gap: 12px;
-    }
-    .study-harvester-cloze-heading {
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
-      min-width: 0;
-    }
-    .study-harvester-cloze-title {
-      font-size: 15px;
-      font-weight: 600;
-      letter-spacing: 0.01em;
-    }
-    .study-harvester-cloze-source {
+      align-items: center;
+      gap: 10px;
+      min-height: 28px;
       font-size: 12px;
       color: var(--sh-muted);
+    }
+    .study-harvester-cloze-kicker {
+      flex: none;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--sh-accent);
+    }
+    .study-harvester-cloze-source {
+      min-width: 0;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+    .study-harvester-cloze-source::before {
+      content: "·";
+      margin-right: 10px;
     }
     .study-harvester-cloze-close {
       margin-left: auto;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 30px;
-      height: 30px;
+      width: 28px;
+      height: 28px;
       flex: none;
       border-radius: 999px;
       background: transparent;
@@ -1100,59 +1076,51 @@ function injectImmersionStyles(): void {
       background-color: rgba(255, 255, 255, 0.08);
       color: var(--sh-ink);
     }
-    .study-harvester-cloze-note {
-      padding: 8px 12px;
-      border-radius: 10px;
-      border: 1px solid rgba(240, 182, 90, 0.25);
-      background: rgba(240, 182, 90, 0.08);
-      font-size: 12px;
-      line-height: 1.4;
-      color: var(--sh-accent);
-    }
     .study-harvester-cloze-sentence {
-      padding: 18px 18px 16px;
-      border-radius: 16px;
-      border: 1px solid var(--sh-line);
-      background: rgba(0, 0, 0, 0.28);
-      font-size: 20px;
-      line-height: 1.7;
+      padding: 2px 2px 6px;
+      font: 400 23px/1.5 Georgia, "Times New Roman", serif;
       color: var(--sh-ink);
-      max-height: 200px;
+      max-height: 150px;
       overflow-y: auto;
       white-space: pre-wrap;
     }
     .study-harvester-cloze-word {
       display: inline;
       margin: 0 -1px;
-      padding: 1px 3px;
+      padding: 0 3px 1px;
       border: none;
-      border-radius: 6px;
+      border-bottom: 2px solid transparent;
+      border-radius: 5px 5px 0 0;
       background: transparent;
       color: inherit;
       font: inherit;
       line-height: inherit;
       cursor: pointer;
-      transition: background-color 0.12s ease, color 0.12s ease;
+      transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
     }
     .study-harvester-cloze-word:hover {
-      background-color: rgba(240, 182, 90, 0.16);
+      background-color: rgba(240, 182, 90, 0.12);
       color: var(--sh-accent);
     }
     .study-harvester-cloze-word.is-blank {
-      background-color: var(--sh-accent);
-      color: #1a1410;
-      font-weight: 600;
+      background-color: rgba(240, 182, 90, 0.14);
+      border-bottom-color: var(--sh-accent);
+      color: var(--sh-accent);
+    }
+    .study-harvester-cloze-note {
+      font-size: 12px;
+      color: var(--sh-muted);
     }
     .study-harvester-cloze-toolbar {
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 12px;
+      gap: 10px;
       flex-wrap: wrap;
     }
     .study-harvester-cloze-nav {
       display: inline-flex;
-      gap: 4px;
+      flex: none;
+      gap: 2px;
       padding: 3px;
       border-radius: 12px;
       border: 1px solid var(--sh-line);
@@ -1163,14 +1131,15 @@ function injectImmersionStyles(): void {
       align-items: center;
       justify-content: center;
       gap: 6px;
-      height: 32px;
-      min-width: 32px;
-      padding: 0 8px;
+      height: 30px;
+      min-width: 30px;
+      padding: 0 7px;
       border-radius: 9px;
       border: none;
       background: transparent;
       color: var(--sh-ink);
       font: 500 13px "YouTube Sans", Roboto, system-ui, sans-serif;
+      font-variant-numeric: tabular-nums;
       cursor: pointer;
       transition: background-color 0.15s ease;
     }
@@ -1182,54 +1151,42 @@ function injectImmersionStyles(): void {
       background-color: rgba(255, 255, 255, 0.09);
     }
     .study-harvester-cloze-nav-btn.is-listen {
-      padding: 0 12px;
+      padding: 0 10px 0 8px;
       color: var(--sh-accent);
-    }
-    .study-harvester-cloze-nav-btn.is-listen span {
-      color: var(--sh-muted);
-      font-variant-numeric: tabular-nums;
     }
     .study-harvester-cloze-nav-btn:disabled {
       opacity: 0.35;
       cursor: default;
     }
-    .study-harvester-cloze-answer {
+    .study-harvester-cloze-pick {
       display: inline-flex;
+      flex: none;
       align-items: center;
       gap: 8px;
+      height: 36px;
+      padding: 0 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(240, 182, 90, 0.3);
+      background: rgba(240, 182, 90, 0.08);
       font-size: 13px;
       color: var(--sh-muted);
     }
-    .study-harvester-cloze-answer-label {
+    .study-harvester-cloze-pick-label {
       font-size: 11px;
       font-weight: 600;
       letter-spacing: 0.08em;
       text-transform: uppercase;
     }
-    .study-harvester-cloze-answer-word {
-      padding: 3px 10px;
-      border-radius: 999px;
-      border: 1px solid rgba(240, 182, 90, 0.4);
-      background: rgba(240, 182, 90, 0.1);
+    .study-harvester-cloze-pick-word {
       color: var(--sh-accent);
       font-weight: 600;
     }
-    .study-harvester-input-group {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    .study-harvester-input-group span {
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--sh-muted);
-    }
-    .study-harvester-input-group input {
-      width: 100%;
+    .study-harvester-cloze-translation {
+      flex: 1 1 200px;
+      min-width: 0;
+      height: 38px;
       box-sizing: border-box;
-      padding: 10px 14px;
+      padding: 0 14px;
       border-radius: 12px;
       border: 1px solid var(--sh-line);
       background-color: rgba(0, 0, 0, 0.28);
@@ -1238,38 +1195,18 @@ function injectImmersionStyles(): void {
       outline: none;
       transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
-    .study-harvester-input-group input::placeholder {
-      color: rgba(244, 239, 230, 0.35);
+    .study-harvester-cloze-translation::placeholder {
+      color: rgba(244, 239, 230, 0.4);
     }
-    .study-harvester-input-group input:focus {
+    .study-harvester-cloze-translation:focus {
       border-color: rgba(240, 182, 90, 0.7);
       box-shadow: 0 0 0 3px rgba(240, 182, 90, 0.15);
     }
-    .study-harvester-cloze-footer {
-      display: flex;
-      justify-content: flex-end;
-      align-items: center;
-      gap: 10px;
-      margin-top: 2px;
-    }
-    .study-harvester-btn-cancel {
-      height: 38px;
-      padding: 0 16px;
-      border-radius: 12px;
-      border: 1px solid var(--sh-line);
-      background: transparent;
-      color: var(--sh-muted);
-      font: 500 13px "YouTube Sans", Roboto, system-ui, sans-serif;
-      cursor: pointer;
-      transition: color 0.15s ease, border-color 0.15s ease;
-    }
-    .study-harvester-btn-cancel:hover {
-      color: var(--sh-ink);
-      border-color: rgba(255, 255, 255, 0.25);
-    }
     .study-harvester-btn-save {
+      flex: none;
+      margin-left: auto;
       height: 38px;
-      padding: 0 20px;
+      padding: 0 18px;
       border-radius: 12px;
       border: none;
       background: var(--sh-accent);

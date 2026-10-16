@@ -453,22 +453,21 @@ function checkSentencePlayback(videoElement: HTMLVideoElement): void {
   }
 }
 
-async function replaySentence(slow: boolean): Promise<void> {
+async function replaySentence(): Promise<void> {
   const videoElement = document.querySelector("video");
   if (!videoElement) return;
   const currentTime = videoElement.currentTime;
   const loaded = await loadImmersionTranscript();
-  const rate = slow ? 0.75 : undefined;
 
   if (!loaded) {
-    playSentence({ text: "", startSeconds: Math.max(0, currentTime - 4), endSeconds: currentTime }, { rate });
-    showImmersionToast(slow ? "Replaying the last 4s at 0.75×" : "Rewound 4s");
+    playSentence({ text: "", startSeconds: Math.max(0, currentTime - 4), endSeconds: currentTime });
+    showImmersionToast("Rewound 4s");
     return;
   }
 
   const sentence = loaded.sentences[sentenceIndexAt(loaded.sentences, currentTime)];
-  playSentence(sentence, { rate });
-  showImmersionToast(`${slow ? "0.75× " : ""}“${truncateText(sentence.text, 60)}”`);
+  playSentence(sentence);
+  showImmersionToast(`“${truncateText(sentence.text, 60)}”`);
 }
 
 async function skipToNextSentence(): Promise<void> {
@@ -524,25 +523,31 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
   };
 
   const headerRow = createElement("div", "study-harvester-cloze-header");
-  headerRow.appendChild(createElement("div", "study-harvester-cloze-title", "Clozemaster card"));
+  const titleElement = createElement("div", "study-harvester-cloze-title");
+  titleElement.append(hudIcon("sparkle", true), document.createTextNode("Clozemaster card"));
+  headerRow.appendChild(titleElement);
   const timePill = createElement("div", "study-harvester-cloze-time");
   headerRow.appendChild(timePill);
-  const closeButton = createElement("button", "study-harvester-cloze-close", "×");
+  const closeButton = createElement("button", "study-harvester-cloze-close");
+  closeButton.appendChild(hudIcon("close"));
   closeButton.type = "button";
-  closeButton.title = "Close (Esc)";
+  closeButton.title = "Close";
   headerRow.appendChild(closeButton);
   cardElement.appendChild(headerRow);
 
   const navigationRow = createElement("div", "study-harvester-cloze-nav");
-  const previousButton = createElement("button", "study-harvester-cloze-nav-btn", "‹ Previous");
+  const previousButton = createElement("button", "study-harvester-cloze-nav-btn");
+  previousButton.append(hudIcon("previous"), document.createTextNode("Previous"));
   previousButton.type = "button";
-  previousButton.title = "Previous sentence (←)";
-  const listenButton = createElement("button", "study-harvester-cloze-nav-btn", "▶ Listen");
+  previousButton.title = "Previous sentence";
+  const listenButton = createElement("button", "study-harvester-cloze-nav-btn is-primary");
+  listenButton.append(hudIcon("play", true), document.createTextNode("Listen"));
   listenButton.type = "button";
-  listenButton.title = "Play this sentence (Space)";
-  const nextButton = createElement("button", "study-harvester-cloze-nav-btn", "Next ›");
+  listenButton.title = "Play this sentence";
+  const nextButton = createElement("button", "study-harvester-cloze-nav-btn");
+  nextButton.append(document.createTextNode("Next"), hudIcon("next"));
   nextButton.type = "button";
-  nextButton.title = "Next sentence (→)";
+  nextButton.title = "Next sentence";
   navigationRow.append(previousButton, listenButton, nextButton);
   cardElement.appendChild(navigationRow);
 
@@ -556,7 +561,7 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
     );
   }
 
-  cardElement.appendChild(createElement("div", "study-harvester-cloze-label", "Click the word to blank out"));
+  cardElement.appendChild(createElement("div", "study-harvester-cloze-label", "Pick the word to blank out"));
   const chipsContainer = createElement("div", "study-harvester-chips-container");
   cardElement.appendChild(chipsContainer);
   const previewBox = createElement("div", "study-harvester-cloze-preview");
@@ -566,14 +571,15 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
   translationGroup.appendChild(createElement("span", "", "Translation"));
   const translationInput = document.createElement("input");
   translationInput.type = "text";
-  translationInput.placeholder = "Optional. Leave blank and an agent can add it in Clozemaster.";
+  translationInput.placeholder = "Optional. Leave it blank and an AI agent fills it in later.";
   translationGroup.appendChild(translationInput);
   cardElement.appendChild(translationGroup);
 
   const footerRow = createElement("div", "study-harvester-cloze-footer");
   const cancelButton = createElement("button", "study-harvester-btn-cancel", "Cancel");
   cancelButton.type = "button";
-  const saveButton = createElement("button", "study-harvester-btn-save", "Save card (Enter)");
+  const saveButton = createElement("button", "study-harvester-btn-save");
+  saveButton.append(hudIcon("sparkle", true), document.createTextNode("Save card"));
   saveButton.type = "button";
   footerRow.append(cancelButton, saveButton);
   cardElement.appendChild(footerRow);
@@ -619,7 +625,7 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
     chosenToken =
       (preferredWord && tokens.find((token) => token.isWord && token.text.toLocaleLowerCase() === preferredWord)) ||
       pickClozeToken(tokens, capture.frequencies);
-    timePill.textContent = `▶ ${formatTimestamp(sentence.startSeconds)}`;
+    timePill.textContent = formatTimestamp(sentence.startSeconds);
     previousButton.disabled = sentenceIndex === 0;
     nextButton.disabled = sentenceIndex === capture.sentences.length - 1;
     listenButton.disabled = capture.sentences.length === 1 && sentence.endSeconds <= sentence.startSeconds;
@@ -702,22 +708,8 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
       close(capture.resumeOnClose);
       return true;
     }
-    const inTextField = keyboardEvent.target === translationInput;
     if (keyboardEvent.key === "Enter" && !keyboardEvent.isComposing) {
       void save();
-      return true;
-    }
-    if (inTextField) return false;
-    if (keyboardEvent.key === "ArrowLeft") {
-      moveSentence(-1);
-      return true;
-    }
-    if (keyboardEvent.key === "ArrowRight") {
-      moveSentence(1);
-      return true;
-    }
-    if (keyboardEvent.code === "Space") {
-      listen();
       return true;
     }
     return false;
@@ -868,15 +860,23 @@ function injectImmersionStyles(): void {
   styleElement.id = "study-harvester-immersion-styles";
   styleElement.textContent = `
     #study-harvester-player-hud {
+      --sh-ink: #f4efe6;
+      --sh-muted: rgba(244, 239, 230, 0.62);
+      --sh-glass: rgba(14, 12, 11, 0.62);
+      --sh-glass-strong: rgba(14, 12, 11, 0.86);
+      --sh-line: rgba(255, 255, 255, 0.1);
+      --sh-accent: #f0b65a;
+      --sh-accent-2: #ff8f70;
+      --sh-gradient: linear-gradient(120deg, var(--sh-accent), var(--sh-accent-2));
       position: absolute;
       top: 12px;
       right: 12px;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       z-index: 60;
       font-family: "YouTube Sans", Roboto, Arial, sans-serif;
-      color: #fff;
+      color: var(--sh-ink);
       user-select: none;
       pointer-events: auto;
       transition: opacity 0.1s cubic-bezier(0.4, 0, 1, 1);
@@ -900,73 +900,120 @@ function injectImmersionStyles(): void {
     .study-harvester-hud-btn {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 7px;
       height: 36px;
-      padding: 0 14px 0 10px;
-      border: none;
-      border-radius: 18px;
-      background-color: rgba(0, 0, 0, 0.6);
-      color: #fff;
-      font: 500 14px/1 "YouTube Sans", Roboto, Arial, sans-serif;
+      padding: 0 14px 0 11px;
+      border: 1px solid var(--sh-line);
+      border-radius: 999px;
+      background-color: var(--sh-glass);
+      backdrop-filter: blur(14px) saturate(140%);
+      -webkit-backdrop-filter: blur(14px) saturate(140%);
+      box-shadow: 0 6px 20px -10px rgba(0, 0, 0, 0.8);
+      color: var(--sh-ink);
+      font: 500 13px/1 "YouTube Sans", Roboto, Arial, sans-serif;
+      letter-spacing: 0.01em;
       cursor: pointer;
+      transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
     }
-    .study-harvester-hud-btn:hover {
-      background-color: rgba(40, 40, 40, 0.8);
+    .study-harvester-hud-btn:hover:not(:disabled) {
+      background-color: rgba(40, 36, 32, 0.8);
+      border-color: rgba(255, 255, 255, 0.22);
+      transform: translateY(-1px);
+    }
+    .study-harvester-hud-btn:disabled {
+      cursor: default;
+      color: var(--sh-muted);
+    }
+    .study-harvester-hud-btn.is-icon {
+      width: 36px;
+      padding: 0;
+      justify-content: center;
+    }
+    .study-harvester-hud-btn.is-accent {
+      border-color: transparent;
+      background: var(--sh-gradient);
+      color: #1a1410;
+      font-weight: 600;
+      box-shadow: 0 8px 24px -8px rgba(240, 182, 90, 0.7);
+    }
+    .study-harvester-hud-btn.is-accent:hover:not(:disabled) {
+      background: var(--sh-gradient);
+      filter: brightness(1.06);
     }
     .study-harvester-shelf-popover {
       position: absolute;
       top: calc(100% + 8px);
       right: 0;
-      min-width: 220px;
-      padding: 8px 0;
-      border-radius: 12px;
-      background-color: rgba(28, 28, 28, 0.9);
-      text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
+      min-width: 230px;
+      padding: 8px;
+      border-radius: 16px;
+      border: 1px solid var(--sh-line);
+      background-color: var(--sh-glass-strong);
+      backdrop-filter: blur(18px) saturate(140%);
+      -webkit-backdrop-filter: blur(18px) saturate(140%);
+      box-shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.9);
       display: flex;
       flex-direction: column;
+      animation: study-harvester-rise 0.18s ease-out;
     }
     .study-harvester-shelf-header {
-      padding: 6px 16px 8px;
-      font: 500 13px Roboto, Arial, sans-serif;
-      color: rgba(255, 255, 255, 0.7);
+      padding: 6px 10px 8px;
+      font: 600 11px Roboto, Arial, sans-serif;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--sh-muted);
     }
     .study-harvester-shelf-hint {
-      padding: 0 16px 8px;
-      font: 400 12px Roboto, Arial, sans-serif;
-      color: rgba(255, 255, 255, 0.7);
+      padding: 0 10px 8px;
+      font: 400 12px/1.4 Roboto, Arial, sans-serif;
+      color: var(--sh-muted);
     }
     .study-harvester-pillar-item {
       display: flex;
       align-items: center;
-      gap: 12px;
-      height: 40px;
-      padding: 0 16px;
+      gap: 10px;
+      height: 38px;
+      padding: 0 10px;
       border: none;
+      border-radius: 10px;
       background: transparent;
-      color: #eee;
+      color: var(--sh-ink);
       font: 400 14px Roboto, Arial, sans-serif;
       text-align: left;
       cursor: pointer;
     }
     .study-harvester-pillar-item .study-harvester-icon {
-      width: 20px;
-      height: 20px;
-      opacity: 0.7;
+      width: 18px;
+      height: 18px;
+      opacity: 0.6;
     }
     .study-harvester-pillar-item.saved {
       cursor: default;
+      color: var(--sh-accent);
     }
     .study-harvester-pillar-item.saved .study-harvester-icon {
       opacity: 1;
     }
     .study-harvester-pillar-item:hover:not(:disabled) {
-      background-color: rgba(255, 255, 255, 0.1);
+      background-color: rgba(255, 255, 255, 0.08);
+    }
+    @keyframes study-harvester-rise {
+      from { opacity: 0; transform: translateY(6px) scale(0.98); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
     }
     #study-harvester-cloze-modal {
+      --sh-ink: #f4efe6;
+      --sh-muted: rgba(244, 239, 230, 0.58);
+      --sh-line: rgba(255, 255, 255, 0.1);
+      --sh-accent: #f0b65a;
+      --sh-accent-2: #ff8f70;
+      --sh-gradient: linear-gradient(120deg, var(--sh-accent), var(--sh-accent-2));
       position: absolute;
       inset: 0;
-      background-color: rgba(18, 15, 12, 0.82);
-      backdrop-filter: blur(8px);
+      background: radial-gradient(120% 90% at 50% 0%, rgba(240, 182, 90, 0.12), transparent 60%),
+        rgba(10, 9, 8, 0.72);
+      backdrop-filter: blur(16px) saturate(120%);
+      -webkit-backdrop-filter: blur(16px) saturate(120%);
       z-index: 2147483645;
       display: flex;
       align-items: center;
@@ -974,51 +1021,88 @@ function injectImmersionStyles(): void {
       padding: 20px;
       box-sizing: border-box;
       pointer-events: auto;
+      font-family: "YouTube Sans", Roboto, system-ui, sans-serif;
     }
     .study-harvester-cloze-card {
-      background-color: #231f1b;
-      border: 1px solid rgba(227, 170, 80, 0.4);
-      border-radius: 16px;
-      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9);
+      position: relative;
       width: 100%;
-      max-width: 540px;
-      padding: 22px;
-      color: #efe7da;
-      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 560px;
+      padding: 22px 24px 20px;
+      border-radius: 22px;
+      background: linear-gradient(160deg, rgba(34, 30, 27, 0.92), rgba(18, 16, 15, 0.96));
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 1), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      color: var(--sh-ink);
       display: flex;
       flex-direction: column;
       gap: 14px;
+      animation: study-harvester-rise 0.22s ease-out;
+    }
+    .study-harvester-cloze-card::before {
+      content: "";
+      position: absolute;
+      inset: -1px;
+      border-radius: 23px;
+      padding: 1px;
+      background: linear-gradient(135deg, rgba(240, 182, 90, 0.6), rgba(255, 143, 112, 0.1) 40%, rgba(255, 255, 255, 0.04) 70%, rgba(240, 182, 90, 0.35));
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      pointer-events: none;
+    }
+    .study-harvester-cloze-card:focus {
+      outline: none;
     }
     .study-harvester-cloze-header {
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      gap: 10px;
     }
     .study-harvester-cloze-title {
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      color: #e3aa50;
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+    }
+    .study-harvester-cloze-title .study-harvester-icon {
+      width: 16px;
+      height: 16px;
+      stroke: none;
+      color: var(--sh-accent);
     }
     .study-harvester-cloze-time {
-      font-size: 12px;
-      color: #a89e90;
+      margin-left: auto;
+      padding: 3px 9px;
+      border-radius: 999px;
+      border: 1px solid var(--sh-line);
+      background: rgba(255, 255, 255, 0.04);
+      font-size: 11px;
+      color: var(--sh-muted);
       font-variant-numeric: tabular-nums;
     }
     .study-harvester-cloze-close {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
       background: transparent;
       border: none;
-      color: #a89e90;
-      font-size: 20px;
+      color: var(--sh-muted);
       cursor: pointer;
-      padding: 0 4px;
-      line-height: 1;
+      transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .study-harvester-cloze-close .study-harvester-icon {
+      width: 16px;
+      height: 16px;
     }
     .study-harvester-cloze-close:hover {
-      color: #ffffff;
+      background-color: rgba(255, 255, 255, 0.08);
+      color: var(--sh-ink);
     }
     .study-harvester-cloze-nav {
       display: flex;
@@ -1026,139 +1110,185 @@ function injectImmersionStyles(): void {
     }
     .study-harvester-cloze-nav-btn {
       flex: 1;
-      background-color: rgba(239, 231, 218, 0.08);
-      border: 1px solid rgba(239, 231, 218, 0.16);
-      color: #efe7da;
-      padding: 6px 10px;
-      border-radius: 8px;
-      font-size: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      height: 36px;
+      padding: 0 12px;
+      border-radius: 12px;
+      border: 1px solid var(--sh-line);
+      background-color: rgba(255, 255, 255, 0.04);
+      color: var(--sh-ink);
+      font: 500 13px "YouTube Sans", Roboto, system-ui, sans-serif;
       cursor: pointer;
+      transition: background-color 0.15s ease, border-color 0.15s ease;
+    }
+    .study-harvester-cloze-nav-btn .study-harvester-icon {
+      width: 16px;
+      height: 16px;
     }
     .study-harvester-cloze-nav-btn:hover:not(:disabled) {
-      border-color: #e3aa50;
+      background-color: rgba(255, 255, 255, 0.09);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+    .study-harvester-cloze-nav-btn.is-primary {
+      color: var(--sh-accent);
+      border-color: rgba(240, 182, 90, 0.35);
+      background-color: rgba(240, 182, 90, 0.1);
+    }
+    .study-harvester-cloze-nav-btn.is-primary:hover:not(:disabled) {
+      background-color: rgba(240, 182, 90, 0.18);
+      border-color: rgba(240, 182, 90, 0.6);
     }
     .study-harvester-cloze-nav-btn:disabled {
       opacity: 0.35;
       cursor: default;
     }
     .study-harvester-cloze-note {
-      font-size: 11px;
-      color: #e3aa50;
-    }
-    .study-harvester-cloze-blank {
-      background-color: #e3aa50;
-      color: #1a1612;
-      border-radius: 4px;
-      padding: 0 3px;
-      font-weight: 700;
-    }
-    .study-harvester-cloze-card:focus {
-      outline: none;
+      padding: 8px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(240, 182, 90, 0.25);
+      background: rgba(240, 182, 90, 0.08);
+      font-size: 12px;
+      line-height: 1.4;
+      color: var(--sh-accent);
     }
     .study-harvester-cloze-label {
       font-size: 11px;
-      color: #a89e90;
-      margin-bottom: -4px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--sh-muted);
+      margin-bottom: -6px;
     }
     .study-harvester-chips-container {
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
-      padding: 10px;
-      background-color: rgba(0, 0, 0, 0.3);
-      border-radius: 10px;
-      border: 1px solid rgba(239, 231, 218, 0.1);
-      max-height: 120px;
+      padding: 12px;
+      border-radius: 14px;
+      border: 1px solid var(--sh-line);
+      background: rgba(0, 0, 0, 0.28);
+      max-height: 132px;
       overflow-y: auto;
     }
     .study-harvester-word-chip {
-      background-color: rgba(239, 231, 218, 0.08);
-      border: 1px solid rgba(239, 231, 218, 0.16);
-      color: #efe7da;
-      padding: 5px 9px;
-      border-radius: 7px;
-      font-size: 12px;
+      padding: 6px 11px;
+      border-radius: 999px;
+      border: 1px solid var(--sh-line);
+      background-color: rgba(255, 255, 255, 0.05);
+      color: var(--sh-ink);
+      font: 500 13px "YouTube Sans", Roboto, system-ui, sans-serif;
       cursor: pointer;
-      transition: all 0.12s ease;
+      transition: background-color 0.12s ease, border-color 0.12s ease, transform 0.12s ease, box-shadow 0.12s ease;
     }
     .study-harvester-word-chip:hover {
-      background-color: rgba(227, 170, 80, 0.2);
-      border-color: #e3aa50;
-      color: #ffffff;
+      background-color: rgba(240, 182, 90, 0.14);
+      border-color: rgba(240, 182, 90, 0.5);
+      transform: translateY(-1px);
     }
     .study-harvester-word-chip.active {
-      background-color: #e3aa50;
-      color: #1a1612;
-      font-weight: 700;
-      border-color: #e3aa50;
-      box-shadow: 0 0 10px rgba(227, 170, 80, 0.4);
+      background: var(--sh-gradient);
+      border-color: transparent;
+      color: #1a1410;
+      font-weight: 600;
+      box-shadow: 0 6px 18px -6px rgba(240, 182, 90, 0.8);
     }
     .study-harvester-cloze-preview {
-      background-color: rgba(0, 0, 0, 0.4);
-      border: 1px dashed rgba(227, 170, 80, 0.4);
-      padding: 10px 14px;
-      border-radius: 8px;
-      font-size: 15px;
-      line-height: 1.5;
-      color: #efe7da;
+      padding: 14px 16px;
+      border-radius: 14px;
+      border: 1px solid var(--sh-line);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
+      font-size: 16px;
+      line-height: 1.55;
+      color: var(--sh-ink);
+    }
+    .study-harvester-cloze-blank {
+      display: inline-block;
+      padding: 0 7px;
+      border-radius: 7px;
+      background: var(--sh-gradient);
+      color: #1a1410;
+      font-weight: 600;
+      box-shadow: 0 0 0 3px rgba(240, 182, 90, 0.18);
     }
     .study-harvester-input-group {
       display: flex;
       flex-direction: column;
-      gap: 5px;
+      gap: 6px;
     }
     .study-harvester-input-group span {
       font-size: 11px;
-      color: #a89e90;
+      font-weight: 600;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
-      letter-spacing: 0.04em;
+      color: var(--sh-muted);
     }
     .study-harvester-input-group input {
-      background-color: #2a2520;
-      border: 1px solid rgba(239, 231, 218, 0.18);
-      border-radius: 8px;
-      padding: 8px 12px;
-      color: #efe7da;
-      font-size: 13px;
       width: 100%;
       box-sizing: border-box;
+      padding: 10px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--sh-line);
+      background-color: rgba(0, 0, 0, 0.28);
+      color: var(--sh-ink);
+      font: 400 14px "YouTube Sans", Roboto, system-ui, sans-serif;
       outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .study-harvester-input-group input::placeholder {
+      color: rgba(244, 239, 230, 0.35);
     }
     .study-harvester-input-group input:focus {
-      border-color: #e3aa50;
+      border-color: rgba(240, 182, 90, 0.7);
+      box-shadow: 0 0 0 3px rgba(240, 182, 90, 0.15);
     }
     .study-harvester-cloze-footer {
       display: flex;
       justify-content: flex-end;
+      align-items: center;
       gap: 10px;
-      margin-top: 6px;
+      margin-top: 4px;
     }
     .study-harvester-btn-cancel {
+      height: 38px;
+      padding: 0 16px;
+      border-radius: 12px;
+      border: 1px solid var(--sh-line);
       background: transparent;
-      color: #a89e90;
-      border: 1px solid rgba(239, 231, 218, 0.18);
-      padding: 8px 14px;
-      border-radius: 8px;
+      color: var(--sh-muted);
+      font: 500 13px "YouTube Sans", Roboto, system-ui, sans-serif;
       cursor: pointer;
-      font-size: 12px;
+      transition: color 0.15s ease, border-color 0.15s ease;
     }
     .study-harvester-btn-cancel:hover {
-      color: #efe7da;
-      border-color: rgba(239, 231, 218, 0.35);
+      color: var(--sh-ink);
+      border-color: rgba(255, 255, 255, 0.25);
     }
     .study-harvester-btn-save {
-      background-color: #e3aa50;
-      color: #1a1612;
-      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      height: 38px;
+      padding: 0 18px;
+      border-radius: 12px;
       border: none;
-      padding: 8px 18px;
-      border-radius: 8px;
+      background: var(--sh-gradient);
+      color: #1a1410;
+      font: 600 13px "YouTube Sans", Roboto, system-ui, sans-serif;
       cursor: pointer;
-      font-size: 12px;
-      transition: background-color 0.15s ease;
+      box-shadow: 0 10px 28px -10px rgba(240, 182, 90, 0.8);
+      transition: filter 0.15s ease, transform 0.15s ease;
+    }
+    .study-harvester-btn-save .study-harvester-icon {
+      width: 15px;
+      height: 15px;
+      stroke: none;
     }
     .study-harvester-btn-save:hover {
-      background-color: #f1b95f;
+      filter: brightness(1.06);
+      transform: translateY(-1px);
     }
     #study-harvester-hud-toast {
       position: absolute;
@@ -1166,9 +1296,12 @@ function injectImmersionStyles(): void {
       bottom: 64px;
       max-width: min(480px, 70%);
       padding: 10px 14px;
-      border-radius: 8px;
-      background-color: rgba(28, 28, 28, 0.9);
-      color: #fff;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background-color: rgba(14, 12, 11, 0.82);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      color: #f4efe6;
       font: 400 14px/20px Roboto, Arial, sans-serif;
       z-index: 61;
       transition: opacity 0.2s ease, transform 0.2s ease;
@@ -1193,6 +1326,13 @@ const HUD_ICON_PATHS = {
   card: "M4 6h16v12H4zM8 12h3m3 0h2",
   check: "M5 12.5l4.5 4.5L19 7",
   plus: "M12 5v14M5 12h14",
+  close: "M6 6l12 12M18 6L6 18",
+  play: "M8 5.5v13l11-6.5z",
+  previous: "M15 6l-6 6 6 6",
+  next: "M9 6l6 6-6 6",
+  replay: "M4 12a8 8 0 1 0 2.3-5.6M4 4v5h5",
+  skip: "M5 5l9 7-9 7zM18 5v14",
+  sparkle: "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z",
 };
 
 function hudIcon(name: keyof typeof HUD_ICON_PATHS, filled = false): SVGSVGElement {
@@ -1210,12 +1350,16 @@ function hudIcon(name: keyof typeof HUD_ICON_PATHS, filled = false): SVGSVGEleme
 
 function hudButton(icon: SVGSVGElement, label: string, title: string): HTMLButtonElement {
   const button = document.createElement("button");
-  button.className = "study-harvester-hud-btn";
+  button.className = label ? "study-harvester-hud-btn" : "study-harvester-hud-btn is-icon";
   button.type = "button";
   button.title = title;
-  const text = document.createElement("span");
-  text.textContent = label;
-  button.append(icon, text);
+  button.setAttribute("aria-label", title);
+  button.appendChild(icon);
+  if (label) {
+    const text = document.createElement("span");
+    text.textContent = label;
+    button.appendChild(text);
+  }
   return button;
 }
 
@@ -1324,11 +1468,24 @@ function updateImmersionHud(): void {
     hudContainer.appendChild(logTimeButton);
   }
 
+  const replayButton = hudButton(hudIcon("replay"), "", "Replay the sentence just spoken");
+  replayButton.addEventListener("click", (clickEvent) => {
+    clickEvent.stopPropagation();
+    void replaySentence();
+  });
+  const skipButton = hudButton(hudIcon("skip"), "", "Skip to the next sentence");
+  skipButton.addEventListener("click", (clickEvent) => {
+    clickEvent.stopPropagation();
+    void skipToNextSentence();
+  });
+  hudContainer.append(replayButton, skipButton);
+
   const clozeButton = hudButton(
-    hudIcon("card"),
+    hudIcon("sparkle", true),
     "Cloze",
-    "Make a Clozemaster card from the sentence just spoken (Alt+C)"
+    "Make a Clozemaster card from the sentence just spoken"
   );
+  clozeButton.classList.add("is-accent");
   clozeButton.addEventListener("click", (clickEvent) => {
     clickEvent.stopPropagation();
     void triggerClozeCardCapture();
@@ -1348,42 +1505,13 @@ function isEditableTarget(targetElement: EventTarget | null): boolean {
 }
 
 function handleGlobalKeydown(keyboardEvent: KeyboardEvent): void {
-  if (handleClozeModalKey) {
-    if (handleClozeModalKey(keyboardEvent)) {
-      keyboardEvent.preventDefault();
-      keyboardEvent.stopPropagation();
-    } else if (!isEditableTarget(keyboardEvent.target)) {
-      // Keep YouTube's own shortcuts (seek, fullscreen, mute) from firing behind the open card.
-      keyboardEvent.stopPropagation();
-    }
-    return;
-  }
-
-  if (isEditableTarget(keyboardEvent.target)) {
-    return;
-  }
-
-  if (keyboardEvent.altKey && !keyboardEvent.ctrlKey && !keyboardEvent.metaKey && keyboardEvent.code === "KeyC") {
+  if (!handleClozeModalKey) return;
+  if (handleClozeModalKey(keyboardEvent)) {
     keyboardEvent.preventDefault();
     keyboardEvent.stopPropagation();
-    void triggerClozeCardCapture();
-    return;
-  }
-
-  if (keyboardEvent.ctrlKey || keyboardEvent.altKey || keyboardEvent.metaKey || keyboardEvent.shiftKey) {
-    return;
-  }
-
-  const sentenceActions: Record<string, () => Promise<void>> = {
-    KeyA: () => replaySentence(false),
-    KeyS: () => replaySentence(true),
-    KeyD: () => skipToNextSentence(),
-  };
-  const action = sentenceActions[keyboardEvent.code];
-  if (action) {
-    keyboardEvent.preventDefault();
+  } else if (!isEditableTarget(keyboardEvent.target)) {
+    // Keep YouTube's own shortcuts (seek, fullscreen, mute) from firing behind the open card.
     keyboardEvent.stopPropagation();
-    void action();
   }
 }
 

@@ -1,5 +1,5 @@
 /**
- * Shared input schemas for the WebMCP tools over the Alt+C capture queue, which the
+ * Shared input schemas for the WebMCP tools over the Cloze capture queue, which the
  * YouTube and Clozemaster pages both expose.
  */
 

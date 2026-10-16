@@ -1,5 +1,6 @@
 import { loadStagedClozeCards, type StagedClozeCard } from "../utils/storage";
 import { registerBridgeListener } from "../utils/webmcpBridge";
+import { requestFromPage } from "../utils/pageService";
 
 const CLOZEMASTER_HARVEST_STORAGE_KEY = "clozemaster_staged_harvest";
 
@@ -89,6 +90,17 @@ export default defineContentScript({
     syncCardsToClozemasterLocalStorage(initialCards);
 
     browser.runtime.onMessage.addListener((runtimeMessage, _sender, sendResponse) => {
+      if (runtimeMessage.action === "clozemaster-op") {
+        const { op, payload } = runtimeMessage as { op: "list" | "add"; payload?: unknown };
+        // Adding many sentences goes one request at a time, so allow a few seconds per card.
+        const cardCount = Array.isArray((payload as { cards?: unknown[] })?.cards)
+          ? (payload as { cards: unknown[] }).cards.length
+          : 0;
+        void requestFromPage(`clozemaster:${op}`, payload ?? {}, 15_000 + cardCount * 3_000).then((result) =>
+          sendResponse(result ?? { success: false, reason: "not_ready", errorMessage: "The Clozemaster tab didn't answer." })
+        );
+        return true;
+      }
       if (runtimeMessage.action === "new-cloze-card" && runtimeMessage.card) {
         void loadStagedClozeCards().then((updatedCards) => {
           syncCardsToClozemasterLocalStorage(updatedCards);

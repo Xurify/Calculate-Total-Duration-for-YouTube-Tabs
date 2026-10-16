@@ -1435,6 +1435,10 @@ export default defineContentScript({
       "get-open-tabs-catalog": () => browser.runtime.sendMessage({ action: "get-open-tabs-catalog" }),
       "stage-focused-study-queue": (payload) =>
         browser.runtime.sendMessage({ action: "stage-focused-study-queue", payload }),
+      "clozemaster-list": (payload) =>
+        browser.runtime.sendMessage({ action: "clozemaster-remote", op: "list", payload }),
+      "clozemaster-add": (payload) =>
+        browser.runtime.sendMessage({ action: "clozemaster-remote", op: "add", payload }),
       "refine-language": (payload) => {
         const { detected, text, channelName, videoId } = payload as VideoChannel & {
           detected: DetectedLanguage;

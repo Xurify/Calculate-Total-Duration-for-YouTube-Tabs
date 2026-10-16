@@ -13,6 +13,12 @@ import {
   type DetectedLanguage,
 } from "../utils/captionLanguage";
 import { sendBridgeRequest } from "../utils/webmcpBridge";
+import {
+  CARDS_INPUT_SCHEMA,
+  COLLECTION_TARGET_PROPERTIES,
+  MAX_CARDS_PER_CALL,
+  type AddSentencesInput,
+} from "../utils/clozemasterTools";
 import { buildSentences, type TranscriptSegment } from "../utils/transcript";
 import {
   getPlayerResponse as getPlayerResponseFromWindow,
@@ -103,7 +109,7 @@ export default defineContentScript({
       Record<string, unknown>,
       unknown
     > = {
-      name: "get_active_video_details",
+      name: "youtube_get_current_video",
       description:
         "Returns comprehensive metadata and playback state for the currently active YouTube video or short, including duration, current time, remaining time, language, and volume.",
       annotations: {
@@ -196,7 +202,7 @@ export default defineContentScript({
       { targetLanguageCode?: string; startSeconds?: number; endSeconds?: number; unit?: "sentence" | "caption" },
       unknown
     > = {
-      name: "get_video_transcript",
+      name: "youtube_get_transcript",
       description:
         "Extracts the timestamped transcript of the current YouTube video in its original language, from the same source as YouTube's \"Show transcript\" panel (never auto-translated). By default segments are whole sentences, rebuilt from the caption lines, which is what cloze cards and active recall need; pass unit \"caption\" for the raw caption lines.",
       inputSchema: {
@@ -315,7 +321,7 @@ export default defineContentScript({
       },
       unknown
     > = {
-      name: "control_playback",
+      name: "youtube_control_playback",
       description:
         "Controls video playback on the active YouTube player (play, pause, toggle, seek, adjust speed, adjust volume, mute, unmute).",
       inputSchema: {
@@ -488,7 +494,7 @@ export default defineContentScript({
     };
 
     const getOpenTabsCatalogTool: WebMcpToolDefinition<Record<string, unknown>, unknown> = {
-      name: "get_open_tabs_catalog",
+      name: "youtube_list_open_tabs",
       description:
         "Returns the complete catalog of all open YouTube tabs across all browser windows, including their video IDs, titles, channel names, total durations, remaining times, and detected languages. Use this to help the user plan focused study sessions. The first call from this page opens an approval window, so the user must allow it.",
       annotations: {
@@ -509,7 +515,7 @@ export default defineContentScript({
       },
       unknown
     > = {
-      name: "stage_focused_study_queue",
+      name: "youtube_stage_study_queue",
       description:
         "Stages a curated list of YouTube tabs for a focused study session. Can automatically stash unselected/distraction tabs into extension storage ('Saved Sessions') and close them guilt-free. The user must approve this in a separate window before anything is closed or removed.",
       inputSchema: {
@@ -556,12 +562,46 @@ export default defineContentScript({
       },
     };
 
+    const languagePairProperty = {
+      languagePair: {
+        type: "string",
+        description:
+          'Clozemaster language pair from its URLs, such as "slk-eng" (Slovak for English speakers). Optional when the user studies only one language or has that language open in Clozemaster; otherwise the error lists the pairs to choose from.',
+      },
+    };
+
+    const clozemasterListCollectionsTool: WebMcpToolDefinition<{ languagePair?: string }, unknown> = {
+      name: "clozemaster_list_collections",
+      description:
+        "Lists the user's own Clozemaster collections (decks) for one language, with IDs, slugs, play URLs and sentence counts, without leaving YouTube: the extension uses an open Clozemaster tab or opens one in the background. The first call from this page asks the user to allow it. On failure it returns reason and instruction.",
+      inputSchema: { type: "object", properties: languagePairProperty },
+      annotations: { readOnlyHint: true, untrustedContentHint: true },
+      execute: (inputArguments) => sendBridgeRequest("clozemaster-list", inputArguments),
+    };
+
+    const clozemasterAddSentencesTool: WebMcpToolDefinition<
+      AddSentencesInput & { languagePair?: string } & Record<string, unknown>,
+      unknown
+    > = {
+      name: "clozemaster_add_sentences",
+      description: `Adds cloze sentences from this video to the user's Clozemaster without leaving YouTube. Pass collectionId to add to an existing collection (deck), or collectionName to add to the collection with that name, creating a new deck if there is none. Each sentence must be in the video's language with exactly one word wrapped in {{ }}, plus a translation; youtube_get_transcript gives whole sentences to pick from. At most ${MAX_CARDS_PER_CALL} sentences per call; call again with the same collection for a bigger deck. The user approves every call in a separate window. Requires Clozemaster Pro.`,
+      inputSchema: {
+        type: "object",
+        properties: { ...languagePairProperty, ...COLLECTION_TARGET_PROPERTIES, cards: CARDS_INPUT_SCHEMA },
+        required: ["cards"],
+      },
+      annotations: { readOnlyHint: false },
+      execute: (inputArguments) => sendBridgeRequest("clozemaster-add", inputArguments),
+    };
+
     await Promise.all([
       registerWebMcpTool(getActiveVideoDetailsTool, abortController.signal),
       registerWebMcpTool(getVideoTranscriptTool, abortController.signal),
       registerWebMcpTool(controlPlaybackTool, abortController.signal),
       registerWebMcpTool(getOpenTabsCatalogTool, abortController.signal),
       registerWebMcpTool(stageFocusedStudyQueueTool, abortController.signal),
+      registerWebMcpTool(clozemasterListCollectionsTool, abortController.signal),
+      registerWebMcpTool(clozemasterAddSentencesTool, abortController.signal),
     ]);
   },
 });

@@ -37,7 +37,7 @@ import {
   isStoreUpdatedMessage,
   type StoreState,
 } from "../../utils/store";
-import { formatTime, formatCompact, formatDurationWords, formatOffset, parseTimeParam, getVideoIdFromUrl, normalizeText, isYoutubeWatchOrShortsUrl } from "../../utils/format";
+import { formatTime, formatCompact, formatDurationWords, formatOffset, formatShortDuration, parseTimeParam, getVideoIdFromUrl, normalizeText, isYoutubeWatchOrShortsUrl } from "../../utils/format";
 import { pillarColor, type SiteRule, type TimeTrackingPrefs } from "../../utils/timeLog";
 import { actionOptionsHtml, formatMinutesWords, pillarChoices, pillarOptionsHtml, pillarTitleOf, type TimeSummaryResponse } from "../../utils/timeUi";
 import type { WatchSummary } from "../../utils/watchLog";
@@ -3304,24 +3304,31 @@ function facetIconHtml(row: FacetRow): string {
   return `<span class="facet-icon">${icon}</span>`;
 }
 
-function facetButtonHtml(row: FacetRow, extraAttrs = ""): string {
+/** `longest` is the group's biggest row, so a row's bar shows its time against the leader's. */
+function facetButtonHtml(row: FacetRow, extraAttrs = "", longest = 0): string {
   const active = facetIsActive(row);
   const dot = facetIconHtml(row);
-  const time = row.count > 0 && row.seconds > 0 ? formatDurationWords(row.seconds) : "";
+  const hasTime = row.count > 0 && row.seconds > 0;
+  const timeWords = hasTime ? `, ${formatDurationWords(row.seconds)}${selectedSession == null ? " left to watch" : ""}` : "";
+  const title = `${row.label}: ${row.count} ${row.count === 1 ? "video" : "videos"}${timeWords}`;
+  const share = longest > 0 && hasTime ? Math.max(2, Math.round((row.seconds / longest) * 100)) : 0;
   return `
-    <button type="button" class="facet${active ? " facet--active" : ""}${row.muted ? " facet--muted" : ""}" data-facet-kind="${row.kind}" data-facet-value="${escapeHtml(row.value)}"${extraAttrs} aria-pressed="${active}" title="${escapeHtml(row.label)}">
+    <button type="button" class="facet${active ? " facet--active" : ""}${row.muted ? " facet--muted" : ""}" data-facet-kind="${row.kind}" data-facet-value="${escapeHtml(row.value)}"${extraAttrs} aria-pressed="${active}" title="${escapeHtml(title)}">
       ${dot}
       <span class="facet-name">${escapeHtml(row.label)}</span>
-      <span class="facet-count">${row.count}${time ? ` · ${time}` : ""}</span>
+      <span class="facet-count" aria-label="${row.count} ${row.count === 1 ? "video" : "videos"}">${row.count}</span>
+      <span class="facet-time">${hasTime ? formatShortDuration(row.seconds) : ""}</span>
+      ${share ? `<span class="facet-share" aria-hidden="true"><span style="width: ${share}%; background: ${row.color ?? "var(--color-accent)"}"></span></span>` : ""}
     </button>`;
 }
 
 function facetGroupHtml(title: string, rows: FacetRow[], trailing = "", extraClass = ""): string {
   if (rows.length === 0 && !trailing) return "";
+  const longest = Math.max(0, ...rows.map((row) => row.seconds));
   return `
     <div class="facet-group${extraClass ? ` ${extraClass}` : ""}">
       <div class="facet-head">${escapeHtml(title)}</div>
-      ${rows.map((row) => facetButtonHtml(row, row.sectionId || row.value === "__unsorted" ? ` data-section-wrapper="${escapeHtml(row.value)}"` : "")).join("")}
+      ${rows.map((row) => facetButtonHtml(row, row.sectionId || row.value === "__unsorted" ? ` data-section-wrapper="${escapeHtml(row.value)}"` : "", longest)).join("")}
       ${trailing}
     </div>`;
 }

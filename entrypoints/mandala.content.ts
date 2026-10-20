@@ -171,18 +171,23 @@ async function syncMandalaSummaryToExtension(): Promise<CachedMandalaSummary | n
   return summary;
 }
 
-function addShelfLink(chartData: MandalaChartData, pillarIndex: number, url: string, title: string, kind?: string) {
+/** Shelves a link, or points a shelved one at `action`. `changed` is true when the chart needs writing. */
+function addShelfLink(chartData: MandalaChartData, pillarIndex: number, url: string, title: string, kind?: string, action?: string) {
   chartData.tools ??= {};
   const pillarKey = `p${pillarIndex}`;
   const toolsList = chartData.tools[pillarKey] || [];
   const existing = toolsList.find(
     (tool) => tool.url === url || shelfLinksForVideo([{ id: tool.id, pillarIndex, title: "", url: tool.url }], url).length > 0
   );
-  if (existing) return { tool: existing, added: false };
+  if (existing) {
+    if (!action || existing.action === action) return { tool: existing, added: false, changed: false };
+    existing.action = action;
+    return { tool: existing, added: false, changed: true };
+  }
 
-  const tool: MandalaTool = { id: newMandalaId("tool"), url, title: title || url, kind: kind || "repeat" };
+  const tool: MandalaTool = { id: newMandalaId("tool"), url, title: title || url, kind: kind || "repeat", ...(action ? { action } : {}) };
   chartData.tools[pillarKey] = [...toolsList, tool];
-  return { tool, added: true };
+  return { tool, added: true, changed: true };
 }
 
 /**
@@ -256,14 +261,15 @@ async function flushPendingMandalaQueues(): Promise<void> {
 
   const pendingLinks = (storageData[PENDING_MANDALA_SHELF_LINKS_KEY] as PendingMandalaShelfLink[]) || [];
   for (const pendingLink of pendingLinks) {
-    const { added } = addShelfLink(
+    const { changed } = addShelfLink(
       activeChart.data,
       pendingLink.pillarIndex,
       pendingLink.url,
       pendingLink.title,
-      pendingLink.kind
+      pendingLink.kind,
+      pendingLink.action
     );
-    hasModifications ||= added;
+    hasModifications ||= changed;
   }
 
   // Logs queued before the video was shelved, or by older versions without a url, have no action to land on.
@@ -424,11 +430,12 @@ export default defineContentScript({
       }
 
       if (runtimeMessage.action === "add-shelf-link") {
-        const { pillarIndex, url, title, kind } = runtimeMessage as {
+        const { pillarIndex, url, title, kind, action } = runtimeMessage as {
           pillarIndex: number;
           url: string;
           title: string;
           kind?: string;
+          action?: string;
         };
 
         const library = readMandalaLibrary();
@@ -438,8 +445,8 @@ export default defineContentScript({
           return true;
         }
 
-        const { tool, added } = addShelfLink(activeChart.data, pillarIndex, url, title, kind);
-        if (added) {
+        const { tool, added, changed } = addShelfLink(activeChart.data, pillarIndex, url, title, kind, action);
+        if (changed) {
           activeChart.updatedAt = Date.now();
           writeMandalaLibrary(library);
           void syncMandalaSummaryToExtension();

@@ -393,6 +393,7 @@ export default defineBackground(() => {
           url: string;
           title: string;
           kind?: string;
+          action?: string;
         }
       )
         .then((result) => sendResponse(result))
@@ -980,6 +981,7 @@ async function handleSaveMandalaShelfLink(payload: {
   url: string;
   title: string;
   kind?: string;
+  action?: string;
 }) {
   const mandalaTab = await findMandalaTab();
   if (mandalaTab && mandalaTab.id !== undefined) {
@@ -1003,6 +1005,7 @@ async function handleSaveMandalaShelfLink(payload: {
     url: payload.url,
     title: payload.title,
     kind: payload.kind,
+    action: payload.action,
     timestamp: Date.now(),
   };
   await browser.storage.local.set({
@@ -1012,12 +1015,15 @@ async function handleSaveMandalaShelfLink(payload: {
   // Until the Mandala tab flushes the queue, the cache is what the player reads its shelves from.
   const cachedSummary = await loadCachedMandalaSummary();
   if (cachedSummary) {
+    const existing = shelfLinksForVideo(cachedSummary.shelfLinks, payload.url).find((link) => link.pillarIndex === payload.pillarIndex);
     await saveCachedMandalaSummary({
       ...cachedSummary,
-      shelfLinks: [
-        ...cachedSummary.shelfLinks,
-        { id: newEntry.id, pillarIndex: payload.pillarIndex, title: payload.title, url: payload.url, kind: payload.kind },
-      ],
+      shelfLinks: existing
+        ? cachedSummary.shelfLinks.map((link) => (link === existing && payload.action ? { ...link, action: payload.action } : link))
+        : [
+            ...cachedSummary.shelfLinks,
+            { id: newEntry.id, pillarIndex: payload.pillarIndex, title: payload.title, url: payload.url, kind: payload.kind, action: payload.action },
+          ],
     });
   }
 

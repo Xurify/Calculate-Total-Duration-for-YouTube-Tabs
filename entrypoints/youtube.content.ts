@@ -11,7 +11,7 @@ import {
 import { resolveVideoLanguage, type VideoChannel } from "../utils/channelLanguage";
 import { registerBridgeListener } from "../utils/webmcpBridge";
 import { extractChaptersFromPlayerResponse } from "../utils/chapters";
-import type { MandalaStatus, VideoChapter, StagedClozeCard } from "../utils/storage";
+import type { CachedMandalaAction, MandalaStatus, VideoChapter, StagedClozeCard } from "../utils/storage";
 import {
   buildSentences,
   countWordFrequencies,
@@ -102,6 +102,7 @@ let latestMandalaStatus: MandalaStatus = {
 };
 
 let isPillarPopoverOpen = false;
+let popoverPillarIndex: number | null = null;
 let currentWatchVideoId: string | null = null;
 
 function getVideoIdFromLocation(): string | null {
@@ -822,8 +823,9 @@ async function quickLogWatchedTimeToMandala(): Promise<void> {
   }
 }
 
-async function saveCurrentVideoToMandalaShelf(pillarIndex: number): Promise<void> {
+async function saveCurrentVideoToMandalaShelf(pillarIndex: number, action?: CachedMandalaAction): Promise<void> {
   const pillarTitle = pillarTitleAt(pillarIndex);
+  const destination = action ? `“${truncateText(action.text, 40)}”` : pillarTitle;
   try {
     const response = (await browser.runtime.sendMessage({
       action: "save-mandala-shelf-link",
@@ -832,6 +834,7 @@ async function saveCurrentVideoToMandalaShelf(pillarIndex: number): Promise<void
         url: canonicalVideoUrl(),
         title: lastMetadata.title || document.title,
         kind: "repeat",
+        action: action?.id,
       },
     })) as { success: boolean; queued?: boolean; errorMessage?: string };
 
@@ -845,8 +848,10 @@ async function saveCurrentVideoToMandalaShelf(pillarIndex: number): Promise<void
     updateImmersionHud();
     showImmersionToast(
       response.queued
-        ? `Saved to ${pillarTitle}. It reaches Mandala next time you open it.`
-        : `Saved to ${pillarTitle}'s shelf`
+        ? `Saved to ${destination}. It reaches Mandala next time you open it.`
+        : action
+          ? `Time on this video now goes to ${destination}`
+          : `Saved to ${pillarTitle}'s shelf`
     );
     void checkMandalaStatusForCurrentPage();
   } catch {
@@ -986,9 +991,20 @@ function injectImmersionStyles(): void {
       height: 18px;
       opacity: 0.6;
     }
+    .study-harvester-pillar-item > span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .study-harvester-pillar-item.saved {
-      cursor: default;
       color: var(--sh-accent);
+    }
+    .study-harvester-pillar-item.saved:disabled {
+      cursor: default;
+    }
+    .study-harvester-pillar-item.is-back {
+      color: var(--sh-muted);
     }
     .study-harvester-pillar-item.saved .study-harvester-icon {
       opacity: 1;
@@ -1387,6 +1403,7 @@ function updateImmersionHud(): void {
   shelfButton.addEventListener("click", (clickEvent) => {
     clickEvent.stopPropagation();
     isPillarPopoverOpen = !isPillarPopoverOpen;
+    popoverPillarIndex = null;
     updateImmersionHud();
   });
   hudContainer.appendChild(shelfButton);
@@ -1396,43 +1413,8 @@ function updateImmersionHud(): void {
     popover.className = "study-harvester-shelf-popover";
     popover.addEventListener("click", (clickEvent) => clickEvent.stopPropagation());
 
-    const header = document.createElement("div");
-    header.className = "study-harvester-shelf-header";
-    header.textContent = "Save to shelf";
-    popover.appendChild(header);
-
-    if (!latestMandalaStatus.connected && !latestMandalaStatus.cached) {
-      const hint = document.createElement("div");
-      hint.className = "study-harvester-shelf-hint";
-      hint.textContent = "Open Mandala once so your pillar names show here.";
-      popover.appendChild(hint);
-    }
-
-    const pillars =
-      latestMandalaStatus.pillars.length > 0
-        ? latestMandalaStatus.pillars
-        : Array.from({ length: 8 }, (_item, pillarIndex) => ({
-            index: pillarIndex,
-            title: `Pillar ${pillarIndex + 1}`,
-            actionCount: 0,
-          }));
-
-    for (const pillar of pillars) {
-      const isSaved = savedPillarIndexes.includes(pillar.index);
-      const pillarButton = document.createElement("button");
-      pillarButton.className = `study-harvester-pillar-item${isSaved ? " saved" : ""}`;
-      pillarButton.type = "button";
-      const label = document.createElement("span");
-      label.textContent = pillar.title;
-      pillarButton.append(hudIcon(isSaved ? "check" : "plus"), label);
-      pillarButton.disabled = isSaved;
-      pillarButton.title = isSaved ? "Already on this shelf" : `Save to ${pillar.title}'s shelf`;
-      pillarButton.addEventListener("click", () => {
-        isPillarPopoverOpen = false;
-        void saveCurrentVideoToMandalaShelf(pillar.index);
-      });
-      popover.appendChild(pillarButton);
-    }
+    if (popoverPillarIndex === null) fillPillarList(popover);
+    else fillActionList(popover, popoverPillarIndex);
 
     hudContainer.appendChild(popover);
   }
@@ -1484,6 +1466,97 @@ function updateImmersionHud(): void {
   hudContainer.appendChild(clozeButton);
 
   watchPlayerForHudLayout(playerContainer);
+}
+
+function popoverItem(icon: HTMLElement | SVGSVGElement, text: string, title: string, onClick: () => void, saved = false): HTMLButtonElement {
+  const item = document.createElement("button");
+  item.className = `study-harvester-pillar-item${saved ? " saved" : ""}`;
+  item.type = "button";
+  item.title = title;
+  const label = document.createElement("span");
+  label.textContent = text;
+  item.append(icon, label);
+  item.addEventListener("click", onClick);
+  return item;
+}
+
+function popoverHeader(text: string): HTMLDivElement {
+  const header = document.createElement("div");
+  header.className = "study-harvester-shelf-header";
+  header.textContent = text;
+  return header;
+}
+
+/** Actions the time can go to: a milestone is reached, not worked on for minutes. */
+function loggableActions(pillarIndex: number): CachedMandalaAction[] {
+  const pillar = latestMandalaStatus.pillars.find((each) => each.index === pillarIndex);
+  return (pillar?.actions ?? []).filter((action) => action.kind !== "milestone");
+}
+
+function fillPillarList(popover: HTMLElement): void {
+  popover.appendChild(popoverHeader("Save to shelf"));
+
+  if (!latestMandalaStatus.connected && !latestMandalaStatus.cached) {
+    const hint = document.createElement("div");
+    hint.className = "study-harvester-shelf-hint";
+    hint.textContent = "Open Mandala once so your pillar names show here.";
+    popover.appendChild(hint);
+  }
+
+  const pillars =
+    latestMandalaStatus.pillars.length > 0
+      ? latestMandalaStatus.pillars
+      : Array.from({ length: 8 }, (_item, pillarIndex) => ({ index: pillarIndex, title: `Pillar ${pillarIndex + 1}`, actionCount: 0 }));
+
+  for (const pillar of pillars) {
+    const isSaved = latestMandalaStatus.savedPillarIndexes.includes(pillar.index);
+    const hasActions = loggableActions(pillar.index).length > 0;
+    popover.appendChild(
+      popoverItem(
+        hudIcon(isSaved ? "check" : hasActions ? "next" : "plus"),
+        pillar.title,
+        hasActions ? `Pick which of ${pillar.title}'s actions this video's time goes to` : `Save to ${pillar.title}'s shelf`,
+        () => {
+          if (hasActions) {
+            popoverPillarIndex = pillar.index;
+            updateImmersionHud();
+            return;
+          }
+          isPillarPopoverOpen = false;
+          if (!isSaved) void saveCurrentVideoToMandalaShelf(pillar.index);
+          else updateImmersionHud();
+        },
+        isSaved
+      )
+    );
+  }
+}
+
+function fillActionList(popover: HTMLElement, pillarIndex: number): void {
+  const back = popoverItem(hudIcon("previous"), pillarTitleAt(pillarIndex), "Back to the pillars", () => {
+    popoverPillarIndex = null;
+    updateImmersionHud();
+  });
+  back.classList.add("is-back");
+  popover.append(back, popoverHeader("Time goes to"));
+
+  const savedLink = latestMandalaStatus.savedLinks?.find((link) => link.pillarIndex === pillarIndex);
+  for (const action of loggableActions(pillarIndex)) {
+    const isCurrent = savedLink?.action === action.id;
+    const item = popoverItem(
+      hudIcon(isCurrent ? "check" : "plus"),
+      action.text,
+      isCurrent ? "This video's time already goes here" : action.text,
+      () => {
+        isPillarPopoverOpen = false;
+        popoverPillarIndex = null;
+        void saveCurrentVideoToMandalaShelf(pillarIndex, action);
+      },
+      isCurrent
+    );
+    item.disabled = isCurrent;
+    popover.appendChild(item);
+  }
 }
 
 function isEditableTarget(targetElement: EventTarget | null): boolean {
@@ -1693,6 +1766,7 @@ export default defineContentScript({
     document.addEventListener("click", () => {
       if (isPillarPopoverOpen) {
         isPillarPopoverOpen = false;
+        popoverPillarIndex = null;
         updateImmersionHud();
       }
     });

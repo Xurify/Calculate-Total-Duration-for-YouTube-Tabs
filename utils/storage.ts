@@ -76,6 +76,8 @@ export interface MandalaStatus {
   pillars: CachedMandalaPillar[];
   /** Every pillar whose shelf already holds this video. */
   savedPillarIndexes: number[];
+  /** This video's shelf links, with the action each one's time goes to, when it names one. */
+  savedLinks?: { pillarIndex: number; action?: string }[];
 }
 
 export function shelfLinksForVideo(
@@ -105,6 +107,7 @@ export function mandalaStatusFor(
     savedPillarIndexes: [...new Set(shelfLinksForVideo(summary.shelfLinks, rawUrl).map((link) => link.pillarIndex))].sort(
       (first, second) => first - second
     ),
+    savedLinks: shelfLinksForVideo(summary.shelfLinks, rawUrl).map((link) => ({ pillarIndex: link.pillarIndex, action: link.action })),
   };
 }
 
@@ -114,6 +117,7 @@ export interface PendingMandalaShelfLink {
   url: string;
   title: string;
   kind?: string;
+  action?: string;
   timestamp: number;
 }
 

@@ -1,6 +1,7 @@
 import { getLiveTabSections, loadCachedMandalaSummary, type CachedMandalaSummary, type LiveTabSectionsState } from "./storage";
 import {
   closeStaleEntries,
+  DEFAULT_TIME_TRACKING_PREFS,
   isTrackableUrl,
   loadSiteRules,
   loadTimeLog,
@@ -74,7 +75,7 @@ function toolbarButton() {
 
 export class SiteTracker {
   #state: TrackerState = { active: null, passive: {}, idle: false };
-  #prefs: TimeTrackingPrefs = { enabled: true, idleSeconds: 60 };
+  #prefs: TimeTrackingPrefs = { ...DEFAULT_TIME_TRACKING_PREFS };
   #rules: SiteRule[] = [];
   #summary: CachedMandalaSummary | null = null;
   #piles: LiveTabSectionsState | null = null;

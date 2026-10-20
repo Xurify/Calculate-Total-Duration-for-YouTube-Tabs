@@ -26,6 +26,16 @@ export function formatDurationWords(totalSeconds: number): string {
   return `${total} s`;
 }
 
+/** "3h 58m", "38m", "53s": for narrow columns where several durations line up. */
+export function formatShortDuration(totalSeconds: number): string {
+  const total = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  if (minutes > 0) return `${minutes}m`;
+  return `${total}s`;
+}
+
 /** Queue offset label: "now" for zero, else "+10 min" / "+1 h 33". */
 export function formatOffset(totalSeconds: number): string {
   const total = Math.max(0, Math.floor(totalSeconds));

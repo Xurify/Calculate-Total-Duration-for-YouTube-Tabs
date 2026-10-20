@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   formatDurationWords,
   formatOffset,
+  formatShortDuration,
   formatTime,
   getVideoIdFromUrl,
   isYoutubeWatchOrShortsUrl,
@@ -62,5 +63,15 @@ describe("time formatting", () => {
     expect(formatOffset(30)).toBe("next");
     expect(formatOffset(600)).toBe("+10 min");
     expect(formatOffset(5580)).toBe("+1 h 33");
+  });
+});
+
+describe("formatShortDuration", () => {
+  test("keeps the two biggest units, short", () => {
+    expect(formatShortDuration(3 * 3600 + 58 * 60 + 20)).toBe("3h 58m");
+    expect(formatShortDuration(9 * 3600)).toBe("9h");
+    expect(formatShortDuration(38 * 60 + 59)).toBe("38m");
+    expect(formatShortDuration(53.7)).toBe("53s");
+    expect(formatShortDuration(-4)).toBe("0s");
   });
 });

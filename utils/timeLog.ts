@@ -68,13 +68,15 @@ export interface TimeTrackingPrefs {
   enabled: boolean;
   /** Seconds without input before the active tab stops counting. */
   idleSeconds: number;
+  /** Keep a history of the YouTube videos played, with or without Mandala. */
+  watchHistory: boolean;
 }
 
 export const SITE_RULES_KEY = "siteRules";
 export const TIME_LOG_KEY = "timeLog";
 export const TIME_TRACKING_PREFS_KEY = "timeTrackingPrefs";
 
-export const DEFAULT_TIME_TRACKING_PREFS: TimeTrackingPrefs = { enabled: true, idleSeconds: 60 };
+export const DEFAULT_TIME_TRACKING_PREFS: TimeTrackingPrefs = { enabled: true, idleSeconds: 60, watchHistory: true };
 
 /** A stretch shorter than this is noise: a tab passed through on the way somewhere else. */
 export const MIN_STRETCH_SECONDS = 5;
@@ -226,6 +228,7 @@ export async function loadTimeTrackingPrefs(): Promise<TimeTrackingPrefs> {
     enabled: raw?.enabled ?? DEFAULT_TIME_TRACKING_PREFS.enabled,
     idleSeconds:
       typeof raw?.idleSeconds === "number" && raw.idleSeconds >= 15 ? Math.floor(raw.idleSeconds) : DEFAULT_TIME_TRACKING_PREFS.idleSeconds,
+    watchHistory: raw?.watchHistory ?? DEFAULT_TIME_TRACKING_PREFS.watchHistory,
   };
 }
 

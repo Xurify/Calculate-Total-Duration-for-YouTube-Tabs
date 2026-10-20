@@ -1,6 +1,6 @@
 /**
  * Content script that runs on YouTube watch/shorts pages.
- * Handles metadata caching, chapter extraction, transcript sentence navigation,
+ * Handles metadata caching, watch time, chapter extraction, transcript sentence navigation,
  * cloze capture, and in-player Mandala integration.
  */
 import {
@@ -24,6 +24,7 @@ import {
 } from "../utils/transcript";
 import { requestPageTranscript } from "../utils/youtubeTranscript";
 import { placeHudBelowNativeControls } from "../utils/hudLayout";
+import { WatchSampler } from "../utils/watchSampler";
 
 const DEBOUNCE_MS = 150;
 
@@ -1760,6 +1761,12 @@ export default defineContentScript({
         }
       }
     );
+
+    new WatchSampler({
+      videoId: () => (isWatchOrShorts() ? getVideoIdFromLocation() : null),
+      metadata: () => lastMetadata,
+      send: async (sample) => browser.runtime.sendMessage({ action: "watch-sample", sample }),
+    }).start(context);
 
     context.addEventListener(window, "keydown", handleGlobalKeydown, { capture: true });
 

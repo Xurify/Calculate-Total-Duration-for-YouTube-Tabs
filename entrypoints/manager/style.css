@@ -210,7 +210,19 @@ body {
   }
 
   .facet-count {
-    @apply text-xs text-text-muted tabular-nums whitespace-nowrap;
+    @apply min-w-[18px] h-[18px] px-1.5 inline-flex items-center justify-center shrink-0 rounded-full bg-surface-hover text-[10px] font-semibold leading-none text-text-secondary tabular-nums;
+  }
+
+  .facet--active .facet-count {
+    @apply bg-surface-elevated text-text-primary;
+  }
+
+  .facet-time {
+    @apply w-[3.25rem] shrink-0 text-right text-xs font-medium text-text-secondary tabular-nums whitespace-nowrap;
+  }
+
+  .facet--active .facet-time {
+    @apply text-text-primary;
   }
 
   .facet.section-drop-target--active {

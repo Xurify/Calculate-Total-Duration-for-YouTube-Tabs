@@ -69,6 +69,8 @@ export interface MandalaStatus {
   cached: boolean;
   /** True when a rule or a shelf link already sends this page's time to Mandala on its own. */
   autoLogged?: boolean;
+  /** What the time tracker has counted on this page today, in either mode: the time Mandala will get. */
+  trackedSeconds?: number;
   activeChartTitle?: string;
   /** Pillars the person has named, or all eight when none are named yet. */
   pillars: CachedMandalaPillar[];

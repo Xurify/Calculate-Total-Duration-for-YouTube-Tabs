@@ -80,6 +80,8 @@ let pendingTranscript: { videoId: string; request: Promise<ImmersionTranscript |
 
 let sessionWatchedSeconds = 0;
 let lastWatchTickTimestamp = Date.now();
+let lastWatchMediaTime: number | null = null;
+let lastMandalaStatusCheck = 0;
 let watchedTimerInterval: ReturnType<typeof setInterval> | null = null;
 
 let sentencePlayback: {
@@ -761,6 +763,7 @@ async function triggerClozeCardCapture(): Promise<void> {
 }
 
 async function checkMandalaStatusForCurrentPage(): Promise<void> {
+  lastMandalaStatusCheck = Date.now();
   try {
     const status = (await browser.runtime.sendMessage({
       action: "check-mandala-status",
@@ -1434,11 +1437,12 @@ function updateImmersionHud(): void {
     hudContainer.appendChild(popover);
   }
 
-  if (latestMandalaStatus.autoLogged && (watchedMinutes >= 1 || savedPillarIndexes.length > 0)) {
+  const trackedMinutes = Math.floor((latestMandalaStatus.trackedSeconds ?? 0) / 60);
+  if (latestMandalaStatus.autoLogged && (trackedMinutes >= 1 || savedPillarIndexes.length > 0)) {
     const autoLabel = hudButton(
       hudIcon("clock"),
-      watchedMinutes >= 1 ? `${watchedMinutes} min` : "Counting",
-      "This video's time reaches Mandala on its own, through the time tracker"
+      trackedMinutes >= 1 ? `${trackedMinutes} min` : "Counting",
+      "Time on this video today that reaches Mandala on its own: while this tab is in front, or playing with sound behind another"
     );
     autoLabel.disabled = true;
     hudContainer.appendChild(autoLabel);
@@ -1511,6 +1515,7 @@ function initializeWatchPageFeatures(context: {
   if (currentWatchVideoId !== videoId) {
     currentWatchVideoId = videoId;
     sessionWatchedSeconds = 0;
+    lastWatchMediaTime = null;
     sentencePlayback = null;
     closeOpenClozeModal?.(false);
   }
@@ -1531,14 +1536,27 @@ function initializeWatchPageFeatures(context: {
       const elapsedMilliseconds = currentTimestamp - lastWatchTickTimestamp;
       lastWatchTickTimestamp = currentTimestamp;
 
+      if (latestMandalaStatus.autoLogged && currentTimestamp - lastMandalaStatusCheck >= 60_000) {
+        void checkMandalaStatusForCurrentPage();
+      }
+
       if (videoElement && !videoElement.paused && elapsedMilliseconds > 0) {
-        const minutesBefore = Math.floor(sessionWatchedSeconds / 60);
-        sessionWatchedSeconds += elapsedMilliseconds / 1000;
-        if (Math.floor(sessionWatchedSeconds / 60) !== minutesBefore) {
-          updateImmersionHud();
+        // Counted from how far the video moved, not the clock: a laptop asleep or a frozen tab leaves a
+        // video "playing" for hours, and a seek is not watching.
+        const mediaTime = videoElement.currentTime;
+        const advancedSeconds = lastWatchMediaTime === null ? 0 : (mediaTime - lastWatchMediaTime) / (videoElement.playbackRate || 1);
+        lastWatchMediaTime = mediaTime;
+        if (advancedSeconds > 0 && advancedSeconds <= elapsedMilliseconds / 1000 + 1) {
+          const minutesBefore = Math.floor(sessionWatchedSeconds / 60);
+          sessionWatchedSeconds += advancedSeconds;
+          if (Math.floor(sessionWatchedSeconds / 60) !== minutesBefore) {
+            updateImmersionHud();
+          }
         }
 
         checkSentencePlayback(videoElement);
+      } else {
+        lastWatchMediaTime = null;
       }
     }, 100);
   }

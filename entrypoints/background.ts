@@ -149,7 +149,7 @@ export default defineBackground(() => {
       void siteTracker
         .describeTab(tabId, message.url as string | undefined)
         .then((site) => sendResponse(site))
-        .catch((error) => sendResponse({ match: null, todayMinutes: 0, runningSeconds: 0, errorMessage: String(error) }));
+        .catch((error) => sendResponse({ match: null, todayMinutes: 0, runningSeconds: 0, pageSeconds: 0, errorMessage: String(error) }));
       return true;
     }
 
@@ -374,7 +374,7 @@ export default defineBackground(() => {
       void handleCheckMandalaStatus(message.url as string)
         .then(async (result) => {
           const site = await siteTracker.describeTab(sender.tab?.id, message.url as string);
-          sendResponse({ ...result, autoLogged: site.match !== null });
+          sendResponse({ ...result, autoLogged: site.match !== null, trackedSeconds: site.pageSeconds });
         })
         .catch((error) =>
           sendResponse({

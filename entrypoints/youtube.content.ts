@@ -946,9 +946,13 @@ function injectImmersionStyles(): void {
       filter: brightness(1.06);
     }
     .study-harvester-shelf-popover {
-      position: absolute;
-      top: calc(100% + 8px);
-      right: 0;
+      --sh-ink: #f4efe6;
+      --sh-muted: rgba(244, 239, 230, 0.62);
+      --sh-glass-strong: rgba(14, 12, 11, 0.86);
+      --sh-line: rgba(255, 255, 255, 0.1);
+      --sh-accent: #f0b65a;
+      position: fixed;
+      z-index: 2147483644;
       min-width: 230px;
       padding: 8px;
       border-radius: 16px;
@@ -957,6 +961,7 @@ function injectImmersionStyles(): void {
       backdrop-filter: blur(18px) saturate(140%);
       -webkit-backdrop-filter: blur(18px) saturate(140%);
       box-shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.9);
+      color: var(--sh-ink);
       display: flex;
       flex-direction: column;
       animation: study-harvester-rise 0.18s ease-out;
@@ -1271,11 +1276,38 @@ function injectImmersionStyles(): void {
   document.head.appendChild(styleElement);
 }
 
+function removeShelfPopover(): void {
+  document.getElementById("study-harvester-shelf-popover")?.remove();
+}
+
+/** Fullscreen is its own layer, so the menu has to live inside it or it disappears. */
+function shelfPopoverRoot(): HTMLElement {
+  return document.fullscreenElement instanceof HTMLElement ? document.fullscreenElement : document.documentElement;
+}
+
+function placeShelfPopover(popover: HTMLElement): void {
+  const anchor = document.getElementById("study-harvester-player-hud");
+  if (!anchor) return;
+  const rect = anchor.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return;
+  const gap = 8;
+  popover.style.top = `${Math.round(rect.bottom + gap)}px`;
+  popover.style.right = `${Math.max(gap, Math.round(window.innerWidth - rect.right))}px`;
+  popover.style.left = "auto";
+}
+
+function mountShelfPopover(popover: HTMLElement): void {
+  placeShelfPopover(popover);
+  const root = shelfPopoverRoot();
+  if (popover.parentElement !== root) root.appendChild(popover);
+}
+
 function removeImmersionHud(): void {
   const existingHud = document.getElementById("study-harvester-player-hud");
   if (existingHud) {
     existingHud.remove();
   }
+  removeShelfPopover();
   stopHudLayoutWatch();
 }
 
@@ -1293,6 +1325,8 @@ function layoutHudAroundNativeControls(): void {
   const playerContainer = hudContainer?.parentElement;
   if (!hudContainer || !playerContainer) return;
   placeHudBelowNativeControls(hudContainer, playerContainer, (element) => element.closest(OWN_OVERLAY_SELECTOR) !== null);
+  const popover = document.getElementById("study-harvester-shelf-popover");
+  if (popover instanceof HTMLElement) mountShelfPopover(popover);
 }
 
 function scheduleHudLayout(): void {
@@ -1375,6 +1409,7 @@ function updateImmersionHud(): void {
   }
 
   injectImmersionStyles();
+  removeShelfPopover();
 
   const playerContainer = getTargetPlayerContainer();
   let hudContainer = document.getElementById("study-harvester-player-hud");
@@ -1411,13 +1446,14 @@ function updateImmersionHud(): void {
 
   if (isPillarPopoverOpen) {
     const popover = document.createElement("div");
+    popover.id = "study-harvester-shelf-popover";
     popover.className = "study-harvester-shelf-popover";
     popover.addEventListener("click", (clickEvent) => clickEvent.stopPropagation());
 
     if (popoverPillarIndex === null) fillPillarList(popover);
     else fillActionList(popover, popoverPillarIndex);
 
-    hudContainer.appendChild(popover);
+    mountShelfPopover(popover);
   }
 
   const trackedMinutes = Math.floor((latestMandalaStatus.trackedSeconds ?? 0) / 60);
@@ -1777,6 +1813,13 @@ export default defineContentScript({
         updateImmersionHud();
       }
     });
+    const repositionShelfPopover = () => {
+      const popover = document.getElementById("study-harvester-shelf-popover");
+      if (popover instanceof HTMLElement) mountShelfPopover(popover);
+    };
+    context.addEventListener(window, "scroll", repositionShelfPopover, true);
+    context.addEventListener(window, "resize", repositionShelfPopover);
+    context.addEventListener(document, "fullscreenchange", repositionShelfPopover);
 
     const handleNavigation = () => {
       if (isWatchOrShorts()) {

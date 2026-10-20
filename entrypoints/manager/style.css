@@ -169,7 +169,7 @@ body {
   }
 
   .facet {
-    @apply relative w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md border-0 bg-transparent text-left cursor-pointer transition-colors text-[13px] text-text-secondary hover:bg-surface-hover/60 hover:text-text-primary;
+    @apply w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md border-0 bg-transparent text-left cursor-pointer transition-colors text-[13px] text-text-secondary hover:bg-surface-hover/60 hover:text-text-primary;
   }
 
   .facet-icon {
@@ -223,16 +223,6 @@ body {
 
   .facet--active .facet-time {
     @apply text-text-primary;
-  }
-
-  /* Starts on the name column, like .facet-head. */
-  .facet-share {
-    @apply absolute left-7 right-2 bottom-0.5 h-0.5 rounded-full overflow-hidden pointer-events-none;
-    background: color-mix(in srgb, var(--color-border) 55%, transparent);
-  }
-
-  .facet-share > span {
-    @apply block h-full rounded-full opacity-70;
   }
 
   .facet.section-drop-target--active {

@@ -2931,7 +2931,7 @@ function renderMain() {
   if (isTimeView) {
     if (viewToolbar) viewToolbar.classList.add("hidden");
     headerTitle.innerText = "where the time went";
-    headerStats.innerText = "What you watched on YouTube: how long, in which language, from which channels.";
+    headerStats.innerText = "";
     setDeskHero({ kicker: "Time", title: "", value: "…", suffix: "" });
     lastTabListFingerprint = "";
     void renderTimePanel();
@@ -3304,31 +3304,27 @@ function facetIconHtml(row: FacetRow): string {
   return `<span class="facet-icon">${icon}</span>`;
 }
 
-/** `longest` is the group's biggest row, so a row's bar shows its time against the leader's. */
-function facetButtonHtml(row: FacetRow, extraAttrs = "", longest = 0): string {
+function facetButtonHtml(row: FacetRow, extraAttrs = ""): string {
   const active = facetIsActive(row);
   const dot = facetIconHtml(row);
   const hasTime = row.count > 0 && row.seconds > 0;
   const timeWords = hasTime ? `, ${formatDurationWords(row.seconds)}${selectedSession == null ? " left to watch" : ""}` : "";
   const title = `${row.label}: ${row.count} ${row.count === 1 ? "video" : "videos"}${timeWords}`;
-  const share = longest > 0 && hasTime ? Math.max(2, Math.round((row.seconds / longest) * 100)) : 0;
   return `
     <button type="button" class="facet${active ? " facet--active" : ""}${row.muted ? " facet--muted" : ""}" data-facet-kind="${row.kind}" data-facet-value="${escapeHtml(row.value)}"${extraAttrs} aria-pressed="${active}" title="${escapeHtml(title)}">
       ${dot}
       <span class="facet-name">${escapeHtml(row.label)}</span>
       <span class="facet-count" aria-label="${row.count} ${row.count === 1 ? "video" : "videos"}">${row.count}</span>
       <span class="facet-time">${hasTime ? formatShortDuration(row.seconds) : ""}</span>
-      ${share ? `<span class="facet-share" aria-hidden="true"><span style="width: ${share}%; background: ${row.color ?? "var(--color-accent)"}"></span></span>` : ""}
     </button>`;
 }
 
 function facetGroupHtml(title: string, rows: FacetRow[], trailing = "", extraClass = ""): string {
   if (rows.length === 0 && !trailing) return "";
-  const longest = Math.max(0, ...rows.map((row) => row.seconds));
   return `
     <div class="facet-group${extraClass ? ` ${extraClass}` : ""}">
       <div class="facet-head">${escapeHtml(title)}</div>
-      ${rows.map((row) => facetButtonHtml(row, row.sectionId || row.value === "__unsorted" ? ` data-section-wrapper="${escapeHtml(row.value)}"` : "", longest)).join("")}
+      ${rows.map((row) => facetButtonHtml(row, row.sectionId || row.value === "__unsorted" ? ` data-section-wrapper="${escapeHtml(row.value)}"` : "")).join("")}
       ${trailing}
     </div>`;
 }
@@ -5804,29 +5800,26 @@ function watchStatTile(label: string, value: string, note: string): string {
   return `<div class="flex flex-col gap-0.5 min-w-0 rounded-[10px] border border-border bg-surface-elevated px-4 py-3">
     <span class="text-[11px] uppercase tracking-[0.1em] text-text-muted">${escapeHtml(label)}</span>
     <span class="font-display text-[26px] leading-tight text-text-primary tabular-nums truncate">${escapeHtml(value)}</span>
-    <span class="text-xs text-text-muted truncate">${escapeHtml(note)}</span>
+    <span class="text-xs text-text-muted truncate min-h-4">${escapeHtml(note)}</span>
   </div>`;
 }
 
 function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): string {
   const total = watch.total;
   if (total.playedSeconds <= 0) {
-    const empty = prefs.watchHistory
-      ? "Nothing watched in this range yet. Play a YouTube video and it shows up here: what you watched, for how long, in which language."
-      : "The YouTube watch history is off. Turn it on under Tracking below.";
-    return `<div class="rounded-[10px] border border-border bg-surface-elevated px-4 py-3 text-sm text-text-secondary">${empty}</div>`;
+    return `<p class="text-sm text-text-muted m-0">${prefs.watchHistory ? "Nothing watched yet." : "Watch history is off."}</p>`;
   }
 
   const speed = total.videoSeconds / total.playedSeconds;
   const saved = total.videoSeconds - total.playedSeconds;
   const background = Math.max(0, total.playedSeconds - total.visibleSeconds);
   const tilesHtml = [
-    watchStatTile("Videos", String(total.videos), `${total.completed} finished${total.shortsSeconds > 0 ? ` · ${formatMinutesWords(total.shortsSeconds)} of Shorts` : ""}`),
-    watchStatTile("Average speed", speedWords(speed), saved >= 60 ? `${formatMinutesWords(saved)} saved` : saved <= -60 ? `${formatMinutesWords(-saved)} longer than at 1×` : "about normal speed"),
-    watchStatTile("With subtitles", shareWords(total.captionSeconds, total.playedSeconds), `${formatMinutesWords(total.captionSeconds)} with subtitles on`),
-    watchStatTile("In the background", shareWords(background, total.playedSeconds), `${formatMinutesWords(background)} heard from another tab`),
-    watchStatTile("Streak", `${watch.streak.current} ${watch.streak.current === 1 ? "day" : "days"}`, `Longest ${watch.streak.longest} ${watch.streak.longest === 1 ? "day" : "days"}`),
-    watchStatTile("Ads", formatMinutesWords(total.adSeconds), "Not counted as watching"),
+    watchStatTile("Videos", String(total.videos), `${total.completed} finished`),
+    watchStatTile("Speed", speedWords(speed), saved >= 60 ? `${formatMinutesWords(saved)} saved` : ""),
+    watchStatTile("Subtitles", shareWords(total.captionSeconds, total.playedSeconds), formatMinutesWords(total.captionSeconds)),
+    watchStatTile("Background", shareWords(background, total.playedSeconds), formatMinutesWords(background)),
+    watchStatTile("Streak", `${watch.streak.current} ${watch.streak.current === 1 ? "day" : "days"}`, `Best ${watch.streak.longest}`),
+    watchStatTile("Ads", formatMinutesWords(total.adSeconds), ""),
   ].join("");
 
   const peakDay = Math.max(60, ...watch.days.map((day) => day.seconds));
@@ -5886,11 +5879,7 @@ function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): strin
     .slice(0, WATCH_VIDEO_ROWS)
     .map((video) => {
       const url = video.isShort ? `https://www.youtube.com/shorts/${encodeURIComponent(video.videoId)}` : `https://www.youtube.com/watch?v=${encodeURIComponent(video.videoId)}`;
-      const progress = video.isLive
-        ? `<span class="text-[11px] text-text-muted">Live</span>`
-        : video.durationSeconds > 0
-          ? `<span class="w-16 h-1.5 rounded-full bg-surface-elevated overflow-hidden" title="${shareWords(video.coverage, 1)} of ${formatMinutesWords(video.durationSeconds)}"><span class="block h-full bg-accent" style="width:${Math.round(video.coverage * 100)}%"></span></span>`
-          : "";
+      const progress = video.isLive ? "Live" : video.durationSeconds > 0 ? shareWords(video.coverage, 1) : "";
       const speed = video.playedSeconds > 0 ? video.videoSeconds / video.playedSeconds : 1;
       return `<li class="flex items-center gap-3 min-w-0 text-sm">
         <img src="https://i.ytimg.com/vi/${encodeURIComponent(video.videoId)}/mqdefault.jpg" alt="" loading="lazy" class="w-16 h-9 rounded object-cover shrink-0 bg-surface-elevated" />
@@ -5898,7 +5887,7 @@ function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): strin
           <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="truncate text-text-primary no-underline hover:text-accent" title="${escapeHtml(video.title || video.videoId)}">${escapeHtml(video.title || video.videoId)}</a>
           <span class="truncate text-xs text-text-muted">${escapeHtml([video.channelName, video.language, Math.abs(speed - 1) >= 0.05 ? speedWords(speed) : "", timeAgoWords(video.lastAt)].filter(Boolean).join(" · "))}</span>
         </span>
-        ${progress}
+        <span class="w-12 text-right text-xs text-text-muted tabular-nums" title="${video.durationSeconds > 0 ? `Of ${formatMinutesWords(video.durationSeconds)}` : ""}">${progress}</span>
         <span class="w-20 text-right text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(video.playedSeconds)}</span>
       </li>`;
     })
@@ -5907,26 +5896,26 @@ function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): strin
   return `
     <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">${tilesHtml}</div>
     <section class="flex flex-col gap-3">
-      ${timeSectionHeading("By day")}
+      ${timeSectionHeading(
+        "By day",
+        `<span class="flex items-center gap-3 text-xs text-text-muted"><span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-accent"></span>On screen</span><span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-accent/35"></span>Background</span></span>`
+      )}
       <div class="grid ${dense ? "gap-px" : "gap-1.5"}" style="grid-template-columns: repeat(${watch.days.length}, minmax(0, 1fr))">${daysHtml}</div>
-      <p class="text-xs text-text-muted m-0">Solid is on screen; light is heard from another tab. Watched on ${total.activeDays} of ${watch.days.length} days, in ${total.sittings} ${total.sittings === 1 ? "sitting" : "sittings"}. Paused, buffering and ad time is left out.</p>
     </section>
     <section class="flex flex-col gap-3">
       ${timeSectionHeading("Languages")}
       <ul class="m-0 p-0 list-none flex flex-col gap-2">${languagesHtml}</ul>
-      <p class="text-xs text-text-muted m-0">A language you set for a video or a channel on the desk counts here too.</p>
     </section>
     <section class="flex flex-col gap-3">
       ${timeSectionHeading("Time of day")}
       <div class="grid gap-1" style="grid-template-columns: repeat(24, minmax(0, 1fr))">${hoursHtml}</div>
-      <p class="text-xs text-text-muted m-0">You watch most around ${escapeHtml(hourWords(peakHour))}.</p>
     </section>
     <section class="flex flex-col gap-3">
       ${timeSectionHeading("Channels")}
       <table class="w-full border-collapse"><thead><tr class="text-[11px] uppercase tracking-[0.1em] text-text-muted text-left"><th class="font-semibold pb-1 pr-3">Channel</th><th class="font-semibold pb-1 pr-3">Language</th><th class="font-semibold pb-1 pr-3">Videos</th><th class="font-semibold pb-1 text-right">Watched</th></tr></thead><tbody>${channelsHtml}</tbody></table>
     </section>
     <section class="flex flex-col gap-3">
-      ${timeSectionHeading("Videos", `<span class="text-xs text-text-muted">${watch.videos.length > WATCH_VIDEO_ROWS ? `Latest ${WATCH_VIDEO_ROWS} of ${watch.videos.length}` : ""}</span>`)}
+      ${timeSectionHeading("Videos", `<span class="text-xs text-text-muted tabular-nums">${watch.videos.length > WATCH_VIDEO_ROWS ? `${WATCH_VIDEO_ROWS} of ${watch.videos.length}` : ""}</span>`)}
       <ul class="m-0 p-0 list-none flex flex-col gap-2.5">${videosHtml}</ul>
     </section>
   `;
@@ -5950,7 +5939,7 @@ function mandalaSectionHtml(data: TimeSummaryResponse): string {
           </li>`
         )
         .join("")
-    : `<li class="text-sm text-text-muted">Nothing counted for a pillar yet. Open a page that is on a Mandala shelf, or give a site a pillar from the popup.</li>`;
+    : `<li class="text-sm text-text-muted">Nothing counted yet.</li>`;
 
   const sitesHtml = summary.bySite.length
     ? summary.bySite
@@ -5995,29 +5984,28 @@ function mandalaSectionHtml(data: TimeSummaryResponse): string {
 
   const pendingHtml =
     summary.pendingMinutes > 0
-      ? `<div class="flex items-center gap-3 rounded-[10px] border border-border bg-surface-elevated px-4 py-3 text-sm text-text-secondary"><span class="flex-1">${summary.pendingMinutes} min waiting to reach Mandala. It lands next time Mandala is open.</span><button type="button" id="time-open-mandala" class="chip h-8 text-xs">Open Mandala</button></div>`
+      ? `<div class="flex items-center gap-3 rounded-[10px] border border-border bg-surface-elevated px-4 py-3 text-sm text-text-secondary"><span class="flex-1">${summary.pendingMinutes} min not sent yet</span><button type="button" id="time-open-mandala" class="chip h-8 text-xs">Open Mandala</button></div>`
       : "";
   const noPillars = !mandala || pillarChoices(mandala).every((pillar) => !mandala.pillars.find((each) => each.index === pillar.index)?.named);
   const counted = summary.total.active + summary.total.passive;
   const inUse = rules.length > 0 || counted > 0 || summary.pendingMinutes > 0;
 
   return `
-    <details class="group flex flex-col gap-4 pt-6 border-t border-border"${inUse ? " open" : ""}>
-      <summary class="flex flex-col gap-1 cursor-pointer list-none">
+    <details class="group flex flex-col gap-4"${inUse ? " open" : ""}>
+      <summary class="flex items-center gap-3 cursor-pointer list-none">
         <h2 class="font-display text-[22px] font-medium m-0 flex items-center gap-2">Mandala<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-text-muted transition-transform group-open:rotate-90" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></h2>
-        <p class="text-xs text-text-muted m-0">Optional. Give a site, a page or a pile a Mandala pillar, and the minutes spent there are sent to Mandala. ${counted > 0 ? `${formatMinutesWords(summary.total.active)} active and ${formatMinutesWords(summary.total.passive)} in the background counted in this range.` : ""}</p>
+        ${counted > 0 ? `<span class="text-sm text-text-muted tabular-nums">${formatMinutesWords(counted)}</span>` : ""}
       </summary>
       <div class="flex flex-col gap-4 mt-4">
       ${pendingHtml}
-      ${noPillars ? `<div class="rounded-[10px] border border-border bg-surface-elevated px-4 py-3 text-sm text-text-secondary">Open Mandala once so your pillar names and actions show here. Rules made before that point at pillars by number.</div>` : ""}
+      ${noPillars ? `<p class="text-sm text-text-muted m-0">Open Mandala once to load your pillar names.</p>` : ""}
       <h3 class="text-sm font-semibold text-text-secondary m-0">By pillar</h3>
       <ul class="m-0 p-0 list-none flex flex-col gap-2">${pillarsHtml}</ul>
       <h3 class="text-sm font-semibold text-text-secondary m-0 mt-2">Sites</h3>
       <table class="w-full border-collapse"><thead><tr class="text-[11px] uppercase tracking-[0.1em] text-text-muted text-left"><th class="font-semibold pb-1 pr-3">Site</th><th class="font-semibold pb-1 pr-3">Counts for</th><th class="font-semibold pb-1 pr-3">Active</th><th class="font-semibold pb-1 pr-3">Background</th><th class="font-semibold pb-1 pr-3">Last</th><th></th></tr></thead><tbody>${sitesHtml}</tbody></table>
-      ${prefixHtml ? `<h3 class="text-sm font-semibold text-text-secondary m-0 mt-2">Pages counted on their own</h3><ul class="m-0 p-0 list-none flex flex-col gap-2">${prefixHtml}</ul>` : ""}
+      ${prefixHtml ? `<h3 class="text-sm font-semibold text-text-secondary m-0 mt-2">Pages</h3><ul class="m-0 p-0 list-none flex flex-col gap-2">${prefixHtml}</ul>` : ""}
       <h3 class="text-sm font-semibold text-text-secondary m-0 mt-2">Piles</h3>
-      <p class="text-xs text-text-muted m-0">A pile that counts for a pillar sends every video in it to Mandala, without saving each one to a shelf.</p>
-      ${pileRows ? `<ul class="m-0 p-0 list-none flex flex-col gap-2">${pileRows}</ul>` : `<p class="text-sm text-text-muted m-0">No piles on the desk yet.</p>`}
+      ${pileRows ? `<ul class="m-0 p-0 list-none flex flex-col gap-2">${pileRows}</ul>` : `<p class="text-sm text-text-muted m-0">No piles yet.</p>`}
       </div>
     </details>
   `;
@@ -6039,6 +6027,11 @@ async function renderTimePanel(): Promise<void> {
   if (!isTimeView) return;
   lastTimeResponse = data;
   const { watch, prefs } = data;
+  const headerStats = document.getElementById("current-view-stats");
+  if (headerStats) {
+    const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+    headerStats.textContent = watch.total.videos > 0 ? [plural(watch.total.videos, "video"), plural(watch.byLanguage.length, "language"), plural(watch.byChannel.length, "channel")].join(" · ") : "";
+  }
   setDeskHero({
     kicker: "Time",
     title: "",
@@ -6051,28 +6044,24 @@ async function renderTimePanel(): Promise<void> {
   </span>`;
 
   panel.innerHTML = `
-    <div class="flex items-center gap-3">
-      <p class="text-sm text-text-secondary m-0 flex-1">YouTube videos you played, measured by the player: paused, buffering and ad time is left out.</p>
-      ${rangeHtml}
-    </div>
+    <div class="flex justify-end">${rangeHtml}</div>
     ${watchSectionsHtml(watch, prefs)}
     ${mandalaSectionHtml(data)}
-    <section class="flex flex-col gap-3 pb-6 pt-6 border-t border-border">
+    <section class="flex flex-col gap-3 pb-6">
       <h2 class="font-display text-[22px] font-medium m-0">Tracking</h2>
       <div class="flex flex-wrap items-center gap-x-5 gap-y-3">
-        <label class="flex items-center gap-2 text-sm text-text-primary cursor-pointer"><input type="checkbox" id="time-watch-history" class="w-4 h-4 accent-accent"${prefs.watchHistory ? " checked" : ""} /> Keep a YouTube watch history</label>
-        <label class="flex items-center gap-2 text-sm text-text-primary cursor-pointer"><input type="checkbox" id="time-enabled" class="w-4 h-4 accent-accent"${prefs.enabled ? " checked" : ""} /> Count time on pages for Mandala</label>
-        <label class="flex items-center gap-2 text-sm text-text-secondary">Away after
+        <label class="flex items-center gap-2 text-sm text-text-primary cursor-pointer"><input type="checkbox" id="time-watch-history" class="w-4 h-4 accent-accent"${prefs.watchHistory ? " checked" : ""} /> YouTube history</label>
+        <label class="flex items-center gap-2 text-sm text-text-primary cursor-pointer"><input type="checkbox" id="time-enabled" class="w-4 h-4 accent-accent"${prefs.enabled ? " checked" : ""} /> Mandala page time</label>
+        <label class="flex items-center gap-2 text-sm text-text-secondary">Idle after
           <select id="time-idle" class="h-8 px-2 rounded-md border border-border bg-surface-elevated text-xs text-text-primary">
             ${[30, 60, 120, 300].map((seconds) => `<option value="${seconds}"${prefs.idleSeconds === seconds ? " selected" : ""}>${seconds < 60 ? `${seconds} s` : `${seconds / 60} min`}</option>`).join("")}
           </select>
-          without input
         </label>
         <span class="flex-1"></span>
         <button type="button" id="time-export" class="chip h-8 text-xs">Export JSON</button>
         <button type="button" id="time-clear" class="chip h-8 text-xs chip--danger">Delete all time data</button>
       </div>
-      <p class="text-xs text-text-muted m-0">Everything stays in this browser. The watch history keeps a year: each video's title, channel, language and how long it played. Page time for Mandala keeps only pages that count for a pillar, for 90 days, and Mandala gets whole minutes and the page's shelf link, never the page itself.</p>
+      <p class="text-xs text-text-muted m-0">Stored only in this browser.</p>
     </section>
   `;
   panel.setAttribute("aria-busy", "false");

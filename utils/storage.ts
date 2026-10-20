@@ -69,11 +69,15 @@ export interface MandalaStatus {
   cached: boolean;
   /** True when a rule or a shelf link already sends this page's time to Mandala on its own. */
   autoLogged?: boolean;
+  /** What the time tracker has counted on this page today, in either mode: the time Mandala will get. */
+  trackedSeconds?: number;
   activeChartTitle?: string;
   /** Pillars the person has named, or all eight when none are named yet. */
   pillars: CachedMandalaPillar[];
   /** Every pillar whose shelf already holds this video. */
   savedPillarIndexes: number[];
+  /** This video's shelf links, with the action each one's time goes to, when it names one. */
+  savedLinks?: { pillarIndex: number; action?: string }[];
 }
 
 export function shelfLinksForVideo(
@@ -103,6 +107,7 @@ export function mandalaStatusFor(
     savedPillarIndexes: [...new Set(shelfLinksForVideo(summary.shelfLinks, rawUrl).map((link) => link.pillarIndex))].sort(
       (first, second) => first - second
     ),
+    savedLinks: shelfLinksForVideo(summary.shelfLinks, rawUrl).map((link) => ({ pillarIndex: link.pillarIndex, action: link.action })),
   };
 }
 
@@ -112,6 +117,7 @@ export interface PendingMandalaShelfLink {
   url: string;
   title: string;
   kind?: string;
+  action?: string;
   timestamp: number;
 }
 

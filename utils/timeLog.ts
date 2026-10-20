@@ -266,16 +266,25 @@ export interface Stretch {
   match: RuleMatch;
 }
 
+/** When the page was last counted in either mode, among its open entries. */
+function lastSeenOnPage(entries: readonly TimeEntry[], url: string): number {
+  let lastSeen = 0;
+  for (const entry of entries) if (entry.open && entry.url === url) lastSeen = Math.max(lastSeen, entry.endedAt);
+  return lastSeen;
+}
+
 /**
- * Adds a measured stretch to the log. A stretch on the same page, in the same mode, that follows an open
- * entry within the merge gap extends it; anything else starts an entry. Returns the log, changed in place.
+ * Adds a measured stretch to the log. A stretch on the same page, in the same mode, extends that mode's
+ * open entry while the page has been counted, in either mode, within the merge gap; anything else starts
+ * an entry. Switching tabs while a video plays flips it between active and passive, and without looking
+ * at both modes each flip would cut the session into minute-sized pieces. Returns the log, changed in place.
  */
 export function recordStretch(entries: TimeEntry[], stretch: Stretch): TimeEntry[] {
   const seconds = Math.round((stretch.endedAt - stretch.startedAt) / 1000);
   if (seconds < MIN_STRETCH_SECONDS) return entries;
   const url = normalizePageUrl(stretch.url);
   const last = [...entries].reverse().find((entry) => entry.open && entry.url === url && entry.mode === stretch.mode);
-  if (last && stretch.startedAt - last.endedAt <= MERGE_GAP_MS && samePlace(last, stretch.match)) {
+  if (last && stretch.startedAt - lastSeenOnPage(entries, url) <= MERGE_GAP_MS && samePlace(last, stretch.match)) {
     last.endedAt = stretch.endedAt;
     last.seconds += seconds;
     if (stretch.title) last.title = stretch.title;
@@ -306,11 +315,13 @@ function samePlace(entry: TimeEntry, match: RuleMatch): boolean {
   return entry.pillarIndex === match.pillarIndex && entry.actionId === match.actionId && entry.linkId === match.linkId;
 }
 
-/** Closes entries nothing has extended for a merge gap, so they can go to Mandala. */
+/** Closes entries whose page nothing has counted for a merge gap, so they can go to Mandala. */
 export function closeStaleEntries(entries: TimeEntry[], now: number = Date.now()): boolean {
   let changed = false;
+  const lastSeen = new Map<string, number>();
+  for (const entry of entries) if (entry.open) lastSeen.set(entry.url, Math.max(lastSeen.get(entry.url) ?? 0, entry.endedAt));
   for (const entry of entries) {
-    if (entry.open && now - entry.endedAt > MERGE_GAP_MS) {
+    if (entry.open && now - lastSeen.get(entry.url)! > MERGE_GAP_MS) {
       entry.open = false;
       changed = true;
     }

@@ -6,6 +6,7 @@ import {
   loadTimeLog,
   loadTimeTrackingPrefs,
   matchRules,
+  normalizePageUrl,
   pendingForMandala,
   pillarColor,
   recordStretch,
@@ -342,14 +343,31 @@ export class SiteTracker {
   }
 
   /** Where a tab's time goes, and how much went there today, for the popup and the player. */
-  async describeTab(tabId: number | undefined, url: string | undefined): Promise<{ match: RuleMatch | null; todayMinutes: number; runningSeconds: number }> {
+  async describeTab(
+    tabId: number | undefined,
+    url: string | undefined
+  ): Promise<{ match: RuleMatch | null; todayMinutes: number; runningSeconds: number; pageSeconds: number }> {
     await this.#ready;
     const match = url && this.#prefs.enabled ? this.matchFor(url) : null;
-    if (!match) return { match: null, todayMinutes: 0, runningSeconds: 0 };
-    const today = summarize(await this.#getLog(), 1).byPillar[match.pillarIndex];
+    if (!match || !url) return { match: null, todayMinutes: 0, runningSeconds: 0, pageSeconds: 0 };
+    const log = await this.#getLog();
+    const today = summarize(log, 1).byPillar[match.pillarIndex];
+    const now = Date.now();
     const active = this.#state.active;
-    const running = active && active.tabId === tabId ? Math.round((Date.now() - active.since) / 1000) : 0;
-    return { match, todayMinutes: Math.floor((today.active + today.passive + running) / 60), runningSeconds: running };
+    const running = active && active.tabId === tabId ? Math.round((now - active.since) / 1000) : 0;
+    const page = normalizePageUrl(url);
+    const passive = tabId === undefined ? undefined : this.#state.passive[String(tabId)];
+    const runningOnPage = [active?.tabId === tabId ? active : undefined, passive]
+      .filter((stretch): stretch is OpenStretch => Boolean(stretch) && normalizePageUrl(stretch!.url) === page)
+      .reduce((sum, stretch) => sum + Math.max(0, Math.round((now - stretch.since) / 1000)), 0);
+    const midnight = new Date(now).setHours(0, 0, 0, 0);
+    const loggedOnPage = log.filter((entry) => entry.url === page && entry.endedAt >= midnight).reduce((sum, entry) => sum + entry.seconds, 0);
+    return {
+      match,
+      todayMinutes: Math.floor((today.active + today.passive + running) / 60),
+      runningSeconds: running,
+      pageSeconds: loggedOnPage + runningOnPage,
+    };
   }
 
   /** Read back from storage inside the queue, so a reader sees every write that came before it. */

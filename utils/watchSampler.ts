@@ -31,7 +31,7 @@ interface SamplerContext {
 
 const TICK_MS = 1000;
 const FLUSH_MS = 15_000;
-/** A longer gap between ticks means the machine slept or the tab was frozen, and that was not watching. */
+/** Ignore ticks after sleep or tab freeze — that gap was not watching. */
 const MAX_TICK_GAP_MS = 2500;
 
 function mainVideo(): HTMLVideoElement | null {
@@ -42,10 +42,6 @@ function mainVideo(): HTMLVideoElement | null {
   );
 }
 
-/**
- * Counts the seconds a YouTube video really plays on this page and hands them to the background in
- * batches. Paused, buffering, ad, and muted-in-a-hidden-tab seconds are not watching.
- */
 export class WatchSampler {
   #pending: Pending | null = null;
   #lastTick = Date.now();
@@ -63,7 +59,7 @@ export class WatchSampler {
     context.setInterval(() => this.flush(), FLUSH_MS);
     context.addEventListener(document, "visibilitychange", () => this.flush());
     context.addEventListener(window, "pagehide", () => this.flush());
-    // Media events do not bubble, so they are caught on the way down.
+    // Media events do not bubble; capture phase on document.
     context.addEventListener(document, "pause", () => this.flush(), true);
     context.addEventListener(document, "ended", () => this.flush(), true);
   }
@@ -135,7 +131,6 @@ export class WatchSampler {
     void this.options.send(sample).catch(() => this.#putBack(pending));
   }
 
-  /** The background was not there to take it, so the next batch carries it. */
   #putBack(sent: Pending): void {
     const current = this.#pending;
     if (!current) {

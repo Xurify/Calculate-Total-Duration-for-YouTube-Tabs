@@ -26,7 +26,6 @@ export function formatDurationWords(totalSeconds: number): string {
   return `${total} s`;
 }
 
-/** "3h 58m", "38m", "53s": for narrow columns where several durations line up. */
 export function formatShortDuration(totalSeconds: number): string {
   const total = Math.max(0, Math.floor(totalSeconds));
   const hours = Math.floor(total / 3600);

@@ -68,7 +68,6 @@ export interface TimeTrackingPrefs {
   enabled: boolean;
   /** Seconds without input before the active tab stops counting. */
   idleSeconds: number;
-  /** Keep a history of the YouTube videos played, with or without Mandala. */
   watchHistory: boolean;
 }
 

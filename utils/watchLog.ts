@@ -3,8 +3,8 @@ import { dateKeyOf } from "./timeLog";
 import { newTypeId } from "./typeId";
 
 /**
- * What was watched on YouTube, measured by the player on the page: a second counts while the video is
- * playing, is not an ad, and is either on screen or audible. It does not depend on any rule or on Mandala.
+ * YouTube watch history from the page player: counts while the video plays (not ads), on screen or audible.
+ * Independent of Mandala and site rules.
  */
 
 export interface WatchSample {
@@ -13,17 +13,13 @@ export interface WatchSample {
   channelName: string;
   language: string | null;
   languageName: string | null;
-  /** The video's length; 0 for a live stream. */
   durationSeconds: number;
   isLive: boolean;
   isShort: boolean;
   startedAt: number;
   endedAt: number;
-  /** Wall-clock seconds the video played. */
   playedSeconds: number;
-  /** Seconds of the video those covered: more than played above 1×, less below. */
   videoSeconds: number;
-  /** Played while the tab was on screen; the rest was heard from another tab. */
   visibleSeconds: number;
   captionSeconds: number;
   adSeconds: number;
@@ -31,19 +27,17 @@ export interface WatchSample {
 }
 
 export interface WatchEntry extends Omit<WatchSample, "position"> {
-  /** A `watch_` TypeID. */
   id: string;
   lastPosition: number;
-  /** Played seconds per local hour of the day, keyed "0" to "23". */
   hours: Record<string, number>;
 }
 
 export const WATCH_LOG_KEY = "watchLog";
-/** Two stretches of one video closer than this, on the same day, are one sitting. */
+/** Same video, same local day, gap under this → one sitting. */
 export const WATCH_MERGE_GAP_MS = 30 * 60_000;
 export const WATCH_KEEP_DAYS = 365;
 export const WATCH_MAX_ENTRIES = 6000;
-/** Watched to here or further counts as finished: end cards and credits are rarely sat through. */
+/** End cards and credits rarely get sat through; this share counts as finished. */
 export const COMPLETED_SHARE = 0.9;
 export const UNKNOWN_LANGUAGE = "Unknown language";
 
@@ -51,7 +45,6 @@ function finiteSeconds(value: unknown, max: number): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.min(value, max) : 0;
 }
 
-/** The sample as the background trusts it: numbers in range, strings trimmed. Null when there is nothing to keep. */
 export function cleanWatchSample(raw: unknown): WatchSample | null {
   if (!raw || typeof raw !== "object") return null;
   const sample = raw as Partial<WatchSample>;
@@ -85,7 +78,6 @@ export function cleanWatchSample(raw: unknown): WatchSample | null {
   };
 }
 
-/** Adds a sample to the log, extending the video's last sitting when it follows closely. Returns the log, changed in place. */
 export function recordWatchSample(entries: WatchEntry[], sample: WatchSample): WatchEntry[] {
   const last = [...entries].reverse().find((entry) => entry.videoId === sample.videoId);
   const hour = String(new Date(sample.endedAt).getHours());
@@ -103,7 +95,7 @@ export function recordWatchSample(entries: WatchEntry[], sample: WatchSample): W
     last.adSeconds += sample.adSeconds;
     last.lastPosition = sample.position;
     last.hours[hour] = (last.hours[hour] ?? 0) + sample.playedSeconds;
-    // Title, channel and language are read after playback starts, so a later sample fills them in.
+    // Title, channel and language arrive after playback starts.
     if (sample.title) last.title = sample.title;
     if (sample.channelName) last.channelName = sample.channelName;
     if (sample.language || sample.languageName) {
@@ -157,7 +149,6 @@ export interface WatchVideoRow {
   playedSeconds: number;
   videoSeconds: number;
   durationSeconds: number;
-  /** Share of the video covered in the range, 0 to 1; 0 for live streams. */
   coverage: number;
   sittings: number;
   lastAt: number;
@@ -182,14 +173,11 @@ export interface WatchSummary {
   };
   byLanguage: { label: string; seconds: number; videos: number }[];
   byChannel: { channelName: string; seconds: number; videos: number; language: string }[];
-  /** Played seconds per local hour of the day, 0 to 23. */
   byHour: number[];
   videos: WatchVideoRow[];
-  /** Days in a row with at least a minute watched, ending today or yesterday; and the longest such run in the log. */
   streak: { current: number; longest: number };
 }
 
-/** Days that hold at least a minute of watching count toward a streak. */
 const STREAK_DAY_SECONDS = 60;
 
 function streaksOf(entries: readonly WatchEntry[], now: number): { current: number; longest: number } {
@@ -223,7 +211,6 @@ function streaksOf(entries: readonly WatchEntry[], now: number): { current: numb
   return { current, longest };
 }
 
-/** Watching since local midnight `days` days ago, for the desk's Time view. */
 export function summarizeWatch(
   entries: readonly WatchEntry[],
   days = 7,

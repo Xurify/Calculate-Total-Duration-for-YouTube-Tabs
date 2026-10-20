@@ -69,7 +69,6 @@ const siteTracker = new SiteTracker(() => void notifyMandalaTabsOfPendingTime())
 let watchLog: WatchEntry[] | null = null;
 let watchQueue: Promise<unknown> = Promise.resolve();
 
-/** Runs watch-log work one piece at a time, so two tabs reporting at once never overwrite each other. */
 function withWatchLog<T>(work: (log: WatchEntry[]) => Promise<T> | T): Promise<T> {
   const run = watchQueue.then(async () => {
     watchLog ??= await loadWatchLog();

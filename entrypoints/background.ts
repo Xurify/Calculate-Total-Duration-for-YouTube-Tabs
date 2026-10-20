@@ -52,6 +52,8 @@ import {
   type TimeTrackingPrefs,
 } from "../utils/timeLog";
 import { getLiveTabSections } from "../utils/storage";
+import { cleanWatchSample, loadWatchLog, recordWatchSample, saveWatchLog, summarizeWatch, type WatchEntry, type WatchSample } from "../utils/watchLog";
+import { loadLanguageOverrides } from "../utils/languageOverrides";
 
 /** Tells every open Mandala tab there is time to take; the tab asks for it and posts it to the page. */
 async function notifyMandalaTabsOfPendingTime(): Promise<void> {
@@ -63,6 +65,28 @@ async function notifyMandalaTabsOfPendingTime(): Promise<void> {
 }
 
 const siteTracker = new SiteTracker(() => void notifyMandalaTabsOfPendingTime());
+
+let watchLog: WatchEntry[] | null = null;
+let watchQueue: Promise<unknown> = Promise.resolve();
+
+/** Runs watch-log work one piece at a time, so two tabs reporting at once never overwrite each other. */
+function withWatchLog<T>(work: (log: WatchEntry[]) => Promise<T> | T): Promise<T> {
+  const run = watchQueue.then(async () => {
+    watchLog ??= await loadWatchLog();
+    return work(watchLog);
+  });
+  watchQueue = run.catch((error) => console.warn("[Study Harvester] watch log:", error));
+  return run;
+}
+
+async function recordWatch(sample: WatchSample): Promise<void> {
+  const prefs = await loadTimeTrackingPrefs();
+  if (!prefs.watchHistory) return;
+  await withWatchLog(async (log) => {
+    recordWatchSample(log, sample);
+    await saveWatchLog(log);
+  });
+}
 
 const BATCH_FLUSH_MS = 80;
 let pendingCacheUpdates = new Map<string, { url: string; metadata: Omit<CachedMetadata, "timestamp"> }>();
@@ -138,9 +162,31 @@ export default defineBackground(() => {
 
     if (message.action === "get-time-summary") {
       const days = typeof message.days === "number" && message.days > 0 ? Math.min(90, Math.floor(message.days)) : 7;
-      void Promise.all([siteTracker.entries(), loadTimeTrackingPrefs(), loadSiteRules(), loadCachedMandalaSummary(), getLiveTabSections()])
-        .then(([entries, prefs, rules, mandala, piles]) => sendResponse({ summary: summarize(entries, days), prefs, rules, mandala, piles }))
+      void Promise.all([
+        siteTracker.entries(),
+        withWatchLog((log) => [...log]),
+        loadLanguageOverrides(),
+        loadTimeTrackingPrefs(),
+        loadSiteRules(),
+        loadCachedMandalaSummary(),
+        getLiveTabSections(),
+      ])
+        .then(([entries, watchEntries, overrides, prefs, rules, mandala, piles]) =>
+          sendResponse({ summary: summarize(entries, days), watch: summarizeWatch(watchEntries, days, Date.now(), overrides), prefs, rules, mandala, piles })
+        )
         .catch((error) => sendResponse({ errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "watch-sample") {
+      const sample = cleanWatchSample(message.sample);
+      if (!sample) {
+        sendResponse({ success: true });
+        return;
+      }
+      void recordWatch(sample)
+        .then(() => sendResponse({ success: true }))
+        .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
       return true;
     }
 
@@ -175,17 +221,21 @@ export default defineBackground(() => {
     }
 
     if (message.action === "clear-time-log") {
-      void siteTracker
-        .clear()
+      void Promise.all([
+        siteTracker.clear(),
+        withWatchLog(async (log) => {
+          log.length = 0;
+          await saveWatchLog(log);
+        }),
+      ])
         .then(() => sendResponse({ success: true }))
         .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
       return true;
     }
 
     if (message.action === "export-time-log") {
-      void siteTracker
-        .entries()
-        .then((entries) => sendResponse({ json: JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), entries }, null, 2) }))
+      void Promise.all([siteTracker.entries(), withWatchLog((log) => [...log])])
+        .then(([entries, watch]) => sendResponse({ json: JSON.stringify({ version: 2, exportedAt: new Date().toISOString(), entries, watch }, null, 2) }))
         .catch((error) => sendResponse({ errorMessage: error instanceof Error ? error.message : String(error) }));
       return true;
     }

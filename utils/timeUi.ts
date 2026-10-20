@@ -1,10 +1,12 @@
 import type { CachedMandalaSummary } from "./storage";
 import type { RuleMatch, SiteRule, TimeSummary, TimeTrackingPrefs } from "./timeLog";
 import type { LiveTabSectionsState } from "./storage";
+import type { WatchSummary } from "./watchLog";
 
 /** What the popup and the desk ask the background for, and what comes back. */
 export interface TimeSummaryResponse {
   summary: TimeSummary;
+  watch: WatchSummary;
   prefs: TimeTrackingPrefs;
   rules: SiteRule[];
   mandala: CachedMandalaSummary | null;

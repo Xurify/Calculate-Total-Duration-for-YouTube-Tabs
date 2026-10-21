@@ -61,7 +61,7 @@ export interface PlayerResponseForLanguage {
 }
 
 /** Bump when detection changes so languages cached by older logic are detected again. */
-export const LANGUAGE_DETECTION_VERSION = 2;
+export const LANGUAGE_DETECTION_VERSION = 3;
 
 const NO_LANGUAGE: DetectedLanguage = { language: null, languageName: null };
 

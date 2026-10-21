@@ -46,7 +46,7 @@ import {
   languageTextFromPlayerResponse,
   normalizeLanguageCode,
 } from "../../utils/captionLanguage";
-import { resolveVideoLanguage } from "../../utils/channelLanguage";
+import { requestVideoLanguage } from "../../utils/languageRequest";
 import {
   buildTabsFromVideos,
   countItemsByVideoId,
@@ -732,7 +732,7 @@ async function probeTabsMetadata() {
 
         if (result.languageSource) {
           const sourceDetails = result.languageSource.videoDetails;
-          const detected = await resolveVideoLanguage(
+          const detected = await requestVideoLanguage(
             detectLanguageFromPlayerResponse(result.languageSource),
             languageTextFromPlayerResponse(result.languageSource),
             { channelName: sourceDetails?.author, videoId: sourceDetails?.videoId },
@@ -5762,8 +5762,8 @@ let timePanelWired = false;
 
 const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
 const TIME_RANGES = [7, 30, 90] as const;
-const WATCH_VIDEO_ROWS = 30;
-const WATCH_CHANNEL_ROWS = 10;
+/** Past this the list is a scroll box anyway; more rows only cost thumbnails and DOM. */
+const WATCH_VIDEO_ROWS = 500;
 
 function dayLetter(key: string): string {
   const [year, month, day] = key.split("-").map(Number);
@@ -5864,7 +5864,6 @@ function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): strin
     .join("");
 
   const channelsHtml = watch.byChannel
-    .slice(0, WATCH_CHANNEL_ROWS)
     .map(
       (channel) => `<tr class="border-t border-border/60">
         <td class="py-2 pr-3 text-sm text-text-primary truncate max-w-[18rem]" title="${escapeHtml(channel.channelName)}">${escapeHtml(channel.channelName)}</td>
@@ -5911,12 +5910,14 @@ function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): strin
       <div class="grid gap-1" style="grid-template-columns: repeat(24, minmax(0, 1fr))">${hoursHtml}</div>
     </section>
     <section class="flex flex-col gap-3">
-      ${timeSectionHeading("Channels")}
-      <table class="w-full border-collapse"><thead><tr class="text-[11px] uppercase tracking-[0.1em] text-text-muted text-left"><th class="font-semibold pb-1 pr-3">Channel</th><th class="font-semibold pb-1 pr-3">Language</th><th class="font-semibold pb-1 pr-3">Videos</th><th class="font-semibold pb-1 text-right">Watched</th></tr></thead><tbody>${channelsHtml}</tbody></table>
+      ${timeSectionHeading("Channels", `<span class="text-xs text-text-muted tabular-nums">${watch.byChannel.length}</span>`)}
+      <div class="scroll-shelf custom-scrollbar max-h-[22rem] pr-2" data-scroll-key="channels">
+        <table class="w-full border-collapse"><thead class="sticky top-0 z-10 bg-surface"><tr class="text-[11px] uppercase tracking-[0.1em] text-text-muted text-left"><th class="font-semibold pb-1 pr-3">Channel</th><th class="font-semibold pb-1 pr-3">Language</th><th class="font-semibold pb-1 pr-3">Videos</th><th class="font-semibold pb-1 text-right">Watched</th></tr></thead><tbody>${channelsHtml}</tbody></table>
+      </div>
     </section>
     <section class="flex flex-col gap-3">
-      ${timeSectionHeading("Videos", `<span class="text-xs text-text-muted tabular-nums">${watch.videos.length > WATCH_VIDEO_ROWS ? `${WATCH_VIDEO_ROWS} of ${watch.videos.length}` : ""}</span>`)}
-      <ul class="m-0 p-0 list-none flex flex-col gap-2.5">${videosHtml}</ul>
+      ${timeSectionHeading("Videos", `<span class="text-xs text-text-muted tabular-nums">${watch.videos.length > WATCH_VIDEO_ROWS ? `${WATCH_VIDEO_ROWS} of ${watch.videos.length}` : watch.videos.length}</span>`)}
+      <ul class="scroll-shelf custom-scrollbar max-h-[30rem] m-0 p-0 pr-2 list-none flex flex-col gap-2.5" data-scroll-key="videos">${videosHtml}</ul>
     </section>
   `;
 }
@@ -6043,6 +6044,8 @@ async function renderTimePanel(): Promise<void> {
     ${TIME_RANGES.map((days) => `<button type="button" class="time-range budget-chip" data-days="${days}" aria-pressed="${timeRange === days}">${days} days</button>`).join("")}
   </span>`;
 
+  const keepScroll = panel.dataset.range === String(timeRange);
+  const scrollTops = new Map([...panel.querySelectorAll<HTMLElement>("[data-scroll-key]")].map((box) => [box.dataset.scrollKey, box.scrollTop]));
   panel.innerHTML = `
     <div class="flex justify-end">${rangeHtml}</div>
     ${watchSectionsHtml(watch, prefs)}
@@ -6064,6 +6067,10 @@ async function renderTimePanel(): Promise<void> {
       <p class="text-xs text-text-muted m-0">Stored only in this browser.</p>
     </section>
   `;
+  panel.dataset.range = String(timeRange);
+  if (keepScroll) {
+    for (const box of panel.querySelectorAll<HTMLElement>("[data-scroll-key]")) box.scrollTop = scrollTops.get(box.dataset.scrollKey) ?? 0;
+  }
   panel.setAttribute("aria-busy", "false");
 }
 

@@ -8,7 +8,9 @@ import {
   languageTextFromPlayerResponse,
   type DetectedLanguage,
 } from "../utils/captionLanguage";
-import { resolveVideoLanguage, type VideoChannel } from "../utils/channelLanguage";
+import type { VideoChannel } from "../utils/channelLanguage";
+import { requestVideoLanguage } from "../utils/languageRequest";
+import { requestPageLanguage, type PageLanguageSource } from "../utils/pageLanguage";
 import { registerBridgeListener } from "../utils/webmcpBridge";
 import { extractChaptersFromPlayerResponse } from "../utils/chapters";
 import type { CachedMandalaAction, MandalaStatus, VideoChapter, StagedClozeCard } from "../utils/storage";
@@ -182,15 +184,37 @@ function readPlayerResponseFromPage(): PlayerResponseShape | null {
   return null;
 }
 
-async function extractLanguageFromDom(): Promise<DetectedLanguage | undefined> {
-  const playerResponse = readPlayerResponseFromPage();
-  if (!playerResponse) return undefined;
-  return resolveVideoLanguage(
-    detectLanguageFromPlayerResponse(playerResponse),
-    languageTextFromPlayerResponse(playerResponse),
-    { channelName: playerResponse.videoDetails?.author, videoId: playerResponse.videoDetails?.videoId },
-    document.documentElement.lang
-  );
+/** A miss is asked again after this, in case the player response was not ready yet. */
+const LANGUAGE_RETRY_MS = 15_000;
+let languageLookup: { videoId: string; at: number; result: Promise<DetectedLanguage | undefined> } | null = null;
+
+async function lookUpLanguage(videoId: string): Promise<DetectedLanguage | undefined> {
+  let source: PageLanguageSource | null = await requestPageLanguage(videoId);
+  if (!source) {
+    const playerResponse = readPlayerResponseFromPage();
+    if (playerResponse?.videoDetails?.videoId === videoId) {
+      source = {
+        videoId,
+        detected: detectLanguageFromPlayerResponse(playerResponse),
+        text: languageTextFromPlayerResponse(playerResponse),
+        channelName: playerResponse.videoDetails.author ?? null,
+      };
+    }
+  }
+  if (!source) return undefined;
+  return requestVideoLanguage(source.detected, source.text, { channelName: source.channelName, videoId }, document.documentElement.lang);
+}
+
+async function extractLanguageFromDom(videoId: string | null, refresh = false): Promise<DetectedLanguage | undefined> {
+  if (!videoId) return undefined;
+  const cached = languageLookup?.videoId === videoId ? languageLookup : null;
+  if (cached && !refresh) {
+    const result = await cached.result;
+    if (result?.language || Date.now() - cached.at < LANGUAGE_RETRY_MS) return result;
+  }
+  const lookup = { videoId, at: Date.now(), result: lookUpLanguage(videoId) };
+  languageLookup = lookup;
+  return lookup.result;
 }
 
 function parseDurationFromTimeText(durationText: string): number {
@@ -201,7 +225,7 @@ function parseDurationFromTimeText(durationText: string): number {
   return 0;
 }
 
-async function readMetadataFromDom(): Promise<CachedMetadataPayload> {
+async function readMetadataFromDom(refreshLanguage = false): Promise<CachedMetadataPayload> {
   const videoId = getVideoIdFromLocation();
   const videoElement = document.querySelector("video");
   const currentTime = videoElement ? videoElement.currentTime : 0;
@@ -244,7 +268,7 @@ async function readMetadataFromDom(): Promise<CachedMetadataPayload> {
     isLive = true;
   }
 
-  const detected = await extractLanguageFromDom();
+  const detected = await extractLanguageFromDom(videoId, refreshLanguage);
   const language = detected?.language;
   const languageName = detected?.languageName;
   const volume = videoElement ? videoElement.volume : 1;
@@ -1742,7 +1766,7 @@ export default defineContentScript({
           detected: DetectedLanguage;
           text: string;
         };
-        return resolveVideoLanguage(detected, text, { channelName, videoId }, document.documentElement.lang);
+        return requestVideoLanguage(detected, text, { channelName, videoId }, document.documentElement.lang);
       },
     });
 
@@ -1761,7 +1785,7 @@ export default defineContentScript({
             sendResponse(lastMetadata);
             return;
           }
-          void readMetadataFromDom().then((metadata) => {
+          void readMetadataFromDom(runtimeMessage.refreshLanguage === true).then((metadata) => {
             lastMetadata = metadata;
             updateImmersionHud();
             sendResponse(metadata);

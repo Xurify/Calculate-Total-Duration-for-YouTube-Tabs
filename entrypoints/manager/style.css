@@ -30,6 +30,18 @@ body {
   background: var(--color-surface-hover);
 }
 
+/* Shadows show only while there is more to scroll: the surface-coloured covers scroll with the
+   content (local) and hide the shadows (scroll) once an edge is reached. */
+.scroll-shelf {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background:
+    linear-gradient(var(--color-surface) 30%, transparent) top / 100% 2.5rem no-repeat local,
+    linear-gradient(transparent, var(--color-surface) 70%) bottom / 100% 2.5rem no-repeat local,
+    radial-gradient(farthest-side at 50% 0, color-mix(in srgb, var(--color-text-primary) 14%, transparent), transparent) top / 100% 0.75rem no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%, color-mix(in srgb, var(--color-text-primary) 14%, transparent), transparent) bottom / 100% 0.75rem no-repeat scroll;
+}
+
 @layer components {
   .nav-tabs {
     @apply flex items-center gap-0.5 h-9 p-0.5 rounded-full border border-border bg-surface-elevated;

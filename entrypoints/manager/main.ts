@@ -3061,7 +3061,7 @@ function renderMain() {
   if (videosToShow.length === 0) {
     setTabListInnerHTML(container, emptyListMessage());
   } else {
-    const sortedVideos = orderWithPlan(sortVideosForDisplay(videosToShow));
+    const sortedVideos = sortVideosForDisplay(videosToShow);
     setTabListInnerHTML(container, layoutMode === "grid" ? renderVideoGrid(sortedVideos) : `<div class="queue-card">${renderVideoList(sortedVideos)}</div>`);
     thumbnailCacheBackfill(container);
   }
@@ -3533,15 +3533,6 @@ function computePlan(): { ids: number[]; seconds: number; partial: VideoData | n
   return { ids, seconds, partial: null };
 }
 
-/** The list shows the plan in order at the top, then everything else. */
-function orderWithPlan(videos: VideoData[]): VideoData[] {
-  if (plannedOrder.length === 0) return videos;
-  const byId = new Map(videos.map((video) => [video.id, video]));
-  const head = plannedOrder.map((id) => byId.get(id)).filter((video): video is VideoData => Boolean(video));
-  const planned = new Set(plannedOrder);
-  return [...head, ...videos.filter((video) => !planned.has(video.id))];
-}
-
 function renderPlanner(): void {
   const planner = document.getElementById("planner");
   const startButton = document.getElementById("btn-start-plan") as HTMLButtonElement | null;
@@ -3576,7 +3567,7 @@ function renderPlanner(): void {
     summary.textContent =
       count === 0
         ? "Nothing in this list to plan."
-        : `${count} ${count === 1 ? "video" : "videos"}, ${formatDurationWords(plan.seconds)}${scope ? ` from ${scope}` : ""}. Started videos go first; the plan is at the top of the list.`;
+        : `${count} ${count === 1 ? "video" : "videos"}, ${formatDurationWords(plan.seconds)}${scope ? ` from ${scope}` : ""}. Started videos go first when you start this plan.`;
   }
   if (startLabel) startLabel.textContent = count === 0 ? "Start" : `Start ${formatDurationWords(plan.seconds)}`;
   startButton.disabled = count === 0;

@@ -1,17 +1,52 @@
+import { createEld } from "eld/core";
+import type { PublicPath } from "wxt/browser";
 import { normalizeLanguageCode, type DetectedLanguage } from "./captionLanguage";
 
-const NOISE_PATTERN = /https?:\/\/\S+|www\.\S+|@\S+|[#*_|]/g;
+const NOISE_PATTERN = /https?:\/\/\S+|www\.\S+|@\S+|#\S+|[*_|]/g;
 const MIN_TEXT_LENGTH = 20;
 
-/** Language of the title and description, via the browser's built-in CLD. Null when unsure. */
+let detector: Promise<ReturnType<typeof createEld>["instance"]> | null = null;
+
+/**
+ * ELD (github.com/nitotm/efficient-language-detector-js) instead of the browser's CLD: on short
+ * Tatoeba sentences it was right 98% of the time against CLD3's 88%, and it keeps Slovak from Czech
+ * and Estonian from Finnish, the pairs CLD mixes up most. Background only: the model takes ~35 MB.
+ */
+function loadDetector() {
+  detector ??= fetch(browser.runtime.getURL("/eld/medium.json" as PublicPath))
+    .then((response) => response.json())
+    .then((data) => {
+      const { instance, loadData } = createEld();
+      if (!loadData(data)) throw new Error("eld: no language data");
+      instance.enableTextCleanup(true);
+      return instance;
+    })
+    .catch((error) => {
+      detector = null;
+      throw error;
+    });
+  return detector;
+}
+
+function cleanText(text: string): string {
+  return text.replace(NOISE_PATTERN, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Language of a title (first line) and description. The title wins when it is clear on its own:
+ * descriptions often end in English sponsor and link boilerplate. Null when unsure.
+ */
 export async function detectTextLanguage(text: string): Promise<string | null> {
-  const cleaned = text.replace(NOISE_PATTERN, " ").replace(/\s+/g, " ").trim();
-  if (cleaned.length < MIN_TEXT_LENGTH || !browser.i18n?.detectLanguage) return null;
+  const title = cleanText(text.split("\n", 1)[0]);
+  const whole = cleanText(text);
+  if (whole.length < MIN_TEXT_LENGTH) return null;
   try {
-    const result = await browser.i18n.detectLanguage(cleaned);
-    const top = result.languages[0];
-    if (!result.isReliable || !top || top.language === "und") return null;
-    return top.language;
+    const eld = await loadDetector();
+    for (const candidate of title.length >= MIN_TEXT_LENGTH && title !== whole ? [title, whole] : [whole]) {
+      const result = eld.detect(candidate);
+      if (result.language && result.isReliable()) return result.language;
+    }
+    return null;
   } catch {
     return null;
   }

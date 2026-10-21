@@ -46,7 +46,7 @@ import {
   languageTextFromPlayerResponse,
   normalizeLanguageCode,
 } from "../../utils/captionLanguage";
-import { resolveVideoLanguage } from "../../utils/channelLanguage";
+import { requestVideoLanguage } from "../../utils/languageRequest";
 import {
   buildTabsFromVideos,
   countItemsByVideoId,
@@ -732,7 +732,7 @@ async function probeTabsMetadata() {
 
         if (result.languageSource) {
           const sourceDetails = result.languageSource.videoDetails;
-          const detected = await resolveVideoLanguage(
+          const detected = await requestVideoLanguage(
             detectLanguageFromPlayerResponse(result.languageSource),
             languageTextFromPlayerResponse(result.languageSource),
             { channelName: sourceDetails?.author, videoId: sourceDetails?.videoId },

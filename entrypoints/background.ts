@@ -26,10 +26,12 @@ import { applyMetadataBatchToCache, normalizeMetadataBatch } from "../utils/stor
 import {
   detectLanguageFromPlayerResponse,
   languageTextFromPlayerResponse,
+  normalizeLanguageCode,
   type DetectedLanguage,
 } from "../utils/captionLanguage";
 import { extractChaptersFromPlayerResponse } from "../utils/chapters";
 import { resolveVideoLanguage } from "../utils/channelLanguage";
+import { RESOLVE_LANGUAGE_ACTION, type ResolveLanguageMessage } from "../utils/languageRequest";
 import { getVideoIdFromUrl, isYoutubeWatchOrShortsUrl } from "../utils/format";
 import { queryReadingList, removeReadingListItemById } from "../utils/readingList";
 import {
@@ -85,6 +87,38 @@ async function recordWatch(sample: WatchSample): Promise<void> {
     recordWatchSample(log, sample);
     await saveWatchLog(log);
   });
+}
+
+const watchLanguageTried = new Set<string>();
+
+/**
+ * Sittings saved without a language (before the player response was read from the page world)
+ * get one from their title or their channel's usual language. A name already in the log is
+ * reused for the same code so labels in another display language don't split a row.
+ */
+async function fillMissingWatchLanguages(log: WatchEntry[]): Promise<void> {
+  const missing = log.filter((entry) => !entry.language && !watchLanguageTried.has(entry.id));
+  if (missing.length === 0) return;
+  const namesByCode = new Map<string, string>();
+  for (const entry of log) {
+    if (entry.language && entry.languageName) namesByCode.set(normalizeLanguageCode(entry.language), entry.languageName);
+  }
+  const resolved = new Map<string, DetectedLanguage>();
+  let changed = false;
+  for (const entry of missing) {
+    watchLanguageTried.add(entry.id);
+    let detected = resolved.get(entry.videoId);
+    if (!detected) {
+      const title = entry.title === "YouTube Video" ? "" : entry.title;
+      detected = await resolveVideoLanguage({ language: null, languageName: null }, title, { channelName: entry.channelName, videoId: entry.videoId });
+      resolved.set(entry.videoId, detected);
+    }
+    if (!detected.language) continue;
+    entry.language = detected.language;
+    entry.languageName = namesByCode.get(normalizeLanguageCode(detected.language)) ?? detected.languageName;
+    changed = true;
+  }
+  if (changed) await saveWatchLog(log);
 }
 
 const BATCH_FLUSH_MS = 80;
@@ -163,7 +197,10 @@ export default defineBackground(() => {
       const days = typeof message.days === "number" && message.days > 0 ? Math.min(90, Math.floor(message.days)) : 7;
       void Promise.all([
         siteTracker.entries(),
-        withWatchLog((log) => [...log]),
+        withWatchLog(async (log) => {
+          await fillMissingWatchLanguages(log).catch((error) => console.warn("[Study Harvester] watch languages:", error));
+          return [...log];
+        }),
         loadLanguageOverrides(),
         loadTimeTrackingPrefs(),
         loadSiteRules(),
@@ -174,6 +211,19 @@ export default defineBackground(() => {
           sendResponse({ summary: summarize(entries, days), watch: summarizeWatch(watchEntries, days, Date.now(), overrides), prefs, rules, mandala, piles })
         )
         .catch((error) => sendResponse({ errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === RESOLVE_LANGUAGE_ACTION) {
+      const request = message as ResolveLanguageMessage;
+      void resolveVideoLanguage(
+        request.detected ?? { language: null, languageName: null },
+        typeof request.text === "string" ? request.text : "",
+        { channelName: request.channelName, videoId: request.videoId },
+        request.displayLocale
+      )
+        .then(sendResponse)
+        .catch(() => sendResponse(request.detected));
       return true;
     }
 

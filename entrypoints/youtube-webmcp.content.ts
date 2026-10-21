@@ -13,6 +13,7 @@ import {
   type DetectedLanguage,
 } from "../utils/captionLanguage";
 import { sendBridgeRequest } from "../utils/webmcpBridge";
+import { servePageLanguageRequests } from "../utils/pageLanguage";
 import {
   CARDS_INPUT_SCHEMA,
   COLLECTION_TARGET_PROPERTIES,
@@ -102,6 +103,7 @@ export default defineContentScript({
   runAt: "document_idle",
   async main() {
     serveTranscriptRequests();
+    servePageLanguageRequests();
 
     if (!isWebMcpSupported()) {
       return;

@@ -91,11 +91,7 @@ async function recordWatch(sample: WatchSample): Promise<void> {
 
 const watchLanguageTried = new Set<string>();
 
-/**
- * Sittings saved without a language (before the player response was read from the page world)
- * get one from their title or their channel's usual language. A name already in the log is
- * reused for the same code so labels in another display language don't split a row.
- */
+/** Reuses a name already in the log for the same code, so a label in another display language doesn't split a row. */
 async function fillMissingWatchLanguages(log: WatchEntry[]): Promise<void> {
   const missing = log.filter((entry) => !entry.language && !watchLanguageTried.has(entry.id));
   if (missing.length === 0) return;

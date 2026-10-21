@@ -7,11 +7,7 @@ const MIN_TEXT_LENGTH = 20;
 
 let detector: Promise<ReturnType<typeof createEld>["instance"]> | null = null;
 
-/**
- * ELD (github.com/nitotm/efficient-language-detector-js) instead of the browser's CLD: on short
- * Tatoeba sentences it was right 98% of the time against CLD3's 88%, and it keeps Slovak from Czech
- * and Estonian from Finnish, the pairs CLD mixes up most. Background only: the model takes ~35 MB.
- */
+/** Background only: the model takes ~35 MB. */
 function loadDetector() {
   detector ??= fetch(browser.runtime.getURL("/eld/medium.json" as PublicPath))
     .then((response) => response.json())

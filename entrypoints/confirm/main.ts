@@ -8,12 +8,16 @@ initTheme();
 // window can't land on it when this popup steals focus.
 const ALLOW_ARM_DELAY_MS = 600;
 const KEEPALIVE_INTERVAL_MS = 20_000;
+const COPY_FEEDBACK_MS = 1500;
 
 const approvalId = new URLSearchParams(location.search).get("id") ?? "";
 const titleElement = document.getElementById("title")!;
 const originElement = document.getElementById("origin")!;
 const summaryElement = document.getElementById("summary")!;
 const itemsElement = document.getElementById("items")!;
+const itemsSection = document.getElementById("items-section")!;
+const itemsCountElement = document.getElementById("items-count")!;
+const copyButton = document.getElementById("copy") as HTMLButtonElement;
 const allowButton = document.getElementById("allow") as HTMLButtonElement;
 const denyButton = document.getElementById("deny") as HTMLButtonElement;
 
@@ -25,6 +29,18 @@ function resolveApproval(approved: boolean) {
     .finally(() => window.close());
 }
 
+async function copyItems(items: string[]) {
+  try {
+    await navigator.clipboard.writeText(items.join("\n"));
+    copyButton.textContent = "Copied";
+  } catch {
+    copyButton.textContent = "Copy failed";
+  }
+  window.setTimeout(() => {
+    copyButton.textContent = "Copy all";
+  }, COPY_FEEDBACK_MS);
+}
+
 function render(request: ApprovalRequest) {
   document.title = `Study Harvester · ${request.title}`;
   titleElement.textContent = request.title;
@@ -34,15 +50,16 @@ function render(request: ApprovalRequest) {
   allowButton.classList.toggle("is-destructive", request.destructive);
 
   // Titles and URLs come from web pages, so they are only ever set as text.
-  const listedItems = request.moreCount > 0 ? [...request.items, `…and ${request.moreCount} more`] : request.items;
-  for (const itemText of listedItems) {
+  for (const itemText of request.items) {
     const listItem = document.createElement("li");
-    listItem.className = "truncate";
-    listItem.title = itemText;
+    listItem.className = "break-words";
     listItem.textContent = itemText;
     itemsElement.appendChild(listItem);
   }
-  itemsElement.classList.toggle("hidden", listedItems.length === 0);
+  itemsCountElement.textContent = `${request.items.length} ${request.items.length === 1 ? "item" : "items"}`;
+  itemsSection.classList.toggle("hidden", request.items.length === 0);
+  itemsSection.classList.toggle("flex", request.items.length > 0);
+  copyButton.addEventListener("click", () => void copyItems(request.items));
 
   window.setTimeout(() => {
     allowButton.disabled = false;

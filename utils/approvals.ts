@@ -9,14 +9,12 @@
 
 export const APPROVAL_PAGE_PATH = "/confirm.html";
 const APPROVAL_TIMEOUT_MS = 120_000;
-const MAX_LISTED_ITEMS = 8;
 
 export interface ApprovalRequest {
   title: string;
   origin: string;
   summary: string;
   items: string[];
-  moreCount: number;
   confirmLabel: string;
   destructive: boolean;
 }
@@ -69,14 +67,12 @@ function attachListeners() {
 
 export function buildApprovalRequest(
   sender: Sender,
-  fields: Omit<ApprovalRequest, "origin" | "items" | "moreCount"> & { items?: string[] }
+  fields: Omit<ApprovalRequest, "origin" | "items"> & { items?: string[] }
 ): ApprovalRequest {
-  const items = fields.items ?? [];
   return {
     ...fields,
     origin: senderOrigin(sender),
-    items: items.slice(0, MAX_LISTED_ITEMS),
-    moreCount: Math.max(0, items.length - MAX_LISTED_ITEMS),
+    items: fields.items ?? [],
   };
 }
 
@@ -105,7 +101,7 @@ export async function requestApproval(request: ApprovalRequest): Promise<boolean
         url: browser.runtime.getURL(`${APPROVAL_PAGE_PATH}?id=${approvalId}`),
         type: "popup",
         width: 440,
-        height: 520,
+        height: 600,
         focused: true,
       })
       .then((createdWindow) => {

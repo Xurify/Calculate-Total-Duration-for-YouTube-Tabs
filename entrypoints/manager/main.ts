@@ -40,7 +40,7 @@ import {
 import { formatTime, formatCompact, formatDurationWords, formatOffset, formatShortDuration, parseTimeParam, getVideoIdFromUrl, normalizeText, isYoutubeWatchOrShortsUrl } from "../../utils/format";
 import { pillarColor, type SiteRule, type TimeTrackingPrefs } from "../../utils/timeLog";
 import { actionOptionsHtml, formatMinutesWords, pillarChoices, pillarOptionsHtml, pillarTitleOf, type TimeSummaryResponse } from "../../utils/timeUi";
-import type { WatchSummary } from "../../utils/watchLog";
+import type { WatchSummary, WatchVideoRow } from "../../utils/watchLog";
 import {
   detectLanguageFromPlayerResponse,
   languageTextFromPlayerResponse,
@@ -5750,11 +5750,15 @@ function setupListeners() {
 let timeRange: 7 | 30 | 90 = 7;
 let lastTimeResponse: TimeSummaryResponse | null = null;
 let timePanelWired = false;
+let showAllChannels = false;
+let openChannel: string | null = null;
+let videoRowsShown = 0;
 
 const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
 const TIME_RANGES = [7, 30, 90] as const;
-/** Past this the list is a scroll box anyway; more rows only cost thumbnails and DOM. */
-const WATCH_VIDEO_ROWS = 500;
+const CHANNEL_ROWS = 8;
+const VIDEO_ROWS_PAGE = 20;
+const CHANNEL_TOOLTIP_TITLES = 10;
 
 function dayLetter(key: string): string {
   const [year, month, day] = key.split("-").map(Number);
@@ -5793,6 +5797,21 @@ function watchStatTile(label: string, value: string, note: string): string {
     <span class="font-display text-[26px] leading-tight text-text-primary tabular-nums truncate">${escapeHtml(value)}</span>
     <span class="text-xs text-text-muted truncate min-h-4">${escapeHtml(note)}</span>
   </div>`;
+}
+
+function watchVideoRowHtml(video: WatchVideoRow): string {
+  const url = video.isShort ? `https://www.youtube.com/shorts/${encodeURIComponent(video.videoId)}` : `https://www.youtube.com/watch?v=${encodeURIComponent(video.videoId)}`;
+  const progress = video.isLive ? "Live" : video.durationSeconds > 0 ? shareWords(video.coverage, 1) : "";
+  const speed = video.playedSeconds > 0 ? video.videoSeconds / video.playedSeconds : 1;
+  return `<li class="flex items-center gap-3 min-w-0 text-sm">
+    <img src="https://i.ytimg.com/vi/${encodeURIComponent(video.videoId)}/mqdefault.jpg" alt="" loading="lazy" class="w-16 h-9 rounded object-cover shrink-0 bg-surface-elevated" />
+    <span class="flex-1 min-w-0 flex flex-col">
+      <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="truncate text-text-primary no-underline hover:text-accent" title="${escapeHtml(video.title || video.videoId)}">${escapeHtml(video.title || video.videoId)}</a>
+      <span class="truncate text-xs text-text-muted">${escapeHtml([video.channelName, video.language, Math.abs(speed - 1) >= 0.05 ? speedWords(speed) : "", timeAgoWords(video.lastAt)].filter(Boolean).join(" · "))}</span>
+    </span>
+    <span class="w-12 text-right text-xs text-text-muted tabular-nums" title="${video.durationSeconds > 0 ? `Of ${formatMinutesWords(video.durationSeconds)}` : ""}">${progress}</span>
+    <span class="w-20 text-right text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(video.playedSeconds)}</span>
+  </li>`;
 }
 
 function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): string {
@@ -5854,34 +5873,43 @@ function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): strin
     )
     .join("");
 
-  const channelsHtml = watch.byChannel
-    .map(
-      (channel) => `<tr class="border-t border-border/60">
-        <td class="py-2 pr-3 text-sm text-text-primary truncate max-w-[18rem]" title="${escapeHtml(channel.channelName)}">${escapeHtml(channel.channelName)}</td>
+  // The summary names channel-less videos "Unknown channel", so match it the same way.
+  const videosByChannel = new Map<string, WatchVideoRow[]>();
+  for (const video of watch.videos) {
+    const name = video.channelName || "Unknown channel";
+    videosByChannel.set(name, [...(videosByChannel.get(name) ?? []), video]);
+  }
+  const shownChannels = showAllChannels ? watch.byChannel : watch.byChannel.slice(0, CHANNEL_ROWS);
+  const channelsHtml = shownChannels
+    .map((channel) => {
+      const open = openChannel === channel.channelName;
+      const channelVideos = [...(videosByChannel.get(channel.channelName) ?? [])].sort((first, second) => second.playedSeconds - first.playedSeconds);
+      const titles = channelVideos.slice(0, CHANNEL_TOOLTIP_TITLES).map((video) => `• ${video.title || video.videoId}`);
+      if (channelVideos.length > CHANNEL_TOOLTIP_TITLES) titles.push(`and ${channelVideos.length - CHANNEL_TOOLTIP_TITLES} more`);
+      return `<tr class="time-channel border-t border-border/60 cursor-pointer hover:bg-surface-elevated${open ? " bg-surface-elevated" : ""}" data-channel="${escapeHtml(channel.channelName)}" title="${escapeHtml(titles.join("\n"))}">
+        <td class="py-2 pr-3 text-sm text-text-primary max-w-[18rem]">
+          <button type="button" class="flex items-center gap-1.5 w-full min-w-0 p-0 border-0 bg-transparent text-left text-inherit cursor-pointer" aria-expanded="${open}"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-text-muted transition-transform${open ? " rotate-90" : ""}" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg><span class="truncate">${escapeHtml(channel.channelName)}</span></button>
+        </td>
         <td class="py-2 pr-3 text-sm text-text-secondary whitespace-nowrap"><span class="inline-flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:${languageColors.get(channel.language) ?? "var(--color-border-hover)"}"></span>${escapeHtml(channel.language)}</span></td>
         <td class="py-2 pr-3 text-sm text-text-secondary tabular-nums">${channel.videos}</td>
         <td class="py-2 text-sm text-text-secondary tabular-nums whitespace-nowrap text-right">${formatMinutesWords(channel.seconds)}</td>
-      </tr>`
-    )
-    .join("");
-
-  const videosHtml = watch.videos
-    .slice(0, WATCH_VIDEO_ROWS)
-    .map((video) => {
-      const url = video.isShort ? `https://www.youtube.com/shorts/${encodeURIComponent(video.videoId)}` : `https://www.youtube.com/watch?v=${encodeURIComponent(video.videoId)}`;
-      const progress = video.isLive ? "Live" : video.durationSeconds > 0 ? shareWords(video.coverage, 1) : "";
-      const speed = video.playedSeconds > 0 ? video.videoSeconds / video.playedSeconds : 1;
-      return `<li class="flex items-center gap-3 min-w-0 text-sm">
-        <img src="https://i.ytimg.com/vi/${encodeURIComponent(video.videoId)}/mqdefault.jpg" alt="" loading="lazy" class="w-16 h-9 rounded object-cover shrink-0 bg-surface-elevated" />
-        <span class="flex-1 min-w-0 flex flex-col">
-          <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="truncate text-text-primary no-underline hover:text-accent" title="${escapeHtml(video.title || video.videoId)}">${escapeHtml(video.title || video.videoId)}</a>
-          <span class="truncate text-xs text-text-muted">${escapeHtml([video.channelName, video.language, Math.abs(speed - 1) >= 0.05 ? speedWords(speed) : "", timeAgoWords(video.lastAt)].filter(Boolean).join(" · "))}</span>
-        </span>
-        <span class="w-12 text-right text-xs text-text-muted tabular-nums" title="${video.durationSeconds > 0 ? `Of ${formatMinutesWords(video.durationSeconds)}` : ""}">${progress}</span>
-        <span class="w-20 text-right text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(video.playedSeconds)}</span>
-      </li>`;
+      </tr>${
+        open
+          ? `<tr class="bg-surface-elevated"><td colspan="4" class="pt-1 pb-3 pl-5"><ul class="m-0 p-0 list-none flex flex-col gap-2.5">${channelVideos.map(watchVideoRowHtml).join("")}</ul></td></tr>`
+          : ""
+      }`;
     })
     .join("");
+  const hiddenChannels = watch.byChannel.length - CHANNEL_ROWS;
+  const channelsToggleHtml =
+    hiddenChannels > 0
+      ? `<button type="button" id="time-channels-toggle" class="chip h-8 text-xs self-start">${showAllChannels ? `Show top ${CHANNEL_ROWS}` : `Show all ${watch.byChannel.length} channels`}</button>`
+      : "";
+
+  const shownVideos = Math.min(watch.videos.length, Math.max(videoRowsShown, VIDEO_ROWS_PAGE));
+  const videosHtml = watch.videos.slice(0, shownVideos).map(watchVideoRowHtml).join("");
+  const moreVideos = Math.min(VIDEO_ROWS_PAGE * 2, watch.videos.length - shownVideos);
+  const videosMoreHtml = moreVideos > 0 ? `<button type="button" id="time-videos-more" class="chip h-8 text-xs self-start" data-shown="${shownVideos}">Show ${moreVideos} more</button>` : "";
 
   return `
     <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">${tilesHtml}</div>
@@ -5902,13 +5930,15 @@ function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): strin
     </section>
     <section class="flex flex-col gap-3">
       ${timeSectionHeading("Channels", `<span class="text-xs text-text-muted tabular-nums">${watch.byChannel.length}</span>`)}
-      <div class="scroll-shelf custom-scrollbar max-h-[22rem] pr-2" data-scroll-key="channels">
-        <table class="w-full border-collapse"><thead class="sticky top-0 z-10 bg-surface"><tr class="text-[11px] uppercase tracking-[0.1em] text-text-muted text-left"><th class="font-semibold pb-1 pr-3">Channel</th><th class="font-semibold pb-1 pr-3">Language</th><th class="font-semibold pb-1 pr-3">Videos</th><th class="font-semibold pb-1 text-right">Watched</th></tr></thead><tbody>${channelsHtml}</tbody></table>
+      <div>
+        <table class="w-full border-collapse"><thead><tr class="text-[11px] uppercase tracking-[0.1em] text-text-muted text-left"><th class="font-semibold pb-1 pr-3">Channel</th><th class="font-semibold pb-1 pr-3">Language</th><th class="font-semibold pb-1 pr-3">Videos</th><th class="font-semibold pb-1 text-right">Watched</th></tr></thead><tbody>${channelsHtml}</tbody></table>
       </div>
+      ${channelsToggleHtml}
     </section>
     <section class="flex flex-col gap-3">
-      ${timeSectionHeading("Videos", `<span class="text-xs text-text-muted tabular-nums">${watch.videos.length > WATCH_VIDEO_ROWS ? `${WATCH_VIDEO_ROWS} of ${watch.videos.length}` : watch.videos.length}</span>`)}
-      <ul class="scroll-shelf custom-scrollbar max-h-[30rem] m-0 p-0 pr-2 list-none flex flex-col gap-2.5" data-scroll-key="videos">${videosHtml}</ul>
+      ${timeSectionHeading("Videos", `<span class="text-xs text-text-muted tabular-nums">${shownVideos < watch.videos.length ? `${shownVideos} of ${watch.videos.length}` : watch.videos.length}</span>`)}
+      <ul class="m-0 p-0 list-none flex flex-col gap-2.5">${videosHtml}</ul>
+      ${videosMoreHtml}
     </section>
   `;
 }
@@ -6035,11 +6065,9 @@ async function renderTimePanel(): Promise<void> {
     ${TIME_RANGES.map((days) => `<button type="button" class="time-range budget-chip" data-days="${days}" aria-pressed="${timeRange === days}">${days} days</button>`).join("")}
   </span>`;
 
-  const keepScroll = panel.dataset.range === String(timeRange);
-  const scrollTops = new Map([...panel.querySelectorAll<HTMLElement>("[data-scroll-key]")].map((box) => [box.dataset.scrollKey, box.scrollTop]));
   panel.innerHTML = `
     <div class="flex justify-end">${rangeHtml}</div>
-    ${watchSectionsHtml(watch, prefs)}
+    <div id="time-watch" class="contents">${watchSectionsHtml(watch, prefs)}</div>
     ${mandalaSectionHtml(data)}
     <section class="flex flex-col gap-3 pb-6">
       <h2 class="font-display text-[22px] font-medium m-0">Tracking</h2>
@@ -6058,11 +6086,12 @@ async function renderTimePanel(): Promise<void> {
       <p class="text-xs text-text-muted m-0">Stored only in this browser.</p>
     </section>
   `;
-  panel.dataset.range = String(timeRange);
-  if (keepScroll) {
-    for (const box of panel.querySelectorAll<HTMLElement>("[data-scroll-key]")) box.scrollTop = scrollTops.get(box.dataset.scrollKey) ?? 0;
-  }
   panel.setAttribute("aria-busy", "false");
+}
+
+function repaintWatchSections(panel: HTMLElement): void {
+  const box = panel.querySelector<HTMLElement>("#time-watch");
+  if (box && lastTimeResponse) box.innerHTML = watchSectionsHtml(lastTimeResponse.watch, lastTimeResponse.prefs);
 }
 
 function wireTimePanel(panel: HTMLElement): void {
@@ -6079,7 +6108,27 @@ function wireTimePanel(panel: HTMLElement): void {
     const range = target.closest<HTMLElement>(".time-range");
     if (range) {
       timeRange = TIME_RANGES.find((days) => String(days) === range.dataset.days) ?? 7;
+      showAllChannels = false;
+      openChannel = null;
+      videoRowsShown = 0;
       await renderTimePanel();
+      return;
+    }
+    if (target.closest("#time-channels-toggle")) {
+      showAllChannels = !showAllChannels;
+      repaintWatchSections(panel);
+      return;
+    }
+    const channelRow = target.closest<HTMLElement>(".time-channel");
+    if (channelRow && !target.closest("a")) {
+      openChannel = openChannel === channelRow.dataset.channel ? null : (channelRow.dataset.channel ?? null);
+      repaintWatchSections(panel);
+      return;
+    }
+    const moreVideos = target.closest<HTMLElement>("#time-videos-more");
+    if (moreVideos) {
+      videoRowsShown = Number(moreVideos.dataset.shown) + VIDEO_ROWS_PAGE * 2;
+      repaintWatchSections(panel);
       return;
     }
     const remove = target.closest<HTMLElement>(".time-rule-remove");

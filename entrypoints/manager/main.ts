@@ -5814,6 +5814,16 @@ function watchVideoRowHtml(video: WatchVideoRow): string {
   </li>`;
 }
 
+function channelLetterHtml(letter: string): string {
+  return `<span class="inline-flex items-center justify-center w-5 h-5 rounded-full shrink-0 bg-surface-elevated border border-border text-[10px] font-medium text-text-secondary" aria-hidden="true">${escapeHtml(letter)}</span>`;
+}
+
+function channelAvatarHtml(channel: WatchSummary["byChannel"][number]): string {
+  const letter = Array.from(channel.channelName.trim())[0]?.toUpperCase() ?? "?";
+  if (!channel.avatarUrl) return channelLetterHtml(letter);
+  return `<img src="${escapeHtml(channel.avatarUrl)}" alt="" class="channel-avatar w-5 h-5 rounded-full shrink-0 object-cover bg-surface-elevated" loading="lazy" referrerpolicy="no-referrer" data-letter="${escapeHtml(letter)}">`;
+}
+
 function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): string {
   const total = watch.total;
   if (total.playedSeconds <= 0) {
@@ -5888,7 +5898,7 @@ function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): strin
       if (channelVideos.length > CHANNEL_TOOLTIP_TITLES) titles.push(`and ${channelVideos.length - CHANNEL_TOOLTIP_TITLES} more`);
       return `<tr class="time-channel border-t border-border/60 cursor-pointer hover:bg-surface-elevated${open ? " bg-surface-elevated" : ""}" data-channel="${escapeHtml(channel.channelName)}" title="${escapeHtml(titles.join("\n"))}">
         <td class="py-2 pr-3 text-sm text-text-primary max-w-[18rem]">
-          <button type="button" class="flex items-center gap-1.5 w-full min-w-0 p-0 border-0 bg-transparent text-left text-inherit cursor-pointer" aria-expanded="${open}"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-text-muted transition-transform${open ? " rotate-90" : ""}" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg><span class="truncate">${escapeHtml(channel.channelName)}</span></button>
+          <button type="button" class="flex items-center gap-1.5 w-full min-w-0 p-0 border-0 bg-transparent text-left text-inherit cursor-pointer" aria-expanded="${open}"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-text-muted transition-transform${open ? " rotate-90" : ""}" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>${channelAvatarHtml(channel)}<span class="truncate">${escapeHtml(channel.channelName)}</span></button>
         </td>
         <td class="py-2 pr-3 text-sm text-text-secondary whitespace-nowrap"><span class="inline-flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:${languageColors.get(channel.language) ?? "var(--color-border-hover)"}"></span>${escapeHtml(channel.language)}</span></td>
         <td class="py-2 pr-3 text-sm text-text-secondary tabular-nums">${channel.videos}</td>
@@ -6097,6 +6107,16 @@ function repaintWatchSections(panel: HTMLElement): void {
 function wireTimePanel(panel: HTMLElement): void {
   if (timePanelWired) return;
   timePanelWired = true;
+
+  // Avatar URLs go stale when a channel changes its picture; error doesn't bubble, so listen in capture.
+  panel.addEventListener(
+    "error",
+    (event) => {
+      const img = event.target;
+      if (img instanceof HTMLImageElement && img.classList.contains("channel-avatar")) img.outerHTML = channelLetterHtml(img.dataset.letter ?? "?");
+    },
+    true
+  );
 
   const saveRule = async (rule: Omit<SiteRule, "id" | "createdAt"> & { id?: string }) => {
     await browser.runtime.sendMessage({ action: "set-site-rule", rule });

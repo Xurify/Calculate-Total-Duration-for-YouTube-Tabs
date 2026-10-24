@@ -54,6 +54,7 @@ import {
   type TimeTrackingPrefs,
 } from "../utils/timeLog";
 import { getLiveTabSections } from "../utils/storage";
+import { loadChannelAvatars, recordChannelAvatar } from "../utils/channelAvatars";
 import { cleanWatchSample, loadWatchLog, recordWatchSample, saveWatchLog, summarizeWatch, type WatchEntry, type WatchSample } from "../utils/watchLog";
 import { loadLanguageOverrides } from "../utils/languageOverrides";
 
@@ -87,6 +88,7 @@ async function recordWatch(sample: WatchSample): Promise<void> {
     recordWatchSample(log, sample);
     await saveWatchLog(log);
   });
+  if (sample.channelAvatar && sample.channelName) await recordChannelAvatar(sample.channelName, sample.channelAvatar);
 }
 
 const watchLanguageTried = new Set<string>();
@@ -202,9 +204,10 @@ export default defineBackground(() => {
         loadSiteRules(),
         loadCachedMandalaSummary(),
         getLiveTabSections(),
+        loadChannelAvatars(),
       ])
-        .then(([entries, watchEntries, overrides, prefs, rules, mandala, piles]) =>
-          sendResponse({ summary: summarize(entries, days), watch: summarizeWatch(watchEntries, days, Date.now(), overrides), prefs, rules, mandala, piles })
+        .then(([entries, watchEntries, overrides, prefs, rules, mandala, piles, avatars]) =>
+          sendResponse({ summary: summarize(entries, days), watch: summarizeWatch(watchEntries, days, Date.now(), overrides, avatars), prefs, rules, mandala, piles })
         )
         .catch((error) => sendResponse({ errorMessage: error instanceof Error ? error.message : String(error) }));
       return true;

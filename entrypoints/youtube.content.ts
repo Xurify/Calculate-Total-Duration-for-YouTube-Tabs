@@ -40,6 +40,7 @@ interface CachedMetadataPayload {
   videoId: string | null;
   title: string;
   channelName: string;
+  channelAvatar?: string | null;
   seconds: number;
   currentTime: number;
   isLive: boolean;
@@ -261,6 +262,10 @@ async function readMetadataFromDom(refreshLanguage = false): Promise<CachedMetad
     (document.querySelector(".ytd-video-owner-renderer #channel-name a") as HTMLElement)?.innerText ||
     playerResponse?.videoDetails?.author ||
     "";
+  const channelAvatar =
+    document.querySelector<HTMLImageElement>("ytd-watch-metadata #owner #avatar img")?.src ||
+    document.querySelector<HTMLImageElement>("ytd-video-owner-renderer #avatar img")?.src ||
+    null;
 
   let isLive = false;
   const liveBadge = document.querySelector(".ytp-live-badge") as HTMLElement;
@@ -281,6 +286,7 @@ async function readMetadataFromDom(refreshLanguage = false): Promise<CachedMetad
     videoId,
     title: title || "YouTube Video",
     channelName,
+    channelAvatar,
     seconds: isLive ? 0 : duration,
     currentTime,
     isLive,

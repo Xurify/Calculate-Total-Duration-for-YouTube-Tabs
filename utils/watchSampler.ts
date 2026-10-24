@@ -4,6 +4,7 @@ export interface WatchMetadata {
   videoId: string | null;
   title: string;
   channelName: string;
+  channelAvatar?: string | null;
   language?: string | null;
   languageName?: string | null;
   seconds: number;
@@ -114,6 +115,7 @@ export class WatchSampler {
       videoId: pending.videoId,
       title: metadata?.title ?? "",
       channelName: metadata?.channelName ?? "",
+      channelAvatar: metadata?.channelAvatar ?? null,
       language: metadata?.language ?? null,
       languageName: metadata?.languageName ?? null,
       durationSeconds: metadata?.isLive ? 0 : metadata?.seconds ?? 0,

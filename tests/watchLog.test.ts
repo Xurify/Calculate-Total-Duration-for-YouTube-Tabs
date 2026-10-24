@@ -9,6 +9,7 @@ function sample(overrides: Partial<WatchSample> = {}): WatchSample {
     videoId: "abc123def45",
     title: "Slovak for beginners",
     channelName: "Slovake.eu",
+    channelAvatar: "https://yt3.ggpht.com/abc=s48-c-k-c0x00ffffff-no-rj",
     language: "sk",
     languageName: "Slovak",
     durationSeconds: 600,
@@ -44,6 +45,11 @@ describe("cleanWatchSample", () => {
     expect(cleaned.visibleSeconds).toBe(20);
     expect(cleaned.videoSeconds).toBe(320);
   });
+
+  test("keeps only avatars served by YouTube", () => {
+    expect(cleanWatchSample(sample({ channelAvatar: "https://evil.example/a.png" }))!.channelAvatar).toBeNull();
+    expect(cleanWatchSample(sample({ channelAvatar: "data:image/gif;base64,R0lGOD" }))!.channelAvatar).toBeNull();
+  });
 });
 
 describe("recordWatchSample", () => {
@@ -58,6 +64,7 @@ describe("recordWatchSample", () => {
     expect(log[0].lastPosition).toBe(75);
     expect(log[0].hours["9"]).toBe(30);
     expect(log[0].id.startsWith("watch_")).toBe(true);
+    expect("channelAvatar" in log[0]).toBe(false);
   });
 
   test("starts a new sitting after a long gap, or on another day", () => {
@@ -106,6 +113,12 @@ describe("summarizeWatch", () => {
     expect(summary.byChannel[0]).toMatchObject({ channelName: "Slovake.eu", videos: 1, language: "Slovak" });
     expect(summary.videos[0].videoId).toBe("abc123def45");
     expect(summary.videos.find((video) => video.videoId === "zzz999yyy88")?.coverage).toBe(0.5);
+  });
+
+  test("gives each channel its stored avatar", () => {
+    const byChannel = summarizeWatch(log, 7, at(20, 22), null, { ERR: "https://yt3.ggpht.com/err" }).byChannel;
+    expect(byChannel.find((row) => row.channelName === "ERR")?.avatarUrl).toBe("https://yt3.ggpht.com/err");
+    expect(byChannel.find((row) => row.channelName === "Slovake.eu")?.avatarUrl).toBeNull();
   });
 
   test("leaves out what falls before the range", () => {

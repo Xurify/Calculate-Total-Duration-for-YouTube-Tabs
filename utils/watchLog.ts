@@ -1,3 +1,4 @@
+import { cleanChannelAvatarUrl, type ChannelAvatars } from "./channelAvatars";
 import { languageOverrideFor, type LanguageOverrides } from "./languageOverrides";
 import { dateKeyOf } from "./timeLog";
 import { newTypeId } from "./typeId";
@@ -11,6 +12,7 @@ export interface WatchSample {
   videoId: string;
   title: string;
   channelName: string;
+  channelAvatar?: string | null;
   language: string | null;
   languageName: string | null;
   durationSeconds: number;
@@ -26,7 +28,7 @@ export interface WatchSample {
   position: number;
 }
 
-export interface WatchEntry extends Omit<WatchSample, "position"> {
+export interface WatchEntry extends Omit<WatchSample, "position" | "channelAvatar"> {
   id: string;
   lastPosition: number;
   hours: Record<string, number>;
@@ -61,6 +63,7 @@ export function cleanWatchSample(raw: unknown): WatchSample | null {
     videoId: sample.videoId,
     title: text(sample.title, 300),
     channelName: text(sample.channelName, 200),
+    channelAvatar: cleanChannelAvatarUrl(sample.channelAvatar),
     language: typeof sample.language === "string" && sample.language ? sample.language.slice(0, 20) : null,
     languageName: typeof sample.languageName === "string" && sample.languageName ? sample.languageName.slice(0, 80) : null,
     durationSeconds: finiteSeconds(sample.durationSeconds, 7 * 86_400),
@@ -106,7 +109,7 @@ export function recordWatchSample(entries: WatchEntry[], sample: WatchSample): W
     last.isLive = sample.isLive;
     return entries;
   }
-  const { position, ...rest } = sample;
+  const { position, channelAvatar, ...rest } = sample;
   entries.push({ ...rest, id: newTypeId("watch", sample.startedAt), lastPosition: position, hours: { [hour]: sample.playedSeconds } });
   return entries;
 }
@@ -172,7 +175,7 @@ export interface WatchSummary {
     activeDays: number;
   };
   byLanguage: { label: string; seconds: number; videos: number }[];
-  byChannel: { channelName: string; seconds: number; videos: number; language: string }[];
+  byChannel: { channelName: string; avatarUrl: string | null; seconds: number; videos: number; language: string }[];
   byHour: number[];
   videos: WatchVideoRow[];
   streak: { current: number; longest: number };
@@ -215,7 +218,8 @@ export function summarizeWatch(
   entries: readonly WatchEntry[],
   days = 7,
   now: number = Date.now(),
-  overrides: LanguageOverrides | null = null
+  overrides: LanguageOverrides | null = null,
+  avatars: ChannelAvatars = {}
 ): WatchSummary {
   const start = new Date(now);
   start.setHours(0, 0, 0, 0);
@@ -322,6 +326,7 @@ export function summarizeWatch(
     byChannel: [...channels.values()]
       .map((row) => ({
         channelName: row.channelName,
+        avatarUrl: avatars[row.channelName] ?? null,
         seconds: row.seconds,
         videos: row.videoIds.size,
         language: [...row.languages].sort((first, second) => second[1] - first[1])[0]?.[0] ?? UNKNOWN_LANGUAGE,

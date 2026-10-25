@@ -1,6 +1,6 @@
 import { createEld } from "eld/core";
 import type { PublicPath } from "wxt/browser";
-import { normalizeLanguageCode, type DetectedLanguage } from "./captionLanguage";
+import { languageNamedInTitle, normalizeLanguageCode, type DetectedLanguage } from "./captionLanguage";
 
 const NOISE_PATTERN = /https?:\/\/\S+|www\.\S+|@\S+|#\S+|[*_|]/g;
 const MIN_TEXT_LENGTH = 20;
@@ -61,12 +61,22 @@ export function languageDisplayName(code: string, displayLocale?: string | null)
   }
 }
 
-/** Metadata from the uploader wins; text only replaces a guess from speech recognition. */
+/**
+ * A title that names the language being taught wins, since lessons are often uploaded with English
+ * metadata. Otherwise metadata from the uploader wins; text only replaces a guess from speech recognition.
+ */
 export async function refineLanguageWithText(
   detected: DetectedLanguage,
   text: string,
   displayLocale?: string | null
 ): Promise<DetectedLanguage> {
+  const named = languageNamedInTitle(text.split("\n", 1)[0]);
+  if (named) {
+    if (detected.language && normalizeLanguageCode(detected.language) === named) {
+      return { language: detected.language, languageName: detected.languageName };
+    }
+    return { language: named, languageName: languageDisplayName(named, displayLocale) };
+  }
   if (detected.language && !detected.weak) return detected;
   const code = await detectTextLanguage(text);
   if (!code) return detected;

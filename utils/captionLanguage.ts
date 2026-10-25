@@ -61,9 +61,44 @@ export interface PlayerResponseForLanguage {
 }
 
 /** Bump when detection changes so languages cached by older logic are detected again. */
-export const LANGUAGE_DETECTION_VERSION = 3;
+export const LANGUAGE_DETECTION_VERSION = 4;
 
 const NO_LANGUAGE: DetectedLanguage = { language: null, languageName: null };
+
+const NAMEABLE_LANGUAGE_CODES = [
+  "ar", "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "he", "hi", "hr", "hu", "id", "is", "it",
+  "ja", "ko", "lt", "lv", "nl", "no", "pl", "pt", "ro", "ru", "sk", "sl", "sr", "sv", "th", "tr", "uk", "vi", "zh",
+];
+
+let languageNamePattern: { regex: RegExp; codes: Map<string, string> } | null = null;
+
+function titleLanguagePattern() {
+  if (languageNamePattern) return languageNamePattern;
+  const english = new Intl.DisplayNames(["en"], { type: "language" });
+  const codes = new Map<string, string>();
+  for (const code of NAMEABLE_LANGUAGE_CODES) {
+    const name = english.of(code);
+    if (name && name !== code) codes.set(name.toLowerCase(), code);
+  }
+  const names = [...codes.keys()].join("|");
+  const regex = new RegExp(
+    `\\b(?:in|learn|learning|speak|speaking)\\s+(${names})\\b|\\b(${names})\\s+(?:lessons?|vocabulary|phrases|words|for beginners)\\b`,
+    "i"
+  );
+  languageNamePattern = { regex, codes };
+  return languageNamePattern;
+}
+
+/**
+ * The language a learning video's title names, as in "Parts of the City in Slovak". Such shorts
+ * often carry no captions and an English title, so text detection alone calls them English.
+ */
+export function languageNamedInTitle(title: string): string | null {
+  const { regex, codes } = titleLanguagePattern();
+  const match = regex.exec(title);
+  const name = match?.[1] ?? match?.[2];
+  return name ? codes.get(name.toLowerCase()) ?? null : null;
+}
 
 /** Normalize BCP-47 codes for comparison (`en-US` → `en`). */
 export function normalizeLanguageCode(code: string): string {

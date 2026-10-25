@@ -31,6 +31,7 @@ import {
   type SessionSection,
   type LiveTabSectionsState,
 } from "../../utils/storage";
+import { PLAYBACK_RATE_KEY, formatPlaybackRate, parsePlaybackRate } from "../../utils/playbackRate";
 import {
   applyStorePatch,
   fetchStoreState,
@@ -2505,7 +2506,7 @@ function updateCurrentViewStatsFromState(): void {
     kicker: facetCrumbText() || "On the desk",
     title: "",
     value: formatDurationWords(liveRemainingSeconds(videosToShow)),
-    suffix: "left",
+    suffix: leftSuffix(),
   });
   renderPlanner();
 }
@@ -3048,7 +3049,7 @@ function renderMain() {
     kicker: facetCrumbText() || "On the desk",
     title: "",
     value: formatDurationWords(liveRemainingSeconds(videosToShow)),
-    suffix: "left",
+    suffix: leftSuffix(),
   });
 
   const fpLive = tabListStructureFingerprint();
@@ -3152,9 +3153,25 @@ function facetMatchesSessionTab(tab: SavedSessionTab, sections: SessionSection[]
   return true;
 }
 
+/** The speed the user last chose on YouTube; every "left" figure is in real time at that speed. */
+let playbackRate = 1;
+
+function applyPlaybackRate(value: unknown): void {
+  const rate = parsePlaybackRate(value);
+  if (rate === playbackRate) return;
+  playbackRate = rate;
+  lastFacetRailHtml = "";
+  lastTabListFingerprint = "";
+  render();
+}
+
+function leftSuffix(): string {
+  return playbackRate === 1 ? "left" : `left at ${formatPlaybackRate(playbackRate)}`;
+}
+
 function remainingOf(video: VideoData): number {
   if (video.isLive || video.excluded) return 0;
-  return Math.max(0, video.seconds - video.currentTime);
+  return Math.max(0, video.seconds - video.currentTime) / playbackRate;
 }
 
 interface FacetRow { kind: FacetKind; value: string; label: string; count: number; seconds: number; color?: string; sectionId?: string; muted?: boolean }
@@ -3798,7 +3815,7 @@ function renderVideoList(videos: VideoData[], sectionColorIndex?: number | "unso
     const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
     const isNow = video.audible && !video.suspended;
     const offsetLabel = isNow ? "now" : formatOffset(elapsed);
-    if (!isNow && !video.isLive) elapsed += Math.max(0, video.seconds - video.currentTime);
+    if (!isNow && !video.isLive) elapsed += Math.max(0, video.seconds - video.currentTime) / playbackRate;
     const rowClass = `queue-row group${isNow ? " queue-row--now" : ""}${isSelected ? " queue-row--selected" : ""}${dnd.extraClass}`;
     const languageLabel = video.languageName ? video.languageName.split("(")[0].trim() : "";
     const stateLabel = video.suspended
@@ -6259,6 +6276,10 @@ document.addEventListener("DOMContentLoaded", () => {
     render();
   });
   void refreshSavedSessionsSidebar().then(() => fetchTabs());
+  void browser.storage.local.get(PLAYBACK_RATE_KEY).then((data) => applyPlaybackRate(data[PLAYBACK_RATE_KEY]));
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes[PLAYBACK_RATE_KEY]) applyPlaybackRate(changes[PLAYBACK_RATE_KEY].newValue);
+  });
 
   browser.tabs.onRemoved.addListener(scheduleFetchTabsFromEvents);
   browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {

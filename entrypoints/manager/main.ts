@@ -3488,7 +3488,7 @@ function renderTimeBar(): void {
       const labelled = share >= 9;
       if (!labelled) small.push(`<button type="button" class="time-bar-rest-item" data-facet-kind="language" data-facet-value="${escapeHtml(entry.label)}"><span class="facet-dot" style="background: ${languageColor(entry.label)}"></span>${escapeHtml(entry.label)} <span class="tabular-nums">${formatDurationWords(entry.seconds)}</span></button>`);
       const label = labelled ? `<span class="time-bar-label">${escapeHtml(entry.label)} <span class="time-bar-time">${formatDurationWords(entry.seconds)}</span></span>` : "";
-      return `<button type="button" class="time-bar-seg${active ? " time-bar-seg--active" : ""}${dimmed ? " time-bar-seg--dim" : ""}${detecting ? " time-bar-seg--detecting" : ""}" style="flex: ${Math.max(1, Math.round(entry.seconds))} 1 0px; background: ${languageColor(entry.label)}" data-facet-kind="language" data-facet-value="${escapeHtml(entry.label)}" title="${escapeHtml(entry.label)}: ${entry.count} videos, ${formatDurationWords(entry.seconds)}">${label}</button>`;
+      return `<button type="button" class="time-bar-seg${active ? " time-bar-seg--active" : ""}${dimmed ? " time-bar-seg--dim" : ""}${detecting ? " time-bar-seg--detecting" : ""}" style="flex: ${Math.max(1, Math.round(entry.seconds))} 1 0px; background: ${languageColor(entry.label)}" data-facet-kind="language" data-facet-value="${escapeHtml(entry.label)}" title="${escapeHtml(entry.label)}: ${entry.count} ${entry.count === 1 ? "video" : "videos"}, ${formatDurationWords(entry.seconds)} ${live ? "left" : "in total"}">${label}</button>`;
     })
     .join("");
   if (rest) {

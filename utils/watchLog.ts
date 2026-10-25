@@ -139,7 +139,7 @@ export function languageLabelOf(languageName: string | null | undefined, code: s
   return UNKNOWN_LANGUAGE;
 }
 
-function entryLanguage(entry: WatchEntry, overrides: LanguageOverrides | null): string {
+export function entryLanguage(entry: WatchEntry, overrides: LanguageOverrides | null): string {
   const override = overrides ? languageOverrideFor(overrides, entry.videoId, entry.channelName) : null;
   return override ? override.name : languageLabelOf(entry.languageName, entry.language);
 }

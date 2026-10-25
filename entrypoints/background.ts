@@ -55,6 +55,17 @@ import {
 } from "../utils/timeLog";
 import { getLiveTabSections } from "../utils/storage";
 import { loadChannelAvatars, recordChannelAvatar } from "../utils/channelAvatars";
+import {
+  cleanLanguageLimits,
+  limitUsage,
+  loadLanguageLimits,
+  loadLimitWarningsShown,
+  newLimitWarnings,
+  saveLanguageLimits,
+  saveLimitWarningsShown,
+  type LanguageLimitUsage,
+  type LimitWarning,
+} from "../utils/languageLimits";
 import { cleanWatchSample, loadWatchLog, recordWatchSample, saveWatchLog, summarizeWatch, type WatchEntry, type WatchSample } from "../utils/watchLog";
 import { loadLanguageOverrides } from "../utils/languageOverrides";
 
@@ -81,14 +92,30 @@ function withWatchLog<T>(work: (log: WatchEntry[]) => Promise<T> | T): Promise<T
   return run;
 }
 
-async function recordWatch(sample: WatchSample): Promise<void> {
+async function recordWatch(sample: WatchSample): Promise<LimitWarning[]> {
   const prefs = await loadTimeTrackingPrefs();
-  if (!prefs.watchHistory) return;
-  await withWatchLog(async (log) => {
+  if (!prefs.watchHistory) return [];
+  const usage = await withWatchLog(async (log) => {
     recordWatchSample(log, sample);
     await saveWatchLog(log);
+    const limits = await loadLanguageLimits();
+    return limits.length > 0 ? limitUsage(limits, log, Date.now(), await loadLanguageOverrides()) : [];
   });
   if (sample.channelAvatar && sample.channelName) await recordChannelAvatar(sample.channelName, sample.channelAvatar);
+  return takeLimitWarnings(usage);
+}
+
+let limitWarningsQueue: Promise<unknown> = Promise.resolve();
+
+/** Serialised so two tabs flushing at once don't both show the same warning. */
+function takeLimitWarnings(usage: LanguageLimitUsage[]): Promise<LimitWarning[]> {
+  const run = limitWarningsQueue.then(async () => {
+    const { warnings, shown } = newLimitWarnings(usage, await loadLimitWarningsShown());
+    await saveLimitWarningsShown(shown);
+    return warnings;
+  });
+  limitWarningsQueue = run.catch(() => {});
+  return run;
 }
 
 const watchLanguageTried = new Set<string>();
@@ -205,9 +232,18 @@ export default defineBackground(() => {
         loadCachedMandalaSummary(),
         getLiveTabSections(),
         loadChannelAvatars(),
+        loadLanguageLimits(),
       ])
-        .then(([entries, watchEntries, overrides, prefs, rules, mandala, piles, avatars]) =>
-          sendResponse({ summary: summarize(entries, days), watch: summarizeWatch(watchEntries, days, Date.now(), overrides, avatars), prefs, rules, mandala, piles })
+        .then(([entries, watchEntries, overrides, prefs, rules, mandala, piles, avatars, limits]) =>
+          sendResponse({
+            summary: summarize(entries, days),
+            watch: summarizeWatch(watchEntries, days, Date.now(), overrides, avatars),
+            limits: limitUsage(limits, watchEntries, Date.now(), overrides),
+            prefs,
+            rules,
+            mandala,
+            piles,
+          })
         )
         .catch((error) => sendResponse({ errorMessage: error instanceof Error ? error.message : String(error) }));
       return true;
@@ -233,7 +269,7 @@ export default defineBackground(() => {
         return;
       }
       void recordWatch(sample)
-        .then(() => sendResponse({ success: true }))
+        .then((limitWarnings) => sendResponse({ success: true, limitWarnings }))
         .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
       return true;
     }
@@ -257,6 +293,13 @@ export default defineBackground(() => {
     if (message.action === "remove-site-rule") {
       void removeSiteRule(message.id as string)
         .then(() => sendResponse({ success: true }))
+        .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "set-language-limits") {
+      void saveLanguageLimits(cleanLanguageLimits(message.limits))
+        .then((limits) => sendResponse({ success: true, limits }))
         .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
       return true;
     }

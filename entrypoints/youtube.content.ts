@@ -27,6 +27,8 @@ import {
 import { requestPageTranscript } from "../utils/youtubeTranscript";
 import { placeHudBelowNativeControls } from "../utils/hudLayout";
 import { WatchSampler } from "../utils/watchSampler";
+import type { LimitWarning } from "../utils/languageLimits";
+import { formatMinutesWords } from "../utils/timeUi";
 
 const DEBOUNCE_MS = 150;
 
@@ -391,7 +393,7 @@ function getTargetPlayerContainer(): HTMLElement {
   return shownPlayer ?? candidates[0] ?? document.body;
 }
 
-function showImmersionToast(messageText: string) {
+function showImmersionToast(messageText: string, durationMs = 3200) {
   const existingToast = document.getElementById("study-harvester-hud-toast");
   if (existingToast) {
     existingToast.remove();
@@ -412,7 +414,17 @@ function showImmersionToast(messageText: string) {
     toastElement.style.opacity = "0";
     toastElement.style.transform = "translateY(4px)";
     window.setTimeout(() => toastElement.remove(), 250);
-  }, 3200);
+  }, durationMs);
+}
+
+const LIMIT_TOAST_MS = 9000;
+
+function limitWarningText(warning: LimitWarning): string {
+  const used = formatMinutesWords(warning.usedSeconds);
+  const limit = formatMinutesWords(warning.minutes * 60);
+  return warning.level === "over"
+    ? `${warning.language}: daily limit of ${limit} reached (${used} today).`
+    : `${warning.language}: ${used} of your ${limit} daily limit. Time to switch language soon?`;
 }
 
 function truncateText(text: string, maxLength: number): string {
@@ -1831,7 +1843,12 @@ export default defineContentScript({
     new WatchSampler({
       videoId: () => (isWatchOrShorts() ? getVideoIdFromLocation() : null),
       metadata: () => lastMetadata,
-      send: async (sample) => browser.runtime.sendMessage({ action: "watch-sample", sample }),
+      send: async (sample) => {
+        const response = (await browser.runtime.sendMessage({ action: "watch-sample", sample })) as { limitWarnings?: LimitWarning[] } | undefined;
+        const warning = response?.limitWarnings?.[0];
+        if (warning) showImmersionToast(limitWarningText(warning), LIMIT_TOAST_MS);
+        return response;
+      },
     }).start(context);
 
     context.addEventListener(window, "keydown", handleGlobalKeydown, { capture: true });

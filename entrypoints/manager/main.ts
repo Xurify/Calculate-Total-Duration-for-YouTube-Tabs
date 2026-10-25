@@ -41,6 +41,7 @@ import { formatTime, formatCompact, formatDurationWords, formatOffset, formatSho
 import { pillarColor, type SiteRule, type TimeTrackingPrefs } from "../../utils/timeLog";
 import { actionOptionsHtml, formatMinutesWords, pillarChoices, pillarOptionsHtml, pillarTitleOf, type TimeSummaryResponse } from "../../utils/timeUi";
 import type { WatchSummary, WatchVideoRow } from "../../utils/watchLog";
+import { languageKey, MAX_LIMIT_MINUTES, type LanguageLimit, type LanguageLimitUsage } from "../../utils/languageLimits";
 import {
   detectLanguageFromPlayerResponse,
   languageTextFromPlayerResponse,
@@ -5953,6 +5954,43 @@ function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): strin
   `;
 }
 
+function languageLimitsHtml(limits: LanguageLimitUsage[], watch: WatchSummary, prefs: TimeTrackingPrefs): string {
+  const rowsHtml = limits
+    .map((limit) => {
+      const share = Math.min(1, limit.usedSeconds / (limit.minutes * 60));
+      const barColor = limit.level === "over" ? "var(--color-danger)" : limit.level === "near" ? "var(--color-warning)" : "var(--color-accent)";
+      return `<li class="grid grid-cols-[minmax(0,12rem)_minmax(0,1fr)_7rem_auto] items-center gap-3 text-sm">
+        <span class="truncate font-medium text-text-primary">${escapeHtml(limit.language)}</span>
+        <span class="h-2 rounded-full bg-surface-elevated overflow-hidden flex" role="meter" aria-valuemin="0" aria-valuemax="${limit.minutes}" aria-valuenow="${Math.floor(limit.usedSeconds / 60)}" aria-label="${escapeHtml(limit.language)} today"><span class="h-full" style="width:${Math.max(share > 0 ? 2 : 0, share * 100)}%;background:${barColor}"></span></span>
+        <span class="text-right text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(limit.usedSeconds)} <span class="text-text-muted">of</span></span>
+        <span class="flex items-center gap-2">
+          <input type="number" class="time-limit-minutes h-8 w-20 px-2 rounded-md border border-border bg-surface-elevated text-xs text-text-primary tabular-nums" min="1" max="${MAX_LIMIT_MINUTES}" step="1" value="${limit.minutes}" data-language="${escapeHtml(limit.language)}" aria-label="Daily minutes for ${escapeHtml(limit.language)}" />
+          <span class="text-xs text-text-muted">min</span>
+          <button type="button" class="time-limit-remove chip h-7 px-2.5 text-xs chip--danger" data-language="${escapeHtml(limit.language)}">Remove</button>
+        </span>
+      </li>`;
+    })
+    .join("");
+  const limited = new Set(limits.map((limit) => languageKey(limit.language)));
+  const suggestions = watch.byLanguage.filter((row) => row.label !== UNKNOWN_LANGUAGE && !limited.has(languageKey(row.label)));
+  return `<section class="flex flex-col gap-3">
+    ${timeSectionHeading("Daily limits")}
+    <p class="text-xs text-text-muted m-0">A note shows on the YouTube player at 80% and again at 100%. Time is real time, so 2× speed counts half.${prefs.watchHistory ? "" : " Limits need YouTube history, which is off."}</p>
+    ${rowsHtml ? `<ul class="m-0 p-0 list-none flex flex-col gap-2">${rowsHtml}</ul>` : ""}
+    <form id="time-limit-add" class="flex flex-wrap items-center gap-2">
+      <input type="text" name="language" list="time-limit-languages" required maxlength="80" placeholder="Language, e.g. English" class="h-8 w-48 px-2 rounded-md border border-border bg-surface-elevated text-xs text-text-primary" aria-label="Language" />
+      <datalist id="time-limit-languages">${suggestions.map((row) => `<option value="${escapeHtml(row.label)}"></option>`).join("")}</datalist>
+      <input type="number" name="minutes" required min="1" max="${MAX_LIMIT_MINUTES}" step="1" placeholder="Minutes" class="h-8 w-24 px-2 rounded-md border border-border bg-surface-elevated text-xs text-text-primary tabular-nums" aria-label="Minutes per day" />
+      <button type="submit" class="chip h-8 text-xs">Add limit</button>
+    </form>
+  </section>`;
+}
+
+async function saveLanguageLimitList(limits: LanguageLimit[]): Promise<void> {
+  await browser.runtime.sendMessage({ action: "set-language-limits", limits });
+  await renderTimePanel();
+}
+
 function mandalaSectionHtml(data: TimeSummaryResponse): string {
   const { summary, rules, mandala, piles } = data;
 
@@ -6078,6 +6116,7 @@ async function renderTimePanel(): Promise<void> {
   panel.innerHTML = `
     <div class="flex justify-end">${rangeHtml}</div>
     <div id="time-watch" class="contents">${watchSectionsHtml(watch, prefs)}</div>
+    ${languageLimitsHtml(data.limits ?? [], watch, prefs)}
     ${mandalaSectionHtml(data)}
     <section class="flex flex-col gap-3 pb-6">
       <h2 class="font-display text-[22px] font-medium m-0">Tracking</h2>
@@ -6151,6 +6190,12 @@ function wireTimePanel(panel: HTMLElement): void {
       repaintWatchSections(panel);
       return;
     }
+    const removeLimit = target.closest<HTMLElement>(".time-limit-remove");
+    if (removeLimit) {
+      const limits = lastTimeResponse?.limits ?? [];
+      await saveLanguageLimitList(limits.filter((limit) => limit.language !== removeLimit.dataset.language));
+      return;
+    }
     const remove = target.closest<HTMLElement>(".time-rule-remove");
     if (remove?.dataset.ruleId) {
       await browser.runtime.sendMessage({ action: "remove-site-rule", id: remove.dataset.ruleId });
@@ -6187,6 +6232,20 @@ function wireTimePanel(panel: HTMLElement): void {
     }
   });
 
+  panel.addEventListener("submit", async (event) => {
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement) || form.id !== "time-limit-add") return;
+    event.preventDefault();
+    const fields = new FormData(form);
+    const language = String(fields.get("language") ?? "").trim();
+    const minutes = Number(fields.get("minutes"));
+    if (!language || !(minutes > 0)) return;
+    // Pick up the label as the Time page spells it, so "english" still matches "English".
+    const known = lastTimeResponse?.watch.byLanguage.find((row) => languageKey(row.label) === languageKey(language));
+    const others = (lastTimeResponse?.limits ?? []).filter((limit) => languageKey(limit.language) !== languageKey(language));
+    await saveLanguageLimitList([...others, { language: known?.label ?? language, minutes }]);
+  });
+
   panel.addEventListener("change", async (event) => {
     const target = event.target as HTMLElement;
     if (target.id === "time-enabled" || target.id === "time-idle" || target.id === "time-watch-history") {
@@ -6197,6 +6256,13 @@ function wireTimePanel(panel: HTMLElement): void {
       };
       await browser.runtime.sendMessage({ action: "set-time-tracking-prefs", prefs });
       if (target.id === "time-watch-history") await renderTimePanel();
+      return;
+    }
+    if (target instanceof HTMLInputElement && target.classList.contains("time-limit-minutes")) {
+      const minutes = Number(target.value);
+      if (!target.checkValidity() || !(minutes > 0)) return;
+      const limits = (lastTimeResponse?.limits ?? []).map((limit) => (limit.language === target.dataset.language ? { ...limit, minutes } : limit));
+      await saveLanguageLimitList(limits);
       return;
     }
     const sitePillar = target.closest<HTMLSelectElement>(".time-site-pillar");

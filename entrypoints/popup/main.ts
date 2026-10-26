@@ -11,18 +11,20 @@ import {
   requestMetadataUpdate,
   normalizeYoutubeUrl,
   clearCache,
+  loadPrefsAndMetadataCache,
 } from "../../utils/storage";
 import {
   applyStorePatch,
-  fetchStoreState,
   isStoreUpdatedMessage,
+  type StoreUpdatedMessage,
   type StoreState,
 } from "../../utils/store";
-import { formatTime, formatCompact, formatDurationWords, formatOffset, parseTimeParam, getVideoIdFromUrl } from "../../utils/format";
+import { formatTime, formatCompact, formatDurationWords, formatStartsIn, parseTimeParam, getVideoIdFromUrl } from "../../utils/format";
 import { queryReadingList } from "../../utils/readingList";
 import { loadCachedMandalaSummary, type CachedMandalaSummary } from "../../utils/storage";
 import { hostOf, isTrackableUrl, pagePrefixOf, pillarColor, type SiteRule } from "../../utils/timeLog";
 import { languageFlagHtml } from "../../utils/languageFlags";
+import { isGoal, languageKey, type LanguageTodayRow } from "../../utils/languageLimits";
 import { actionSelectOptions, escapeHtml as escapeText, matchWords, pillarChoices, pillarSelectOptions, type CurrentSiteResponse } from "../../utils/timeUi";
 import { closeAllCustomSelects, mountCustomSelect } from "../manager/custom-select";
 import { installDialogs, installTooltips, syncRangeFill } from "../../utils/controls";
@@ -64,7 +66,7 @@ function applyStoreToVideos(): void {
   });
 }
 
-function handleStoreUpdated(message: { prefs?: StoreState["prefs"]; metadataCache?: StoreState["metadataCache"] }): void {
+function handleStoreUpdated(message: StoreUpdatedMessage): void {
   applyStorePatch(storeState, message);
   if (videoData.length > 0) {
     applyStoreToVideos();
@@ -839,7 +841,7 @@ function renderNow(): void {
               </div>
             </div>
             <div class="mt-3 pt-3 pb-0 border-t border-border/50 text-center">
-              <div class="text-[11px] text-text-muted"><span class="font-display">Study Harvester</span> · v${VERSION_NUMBER}</div>
+              <div class="text-[11px] text-text-muted"><span class="font-display">Study Harvester</span> · v${VERSION_NUMBER} · <span class="inline-flex items-center gap-1 text-success" title="Pages that support WebMCP can use Study Harvester's tools"><span class="w-1.5 h-1.5 rounded-full bg-success"></span>WebMCP on</span></div>
             </div>
           </div>
           <div id="popup-confirm-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-scrim backdrop-blur-sm" aria-modal="true" role="dialog" aria-labelledby="popup-confirm-title">
@@ -1145,57 +1147,59 @@ function setupApp() {
 
   app.innerHTML = `
     <div class="flex flex-col h-popup max-h-popup w-full bg-surface overflow-hidden">
-      <header data-v-header class="shrink-0 px-4 pt-3.5 pb-1">
+      <header data-v-header class="shrink-0 px-4 pt-2.5 pb-0.5">
         <div class="flex items-center gap-1">
           <span class="font-display text-[18px] font-medium text-text-primary leading-none flex-1 min-w-0 truncate">Study Harvester</span>
-          <span class="inline-flex items-center gap-1 px-1.5 py-0.5 mr-1 rounded-full text-[9px] font-semibold bg-success/12 text-success border border-success/30" title="WebMCP active"><span class="w-1.5 h-1.5 rounded-full bg-success"></span>WebMCP</span>
           <button id="refresh-tabs" type="button" class="popup-icon group/refresh" title="Refresh tabs" aria-label="Refresh tabs"><span class="group-active/refresh:rotate-180 transition-transform duration-500 flex"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg></span></button>
           <button id="go-to-settings" type="button" class="popup-icon" title="Settings" aria-label="Settings"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
         </div>
-        <div class="mt-4 flex flex-col gap-2.5">
-          <div class="font-display text-[34px] leading-none tracking-[-0.02em] text-text-primary"><span id="stat-remaining">0 min</span> <span class="text-text-muted">left</span></div>
-          <div class="h-1 rounded-full bg-border overflow-hidden"><div id="stat-overall-progress" class="h-full rounded-full bg-accent transition-[width] duration-700" style="width: 0%"></div></div>
+        <div class="mt-2 flex flex-col gap-1.5">
+          <div class="font-display text-[32px] leading-none tracking-[-0.02em] text-text-primary"><span id="stat-remaining">0 min</span> <span class="text-text-muted">left</span></div>
           <div class="flex items-center justify-between gap-2 text-[12px] text-text-secondary tabular-nums">
             <span id="stat-video-count">0 videos</span>
-            <span><span id="stat-watched">0 min</span> watched · <span id="stat-watched-pct">0%</span></span>
+            <span><span id="stat-watched-pct" class="font-semibold text-text-primary">0%</span> watched</span>
           </div>
-          <div id="popup-lang-bar" class="popup-lang-bar hidden" role="img" aria-label="Time left by language"></div>
+          <div id="popup-lang-bar" class="popup-lang-bar" role="img" aria-label="Time by language"></div>
+          <div id="popup-today" class="hidden grid grid-cols-3 gap-1.5" aria-label="Watched today"></div>
           <span id="stat-total" class="hidden"></span>
         </div>
       </header>
 
       <section id="site-block" class="hidden shrink-0 px-3 pt-2.5"></section>
 
-      <section id="now-playing" class="hidden shrink-0 px-3 pt-3">
+      <section id="now-playing" class="hidden shrink-0 px-3 pt-2">
         <div id="np-card" class="np-card" data-np-tab-id="">
           <div class="flex gap-3">
-            <button type="button" class="np-thumb-btn relative shrink-0 w-[8.25rem] aspect-video rounded-lg overflow-hidden bg-surface-hover border-0 p-0 cursor-pointer" title="Open tab" aria-label="Open tab">
-              <img class="np-thumb w-full h-full object-cover hidden" alt="" width="132" height="74" />
+            <button type="button" class="np-thumb-btn relative shrink-0 w-[6.5rem] aspect-video rounded-lg overflow-hidden bg-surface-hover border-0 p-0 cursor-pointer" title="Open tab" aria-label="Open tab">
+              <img class="np-thumb w-full h-full object-cover hidden" alt="" width="104" height="58" decoding="async" />
               <div class="absolute bottom-0 left-0 right-0 h-[3px] bg-black/40">
                 <div class="np-progress h-full bg-accent transition-[width] duration-500" style="width: 0%"></div>
               </div>
             </button>
-            <div class="flex-1 min-w-0 flex flex-col justify-center gap-1">
+            <div class="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
               <div class="np-kicker text-[10px] font-semibold uppercase tracking-[0.1em] text-accent">Playing now</div>
-              <button type="button" class="np-title font-display text-left text-[17px] font-medium leading-tight text-text-primary line-clamp-2 border-0 bg-transparent p-0 cursor-pointer hover:text-accent transition-colors" title="Open tab"></button>
+              <button type="button" class="np-title font-display text-left text-[15px] font-medium leading-tight text-text-primary line-clamp-2 border-0 bg-transparent p-0 cursor-pointer hover:text-accent transition-colors" title="Open tab"></button>
               <p class="np-channel text-[12px] text-text-muted truncate m-0"></p>
             </div>
           </div>
-          <div class="mt-2.5 flex items-center gap-2.5">
-            <button type="button" class="np-play-pause w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-accent text-on-accent border-0 cursor-pointer hover:bg-accent-hover active:scale-95 transition-colors" title="Play or pause" aria-label="Play or pause"></button>
-            <span class="np-time text-[12px] text-text-secondary tabular-nums shrink-0 min-w-[5rem]"></span>
-            <svg class="np-volume-icon shrink-0 text-text-muted" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-            <div class="flex-1 min-w-0 flex items-center h-3">
-              <input type="range" class="np-volume ui-range w-full" min="0" max="100" value="0" aria-label="Volume" />
+          <div class="mt-2 flex items-center gap-2">
+            <button type="button" class="np-play-pause w-8 h-8 shrink-0 flex items-center justify-center rounded-full bg-accent text-on-accent border-0 cursor-pointer hover:bg-accent-hover active:scale-95 transition-colors" title="Play or pause" aria-label="Play or pause"></button>
+            <button type="button" class="np-next w-7 h-7 shrink-0 flex items-center justify-center rounded-full border border-border bg-surface text-text-primary cursor-pointer hover:bg-surface-hover active:scale-95 transition-colors" title="Play the next video" aria-label="Play the next video"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5 4 15 12 5 20 5 4"/><rect x="16" y="4" width="3" height="16" rx="1"/></svg></button>
+            <span class="np-time text-[12px] text-text-secondary tabular-nums min-w-0 truncate"></span>
+            <div class="ml-auto flex items-center gap-1.5 shrink-0">
+              <svg class="np-volume-icon shrink-0 text-text-muted" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+              <div class="w-14 flex items-center h-3">
+                <input type="range" class="np-volume ui-range w-full" min="0" max="100" value="0" aria-label="Volume" />
+              </div>
             </div>
-            <button type="button" class="np-go-to-tab shrink-0 text-[12px] font-semibold text-accent hover:text-accent-hover border-0 bg-transparent p-0 cursor-pointer" title="Go to tab">Go to tab</button>
+            <button type="button" class="np-go-to-tab popup-icon w-7 h-7 text-accent hover:text-accent-hover" title="Go to tab" aria-label="Go to tab"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></button>
           </div>
         </div>
         <p id="np-also-playing" class="hidden px-1 pt-1.5 text-[11px] text-text-muted truncate m-0"></p>
       </section>
 
-      <div id="up-next-divider" class="flex items-center gap-3 px-4 pt-4 pb-1 shrink-0">
-        <span class="font-display text-[17px] font-medium text-text-primary flex-1">Up next</span>
+      <div id="up-next-divider" class="flex items-center gap-3 px-4 pt-2.5 pb-0.5 shrink-0">
+        <span class="font-display text-[17px] font-medium text-text-primary flex-1">Up next <span id="up-next-count" class="font-sans text-[11px] font-normal text-text-muted ml-1"></span></span>
         <span class="inline-flex gap-0.5 rounded-lg border border-border bg-surface p-0.5" role="group" aria-label="Order">
           <button id="sort-order" type="button" class="theme-option theme-option--small" aria-pressed="true">Tab order</button>
           <button id="sort-duration" type="button" class="theme-option theme-option--small" aria-pressed="false">Longest first</button>
@@ -1204,20 +1208,20 @@ function setupApp() {
 
       <div id="video-list" class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-2 pb-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent"></div>
 
-      <footer class="shrink-0 px-3 py-3 border-t border-border bg-surface flex items-center gap-2">
+      <footer class="shrink-0 px-3 py-2.5 border-t border-border bg-surface flex items-center gap-2">
         <button id="popup-stage-study" type="button" class="flex-1 h-[38px] rounded-[10px] border-0 bg-accent text-on-accent text-[13px] font-semibold flex items-center justify-center gap-2 cursor-pointer hover:bg-accent-hover transition-colors active:scale-[0.98]" title="Start a focused study session from this window's tabs">
           <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           Start study session
         </button>
         <button id="open-manager" type="button" class="h-[38px] px-3.5 rounded-[10px] border border-border bg-surface-elevated text-text-primary text-[13px] font-medium cursor-pointer hover:bg-surface-hover transition-colors" title="Open the full desk">Open desk</button>
         <button id="popup-reading-list" type="button" class="h-[38px] px-3 rounded-[10px] border border-border bg-surface-elevated text-text-secondary text-[12px] font-medium cursor-pointer hover:bg-surface-hover transition-colors flex items-center gap-1.5" title="Open reading list on the desk" aria-label="Reading list">
-          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M6 6h10"/></svg>
-          <span id="popup-reading-count" class="tabular-nums">0</span>
+          Reading <span id="popup-reading-count" class="tabular-nums">0</span>
         </button>
       </footer>
     </div>
   `;
 
+  renderLanguageToday();
   document.getElementById("go-to-settings")?.addEventListener("click", goToSettings);
   document.getElementById("open-manager")?.addEventListener("click", () => {
     void openManager();
@@ -1317,6 +1321,11 @@ function bindNowPlayingCardEvents(): void {
       return;
     }
 
+    if (target.closest(".np-next")) {
+      await playNextVideo(video);
+      return;
+    }
+
     if (target.closest(".np-go-to-tab") || target.closest(".np-title") || target.closest(".np-thumb-btn")) {
       await browser.tabs.update(tabId, { active: true });
       if (video.windowId != null) {
@@ -1362,6 +1371,23 @@ function bindNowPlayingCardEvents(): void {
   });
 }
 
+/** Pauses the current video and starts the first one in Up next, in its own tab. */
+async function playNextVideo(current: VideoData): Promise<void> {
+  const next = getVideosForUpNext().find((video) => video.id !== current.id && !video.excluded && !video.isLive);
+  if (!next) return;
+  if (current.paused === false) await togglePlayback(current.id);
+  await browser.tabs.update(next.id, { active: true });
+  if (next.windowId != null) await browser.windows.update(next.windowId, { focused: true });
+  await browser.scripting
+    .executeScript({
+      target: { tabId: next.id },
+      world: "MAIN",
+      func: () => void document.querySelector("video")?.play().catch(() => {}),
+    })
+    .catch(() => {});
+  void persistLastPlayingTabId(next.id);
+}
+
 function updateNowPlayingCardTime(card: HTMLElement, video: VideoData): void {
   const watchedPercent = getWatchedPercent(video);
   const progressEl = card.querySelector(".np-progress") as HTMLElement | null;
@@ -1379,11 +1405,8 @@ function updateNowPlayingCardTime(card: HTMLElement, video: VideoData): void {
   if (video.isLive) {
     timeEl.innerHTML = `<span class="px-1.5 py-0.5 rounded bg-youtube/15 text-youtube text-[9px] font-bold">LIVE</span>`;
   } else if (video.seconds > 0) {
-    timeEl.innerHTML = `
-      <span class="${watchedPercent > 0 ? "text-text-secondary" : ""}">${formatCompact(video.currentTime)}</span>
-      <span class="mx-0.5 opacity-30">/</span>
-      <span>${formatCompact(video.seconds)}</span>
-    `;
+    const left = Math.max(0, video.seconds - video.currentTime);
+    timeEl.innerHTML = `${formatCompact(video.currentTime)}<span class="mx-0.5 opacity-30">/</span>${formatCompact(video.seconds)}<span class="text-text-muted"> · ${formatDurationWords(left)} left</span>`;
   } else {
     timeEl.innerText = formatCompact(video.currentTime);
   }
@@ -1532,25 +1555,22 @@ function updateHeaderStats(
   videoCount: number,
   totalWatched = 0
 ) {
-  document.getElementById("stat-remaining")!.innerText = formatDurationWords(totalRemaining);
-  document.getElementById("stat-total")!.innerText = formatTime(totalSeconds);
-  document.getElementById("stat-video-count")!.innerText =
-    `${videoCount} video${videoCount === 1 ? "" : "s"} · ${formatDurationWords(totalSeconds)} in total`;
-
-  const watchedEl = document.getElementById("stat-watched");
-  if (watchedEl) watchedEl.innerText = formatDurationWords(totalWatched);
+  // Called every second; unchanged text is left alone so the header doesn't relayout on each tick.
+  setText(document.getElementById("stat-remaining"), formatDurationWords(totalRemaining));
+  setText(document.getElementById("stat-total"), formatTime(totalSeconds));
+  const countEl = document.getElementById("stat-video-count");
+  const countHtml = `<span class="font-semibold text-text-primary">${videoCount} video${videoCount === 1 ? "" : "s"}</span> · ${formatDurationWords(totalSeconds)} total`;
+  if (countEl && countEl.dataset.html !== countHtml) {
+    countEl.dataset.html = countHtml;
+    countEl.innerHTML = countHtml;
+  }
 
   const percent = totalSeconds > 0 ? (totalWatched / totalSeconds) * 100 : 0;
   const watchedPctEl = document.getElementById("stat-watched-pct");
   if (watchedPctEl) {
     const rounded = Math.round(percent);
-    watchedPctEl.textContent =
-      rounded >= 100 ? "Done" : rounded > 0 ? `${rounded}%` : "0%";
-  }
-
-  const overallProgress = document.getElementById("stat-overall-progress");
-  if (overallProgress) {
-    overallProgress.style.width = `${percent}%`;
+    setText(watchedPctEl, rounded >= 100 ? "Done" : `${rounded} %`);
+    watchedPctEl.title = `${formatDurationWords(totalWatched)} watched`;
   }
   renderPopupLanguageBar();
 
@@ -1559,12 +1579,28 @@ function updateHeaderStats(
   btnTab?.setAttribute("aria-pressed", String(!sortByDuration));
   btnLen?.setAttribute("aria-pressed", String(sortByDuration));
 
+  if (readingCount != null) showReadingCount(readingCount);
+}
+
+function setText(element: HTMLElement | null, text: string): void {
+  if (element && element.textContent !== text) element.textContent = text;
+}
+
+let readingCount: number | null = null;
+
+function showReadingCount(count: number): void {
+  const badgeElement = document.getElementById("popup-reading-count");
+  if (badgeElement) badgeElement.textContent = String(count);
+  document
+    .getElementById("popup-reading-list")
+    ?.setAttribute("aria-label", `Reading list, ${count} ${count === 1 ? "item" : "items"}`);
+}
+
+/** The reading list doesn't change while the popup is open, so it's read once instead of on every render. */
+function loadReadingCount(): void {
   void queryReadingList(false).then((items) => {
-    const badgeElement = document.getElementById("popup-reading-count");
-    if (badgeElement) badgeElement.textContent = String(items.length);
-    document
-      .getElementById("popup-reading-list")
-      ?.setAttribute("aria-label", `Reading list, ${items.length} ${items.length === 1 ? "item" : "items"}`);
+    readingCount = items.length;
+    showReadingCount(readingCount);
   });
 }
 
@@ -1586,52 +1622,132 @@ function popupLanguageLabel(video: VideoData): string | null {
   return null;
 }
 
-/** One proportional strip of the time left, split by language, so the popup matches the desk. */
+/**
+ * One strip for the whole queue, split by language like the desk. Each part darkens as it is watched, so the
+ * strip is also the progress bar.
+ */
 function renderPopupLanguageBar(): void {
   const bar = document.getElementById("popup-lang-bar");
   if (!bar) return;
-  const totals = new Map<string, number>();
+  const totals = new Map<string, { seconds: number; watched: number }>();
   for (const video of videoData) {
     if (video.excluded || video.isLive || video.seconds <= 0) continue;
     const label = popupLanguageLabel(video) ?? "Unknown";
-    totals.set(label, (totals.get(label) ?? 0) + Math.max(0, video.seconds - video.currentTime));
+    const row = totals.get(label) ?? { seconds: 0, watched: 0 };
+    row.seconds += video.seconds;
+    row.watched += getEffectiveWatchedSeconds(video);
+    totals.set(label, row);
   }
-  const entries = Array.from(totals.entries()).filter(([, seconds]) => seconds > 0).sort((a, b) => b[1] - a[1]);
-  const total = entries.reduce((sum, [, seconds]) => sum + seconds, 0);
-  if (entries.length < 2 || total <= 0) {
-    bar.classList.add("hidden");
-    bar.innerHTML = "";
-    return;
-  }
-  bar.classList.remove("hidden");
-  bar.innerHTML = entries
-    .map(([label, seconds], index) => {
-      const share = (seconds / total) * 100;
+  const entries = Array.from(totals.entries()).sort((a, b) => b[1].seconds - a[1].seconds);
+  const total = entries.reduce((sum, [, row]) => sum + row.seconds, 0);
+
+  const html =
+    total <= 0
+      ? `<span class="popup-lang-seg flex-1 bg-border"></span>`
+      : entries
+    .map(([label, row], index) => {
+      const share = (row.seconds / total) * 100;
+      const left = Math.max(0, row.seconds - row.watched);
       const color = label === "Unknown" ? "var(--color-border-hover)" : POPUP_LANGUAGE_PALETTE[index % POPUP_LANGUAGE_PALETTE.length];
       const safeLabel = escapeText(label);
-      const text = share >= 18 ? `<span class="popup-lang-label">${safeLabel}</span>` : "";
-      return `<span class="popup-lang-seg" style="width: ${share.toFixed(1)}%; background: ${color}" title="${safeLabel}: ${formatDurationWords(seconds)}">${text}</span>`;
+      const text = share >= 24 ? `${safeLabel} ${formatDurationWords(left)}` : share >= 12 ? safeLabel : "";
+      return `<span class="popup-lang-seg" style="width: ${share.toFixed(1)}%; background: ${color}" title="${safeLabel}: ${formatDurationWords(left)} left of ${formatDurationWords(row.seconds)}"><span class="popup-lang-done" style="width: ${((row.watched / row.seconds) * 100).toFixed(1)}%"></span>${text ? `<span class="popup-lang-label">${text}</span>` : ""}</span>`;
+        })
+        .join("");
+  if (html === lastLanguageBarHtml && bar.childElementCount > 0) return;
+  lastLanguageBarHtml = html;
+  bar.innerHTML = html;
+}
+
+let lastLanguageBarHtml = "";
+
+let languageToday: LanguageTodayRow[] = [];
+
+function languageTodayChipHtml(row: LanguageTodayRow): string {
+  const flag = languageFlagHtml(row.language, "lang-flag lang-flag--xs shrink-0");
+  const used = Math.floor(row.usedSeconds / 60);
+  const name = escapeText(row.language);
+  if (row.minutes == null) {
+    return `<div class="popup-today" title="${name}: ${formatDurationWords(row.usedSeconds)} today">${flag}<span class="font-semibold text-text-primary">${formatDurationWords(row.usedSeconds)}</span><span class="truncate">today</span></div>`;
+  }
+  const share = Math.min(100, (row.usedSeconds / (row.minutes * 60)) * 100);
+  const tone = row.level === "over" ? "popup-today--over" : row.level === "near" ? "popup-today--near" : row.level === "met" ? "popup-today--met" : "";
+  const what = isGoal(row) ? "goal" : "limit";
+  return `<div class="popup-today ${tone}" title="${name}: ${used} of ${row.minutes} min ${what} today">${flag}<span class="font-semibold popup-today-value">${used} / ${row.minutes} min</span><span class="popup-today-meter"><span style="width: ${share.toFixed(0)}%"></span></span></div>`;
+}
+
+function renderLanguageToday(): void {
+  const strip = document.getElementById("popup-today");
+  if (!strip) return;
+  strip.classList.toggle("hidden", languageToday.length === 0);
+  strip.innerHTML = languageToday.map(languageTodayChipHtml).join("");
+}
+
+function loadLanguageToday(): void {
+  void browser.runtime
+    .sendMessage({ action: "get-language-today" })
+    .then((response: { rows?: LanguageTodayRow[] } | undefined) => {
+      languageToday = response?.rows ?? [];
+      renderLanguageToday();
+      updateVideoListCardsFromState();
     })
-    .join("");
+    .catch(() => {});
+}
+
+function isOverLimitToday(video: VideoData): boolean {
+  const label = popupLanguageLabel(video);
+  if (!label) return false;
+  return languageToday.some((row) => row.level === "over" && !isGoal(row) && languageKey(row.language) === languageKey(label));
+}
+
+/** Rows that fit in the popup without scrolling load their thumbnails at once; lazy ones wait for layout. */
+const EAGER_THUMBS = 8;
+
+const ROW_CLASSES =
+  "group relative flex h-10 shrink-0 items-center gap-2.5 overflow-hidden px-2 rounded-[10px] transition-[background-color,opacity] duration-200";
+
+function languageCodeLabel(video: VideoData): string | null {
+  const code = video.language?.split(/[-_]/)[0];
+  if (code && code.length <= 3) return code.toUpperCase();
+  return popupLanguageLabel(video);
 }
 
 function updateVideoListItem(item: HTMLElement, video: VideoData): void {
   const watchedPercent = getWatchedPercent(video);
   const isNowPlaying = isTabActivelyPlaying(video);
+  const avatar = popupChannelAvatars[video.channelName?.trim() ?? ""] ?? "";
+  const overLimit = isOverLimitToday(video);
+  // Runs every second for every row while the popup is open; most rows haven't changed since the last tick.
+  const signature = [
+    watchedPercent.toFixed(1),
+    isNowPlaying,
+    video.active,
+    video.excluded,
+    video.suspended,
+    video.isLive,
+    video.seconds,
+    video.title,
+    video.channelName,
+    video.language,
+    video.languageName,
+    avatar,
+    overLimit,
+  ].join("|");
+  if (item.dataset.signature === signature) return;
+  item.dataset.signature = signature;
+
   const isActiveTab = video.active && !isNowPlaying;
   const stateClasses = isNowPlaying
     ? "bg-accent/8"
     : isActiveTab
       ? "bg-surface-hover/50 hover:bg-surface-hover/70"
       : "hover:bg-surface-hover/60";
-  item.className = `group relative flex h-[3.75rem] shrink-0 items-center gap-2.5 overflow-hidden px-2 rounded-[10px] transition-[background-color,opacity] duration-200 ${stateClasses} ${
-    video.excluded ? "opacity-40 grayscale" : "opacity-100"
-  }`;
+  item.className = `${ROW_CLASSES} ${stateClasses} ${video.excluded ? "opacity-40 grayscale" : "opacity-100"}`;
 
   const thumbEl = item.querySelector(".meta-thumb") as HTMLImageElement;
   const thumbUrl = getThumbnailUrl(video.url);
   if (thumbUrl) {
-    thumbEl.src = thumbUrl;
+    if (thumbEl.getAttribute("src") !== thumbUrl) thumbEl.src = thumbUrl;
     thumbEl.classList.remove("hidden");
   } else {
     thumbEl.removeAttribute("src");
@@ -1648,9 +1764,9 @@ function updateVideoListItem(item: HTMLElement, video: VideoData): void {
   channelEl.innerText = channelLabel;
   const avatarEl = item.querySelector(".meta-avatar") as HTMLImageElement | null;
   if (avatarEl) {
-    const avatar = popupChannelAvatars[video.channelName?.trim() ?? ""];
     if (avatar && avatarEl.getAttribute("src") !== avatar) avatarEl.src = avatar;
-    avatarEl.classList.toggle("hidden", !avatar);
+    // .ui-avatar sets its own display, which wins over Tailwind's .hidden.
+    avatarEl.style.display = avatar ? "" : "none";
   }
 
   const titleEl = item.querySelector(".meta-title") as HTMLElement;
@@ -1659,13 +1775,16 @@ function updateVideoListItem(item: HTMLElement, video: VideoData): void {
 
   const langEl = item.querySelector(".meta-lang") as HTMLElement | null;
   if (langEl) {
-    const label = popupLanguageLabel(video);
-    langEl.innerHTML = label ? `${languageFlagHtml(video.language || label, "lang-flag lang-flag--xs mr-1 align-[-1px]")}${escapeText(label)}` : "";
+    const label = languageCodeLabel(video);
+    langEl.innerHTML = label ? `${languageFlagHtml(video.language || label, "lang-flag lang-flag--xs")}${escapeText(label)}` : "";
+    langEl.title = popupLanguageLabel(video) ?? "";
     langEl.classList.toggle("hidden", label == null);
+    item.querySelector(".meta-dot")?.classList.toggle("hidden", label == null);
   }
+  item.querySelector(".meta-limit")?.classList.toggle("hidden", !overLimit);
 
   const progressTrack = item.querySelector(".meta-progress-track") as HTMLElement | null;
-  if (progressTrack) progressTrack.classList.toggle("hidden", isNowPlaying);
+  if (progressTrack) progressTrack.classList.toggle("hidden", isNowPlaying || watchedPercent <= 0);
 
   const progressEl = item.querySelector(".meta-progress") as HTMLElement;
   progressEl.style.width = `${watchedPercent}%`;
@@ -1679,12 +1798,7 @@ function updateVideoListItem(item: HTMLElement, video: VideoData): void {
   } else if (video.seconds > 0) {
     badgeEl.innerText = formatCompact(video.seconds);
     badgeEl.classList.remove("hidden");
-    timeEl.classList.remove("hidden");
-    timeEl.innerHTML = `
-            <span class="${watchedPercent > 0 ? "text-text-secondary" : "text-text-muted"}">${formatCompact(video.currentTime)}</span>
-            <span class="opacity-40"> / </span>
-            <span>${formatCompact(video.seconds)}</span>
-          `;
+    timeEl.classList.add("hidden");
   } else if (video.suspended) {
     badgeEl.innerText = "—";
     badgeEl.classList.remove("hidden");
@@ -1728,20 +1842,44 @@ function updateVideoListCardsFromState(): void {
     if (!video) return;
     updateVideoListItem(card as HTMLElement, video);
   });
+  updateQueueOffsets();
+}
+
+const clockFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
+
+/** "Next" / "in 10 min" plus the clock time each video starts if the queue plays straight through. */
+function updateQueueOffsets(): void {
+  const container = document.getElementById("video-list");
+  if (!container) return;
+  const playing = getConfirmedNowPlayingVideos()[0];
+  let elapsed = playing && !playing.isLive ? Math.max(0, playing.seconds - playing.currentTime) : 0;
+  const now = Date.now();
+  for (const child of Array.from(container.children) as HTMLElement[]) {
+    const video = videoData.find((entry) => entry.id === parseInt(child.dataset.id || "0", 10));
+    const inEl = child.querySelector(".meta-offset-in") as HTMLElement | null;
+    const atEl = child.querySelector(".meta-offset-at") as HTMLElement | null;
+    if (!video || !inEl || !atEl) continue;
+    const countsTowardQueue = !video.excluded && !video.isLive && !isTabActivelyPlaying(video);
+    const label = countsTowardQueue ? formatStartsIn(elapsed) : "";
+    const at = countsTowardQueue ? clockFormat.format(now + elapsed * 1000) : "";
+    if (inEl.textContent !== label) inEl.textContent = label;
+    if (atEl.textContent !== at) atEl.textContent = at;
+    child.querySelector(".meta-offset")?.classList.toggle("meta-offset--next", label === "Next");
+    if (countsTowardQueue) elapsed += Math.max(0, video.seconds - video.currentTime);
+  }
 }
 
 function updateVideoList(videos: VideoData[]) {
   const container = document.getElementById("video-list")!;
   const currentIds = new Set(videos.map((v) => v.id));
+  const countEl = document.getElementById("up-next-count");
+  if (countEl) countEl.textContent = `${videos.length} video${videos.length === 1 ? "" : "s"}`;
 
-  // 1. Remove stale
   Array.from(container.children).forEach((child) => {
     const id = parseInt((child as HTMLElement).dataset.id || "0");
     if (!currentIds.has(id)) child.remove();
   });
 
-  // 2. Create/Update (preserve DOM nodes; reorder to match sort)
-  let elapsed = 0;
   videos.forEach((video, index) => {
     let item = document.getElementById(`video-item-${video.id}`);
 
@@ -1750,26 +1888,31 @@ function updateVideoList(videos: VideoData[]) {
       item.id = `video-item-${video.id}`;
       item.dataset.id = video.id.toString();
       item.style.viewTransitionName = `video-${video.id}`;
-      item.className =
-        "group relative flex h-[3.75rem] shrink-0 items-center gap-2.5 overflow-hidden px-2 rounded-[10px] transition-[background-color,opacity] duration-200";
+      item.className = ROW_CLASSES;
       item.innerHTML = `
-            <div class="relative shrink-0 w-[4.5rem] aspect-video rounded-md overflow-hidden bg-surface-hover">
-              <img class="meta-thumb w-full h-full object-cover hidden" alt="" />
-              <div class="meta-duration-badge absolute bottom-[3px] right-[3px] px-1 py-px rounded-[3px] text-[10px] font-medium bg-black/80 text-white tabular-nums leading-none"></div>
+            <div class="relative shrink-0 w-14 aspect-video rounded overflow-hidden bg-surface-hover">
+              <img class="meta-thumb w-full h-full object-cover hidden" alt="" width="56" height="32" loading="${index < EAGER_THUMBS ? "eager" : "lazy"}" decoding="async" />
+              <div class="meta-duration-badge absolute bottom-[2px] right-[2px] px-[3px] py-px rounded-[3px] text-[9.5px] font-medium bg-black/80 text-white tabular-nums leading-none"></div>
               <div class="meta-progress-track absolute bottom-0 left-0 right-0 h-[3px] bg-black/40">
                 <div class="meta-progress h-full bg-accent transition-[width] duration-700" style="width: 0%"></div>
               </div>
             </div>
-            <div class="flex-1 min-w-0 flex flex-col justify-center gap-[2px]">
+            <div class="flex-1 min-w-0 flex flex-col justify-center gap-px">
               <span class="meta-now-badge hidden self-start text-[9px] font-semibold uppercase tracking-[0.1em] text-accent leading-none">Playing</span>
-              <div class="meta-title text-[13px] font-medium text-text-primary truncate leading-snug"></div>
-              <div class="flex items-center gap-1.5 min-w-0"><img class="meta-avatar ui-avatar w-3.5 h-3.5 hidden" alt="" referrerpolicy="no-referrer" /><div class="meta-channel text-[11px] text-text-muted truncate"></div></div>
-              <div class="flex items-center gap-1.5 min-w-0">
-                <span class="meta-lang hidden text-[9px] font-bold uppercase tracking-wide px-1.5 py-px rounded-full bg-accent/10 text-accent shrink-0"></span>
-                <div class="meta-time text-[10px] text-text-muted tabular-nums truncate"></div>
+              <div class="meta-title text-[12.5px] font-medium text-text-primary truncate leading-snug"></div>
+              <div class="flex items-center gap-1.5 min-w-0 text-[11px] text-text-muted leading-tight">
+                <span class="meta-lang hidden inline-flex items-center gap-1 text-[9px] font-bold tracking-wide text-text-secondary shrink-0"></span>
+                <span class="meta-dot hidden opacity-50 shrink-0" aria-hidden="true">·</span>
+                <img class="meta-avatar ui-avatar w-3.5 h-3.5" style="display: none" alt="" referrerpolicy="no-referrer" loading="lazy" decoding="async" />
+                <span class="meta-channel truncate"></span>
+                <span class="meta-limit hidden shrink-0 text-danger">· over today’s limit</span>
+                <span class="meta-time hidden shrink-0 tabular-nums"></span>
               </div>
             </div>
-            <span class="meta-offset text-[11px] text-text-muted tabular-nums shrink-0 whitespace-nowrap"></span>
+            <div class="meta-offset shrink-0 flex flex-col items-end leading-tight tabular-nums whitespace-nowrap">
+              <span class="meta-offset-in text-[12px] font-semibold text-text-primary"></span>
+              <span class="meta-offset-at text-[10.5px] text-text-muted"></span>
+            </div>
             <div class="meta-controls absolute right-1 top-1/2 -translate-y-1/2 flex gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity bg-surface-elevated rounded-lg p-0.5 shadow-lg ring-1 ring-border"></div>
           `;
 
@@ -1778,16 +1921,12 @@ function updateVideoList(videos: VideoData[]) {
 
     updateVideoListItem(item, video);
 
-    const offsetEl = item.querySelector(".meta-offset") as HTMLElement | null;
-    const countsTowardQueue = !video.excluded && !video.isLive && !isTabActivelyPlaying(video);
-    if (offsetEl) offsetEl.textContent = countsTowardQueue ? formatOffset(elapsed) : "";
-    if (countsTowardQueue) elapsed += Math.max(0, video.seconds - video.currentTime);
-
     const referenceNode = container.children[index];
     if (referenceNode !== item) {
       container.insertBefore(item, referenceNode ?? null);
     }
   });
+  updateQueueOffsets();
 }
 
 function render(): void {
@@ -1801,8 +1940,10 @@ function render(): void {
 
 async function getYouTubeTabs(): Promise<void> {
   try {
+    // Straight from storage: asking the background would first wake its service worker, which is usually asleep
+    // when the popup opens. Later changes still arrive as store-updated patches.
     const [state, allTabs, currentWindow] = await Promise.all([
-      fetchStoreState(),
+      loadPrefsAndMetadataCache(),
       browser.tabs.query({}),
       browser.windows.getCurrent(),
     ]);
@@ -2152,15 +2293,20 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener(
     "error",
     (event) => {
-      if (event.target instanceof HTMLImageElement && event.target.classList.contains("meta-avatar")) event.target.classList.add("hidden");
+      if (event.target instanceof HTMLImageElement && event.target.classList.contains("meta-avatar")) event.target.style.display = "none";
     },
     true
   );
   document.addEventListener("click", closeAllCustomSelects);
+  void getYouTubeTabs();
+  loadReadingCount();
+  loadLanguageToday();
   void loadChannelAvatars()
-    .then((avatars) => (popupChannelAvatars = avatars))
-    .catch(() => {})
-    .finally(() => void getYouTubeTabs());
+    .then((avatars) => {
+      popupChannelAvatars = avatars;
+      updateVideoListCardsFromState();
+    })
+    .catch(() => {});
 });
 window.addEventListener("pagehide", stopLiveTick);
 document.addEventListener("visibilitychange", () => {

@@ -144,8 +144,6 @@ export interface VideoData {
   chapters?: VideoChapter[];
 }
 
-export const MAX_CACHE_AGE_MS = 48 * 60 * 60 * 1000;
-
 export interface CachedMetadata {
   seconds: number;
   title: string;
@@ -163,11 +161,6 @@ export interface CachedMetadata {
   volume?: number;
   muted?: boolean;
   chapters?: VideoChapter[];
-}
-
-export function isCacheEntryUsable(cached: CachedMetadata | undefined): cached is CachedMetadata {
-  if (!cached) return false;
-  return cached.timestamp != null && Date.now() - cached.timestamp < MAX_CACHE_AGE_MS;
 }
 
 export interface UserPrefs {
@@ -257,7 +250,11 @@ export async function loadMetadataCache(): Promise<Record<string, CachedMetadata
   return forgetOutdatedLanguages((data.metadataCache as Record<string, CachedMetadata>) || {});
 }
 
-/** Resolve cache entry by normalized URL or matching videoId. */
+/**
+ * Resolve cache entry by normalized URL or matching videoId. Entries don't expire: a video's length, title and
+ * channel don't change, and tabs left open for days would otherwise show "Loading…" and download their watch
+ * page again. The cache stays bounded by its size cap instead.
+ */
 export function lookupCachedMetadata(
   cache: Record<string, CachedMetadata>,
   url: string
@@ -268,14 +265,13 @@ export function lookupCachedMetadata(
   if (
     byUrl &&
     byUrl.videoId !== undefined &&
-    byUrl.videoId === expectedVideoId &&
-    isCacheEntryUsable(byUrl)
+    byUrl.videoId === expectedVideoId
   ) {
     return byUrl;
   }
   if (expectedVideoId) {
     for (const entry of Object.values(cache)) {
-      if (entry.videoId === expectedVideoId && isCacheEntryUsable(entry)) {
+      if (entry.videoId === expectedVideoId) {
         return entry;
       }
     }

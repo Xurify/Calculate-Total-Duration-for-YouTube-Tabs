@@ -26,11 +26,60 @@
   }
 
   .popup-lang-bar {
-    @apply flex w-full h-5 rounded-md overflow-hidden gap-px mt-0.5;
+    @apply flex w-full h-5 rounded-md overflow-hidden gap-px;
+  }
+
+  .meta-offset--next .meta-offset-in {
+    @apply text-accent;
+  }
+
+  .popup-today {
+    @apply flex items-center gap-1.5 min-w-0 h-6 px-2 rounded-lg border border-border bg-surface-elevated text-[11px] text-text-secondary tabular-nums whitespace-nowrap;
+  }
+
+  .popup-today-meter {
+    @apply flex-1 min-w-4 h-[3px] rounded-full bg-surface-hover overflow-hidden;
+  }
+
+  .popup-today-meter > span {
+    @apply block h-full rounded-full bg-accent;
+  }
+
+  .popup-today--near .popup-today-value {
+    @apply text-warning;
+  }
+
+  .popup-today--near .popup-today-meter > span {
+    @apply bg-warning;
+  }
+
+  .popup-today--over {
+    @apply border-danger/45;
+  }
+
+  .popup-today--over .popup-today-value {
+    @apply text-danger;
+  }
+
+  .popup-today--over .popup-today-meter > span {
+    @apply bg-danger;
+  }
+
+  .popup-today--met .popup-today-value {
+    @apply text-success;
+  }
+
+  .popup-today--met .popup-today-meter > span {
+    @apply bg-success;
   }
 
   .popup-lang-seg {
     @apply relative h-full min-w-[3px] overflow-hidden;
+  }
+
+  .popup-lang-done {
+    @apply absolute inset-y-0 left-0;
+    background: rgba(26, 23, 20, 0.42);
   }
 
   /* Same dark pill as the desk's time bar: plain light text fails contrast on the paler section colors. */

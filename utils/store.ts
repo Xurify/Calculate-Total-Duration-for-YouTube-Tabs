@@ -14,14 +14,45 @@ export type MetadataBatchEntry = {
   metadata: Omit<CachedMetadata, "timestamp">;
 };
 
+/** What a batch changed: the entries to broadcast and the keys evicted to stay under the cap. */
+export interface MetadataCacheDelta {
+  changed: Record<string, CachedMetadata>;
+  removed: string[];
+}
+
+const COMPARED_FIELDS = [
+  "seconds",
+  "title",
+  "channelName",
+  "currentTime",
+  "isLive",
+  "videoId",
+  "language",
+  "languageName",
+  "languageVersion",
+  "paused",
+  "volume",
+  "muted",
+  "chapters",
+] as const;
+
+function sameMetadata(a: CachedMetadata, b: CachedMetadata): boolean {
+  return COMPARED_FIELDS.every((field) => JSON.stringify(a[field]) === JSON.stringify(b[field]));
+}
+
 /** Apply a batch of metadata updates to an in-memory cache (background-owned). */
 export function applyMetadataBatchToCache(
   cache: Record<string, CachedMetadata>,
   batch: Map<string, MetadataBatchEntry>
-): void {
+): MetadataCacheDelta {
+  const delta: MetadataCacheDelta = { changed: {}, removed: [] };
   for (const [normalizedUrl, { url, metadata }] of batch) {
     const existing = cache[normalizedUrl];
     const durable = toDurableMetadata(metadata);
+    // A sender that doesn't know a field (the popup saving playback has no language or chapters) must not erase it.
+    for (const key of Object.keys(durable) as (keyof typeof durable)[]) {
+      if (durable[key] === undefined) delete durable[key];
+    }
     const shouldUpdateDuration = durable.seconds > 0 || !existing || durable.isLive;
     const isPlaceholderTitle =
       !durable.title || durable.title === "YouTube Video" || durable.title === "YouTube";
@@ -31,7 +62,7 @@ export function applyMetadataBatchToCache(
       existing.title === "YouTube Video" ||
       existing.title === "YouTube";
     const videoId = durable.videoId ?? getVideoIdFromUrl(url) ?? undefined;
-    cache[normalizedUrl] = {
+    const next: CachedMetadata = {
       ...(existing || {}),
       ...durable,
       videoId: videoId ?? existing?.videoId,
@@ -39,13 +70,20 @@ export function applyMetadataBatchToCache(
       title: shouldUpdateTitle ? durable.title : existing?.title ?? durable.title,
       timestamp: Date.now(),
     };
+    cache[normalizedUrl] = next;
+    if (!existing || !sameMetadata(existing, next)) delta.changed[normalizedUrl] = next;
   }
   const keys = Object.keys(cache);
   if (keys.length > METADATA_CACHE_MAX) {
     const sortedKeys = keys.sort((a, b) => cache[a].timestamp - cache[b].timestamp);
     const toRemove = sortedKeys.slice(0, keys.length - METADATA_CACHE_MAX);
-    toRemove.forEach((key) => delete cache[key]);
+    toRemove.forEach((key) => {
+      delete cache[key];
+      delete delta.changed[key];
+    });
+    delta.removed = toRemove;
   }
+  return delta;
 }
 
 export function normalizeMetadataBatch(
@@ -83,7 +121,9 @@ export async function clearStoreMetadataCache(): Promise<void> {
 export interface StoreUpdatedMessage {
   action: "store-updated";
   prefs?: UserPrefs;
+  /** The whole cache; only sent when it was replaced, such as after clearing it. */
   metadataCache?: Record<string, CachedMetadata>;
+  metadataPatch?: MetadataCacheDelta;
 }
 
 export function isStoreUpdatedMessage(message: unknown): message is StoreUpdatedMessage {
@@ -96,8 +136,12 @@ export function isStoreUpdatedMessage(message: unknown): message is StoreUpdated
 
 export function applyStorePatch(
   state: StoreState,
-  patch: { prefs?: UserPrefs; metadataCache?: Record<string, CachedMetadata> }
+  patch: Omit<StoreUpdatedMessage, "action">
 ): void {
   if (patch.prefs) state.prefs = patch.prefs;
   if (patch.metadataCache) state.metadataCache = patch.metadataCache;
+  if (patch.metadataPatch) {
+    Object.assign(state.metadataCache, patch.metadataPatch.changed);
+    for (const key of patch.metadataPatch.removed) delete state.metadataCache[key];
+  }
 }

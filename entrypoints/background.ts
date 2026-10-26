@@ -22,7 +22,7 @@ import {
   type PendingMandalaTimeLog,
   type PendingMandalaShelfLink,
 } from "../utils/storage";
-import { applyMetadataBatchToCache, normalizeMetadataBatch } from "../utils/store";
+import { applyMetadataBatchToCache, normalizeMetadataBatch, type StoreUpdatedMessage } from "../utils/store";
 import {
   detectLanguageFromPlayerResponse,
   languageTextFromPlayerResponse,
@@ -60,6 +60,7 @@ import { recommendInstead, type Recommendation } from "../utils/recommendations"
 import { watchCsv, watchEntriesSince, CSV_COLUMNS, type CsvColumn } from "../utils/watchCsv";
 import {
   cleanLanguageLimits,
+  languageTodayRows,
   limitUsage,
   loadLanguageLimits,
   loadLimitWarningsShown,
@@ -113,6 +114,9 @@ async function recordWatch(sample: WatchSample): Promise<{ limitWarnings: LimitW
 
 const avatarTried = new Set<string>();
 let avatarFill: Promise<unknown> = Promise.resolve();
+const AVATAR_MISSES_KEY = "channelAvatarMisses";
+/** A watch page without an avatar is ~1 MB; the service worker restarts often, so misses are remembered for a week. */
+const AVATAR_RETRY_MS = 7 * 24 * 60 * 60 * 1000;
 /** Watch pages are big; a few per summary is enough to fill the gaps over time without hammering YouTube. */
 const AVATAR_FETCHES_PER_RUN = 4;
 
@@ -123,9 +127,20 @@ const AVATAR_FETCHES_PER_RUN = 4;
 function fillChannelAvatars(channels: { channelName: string; videoId: string }[]): void {
   avatarFill = avatarFill.then(async () => {
     const known = await loadChannelAvatars();
+    const now = Date.now();
+    const stored = (await browser.storage.local.get(AVATAR_MISSES_KEY))[AVATAR_MISSES_KEY] as Record<string, number> | undefined;
+    const misses = Object.fromEntries(Object.entries(stored ?? {}).filter(([, at]) => now - at < AVATAR_RETRY_MS));
     const missing = channels
-      .filter((channel) => channel.channelName && channel.channelName !== "Unknown channel" && !known[channel.channelName] && !avatarTried.has(channel.channelName))
+      .filter(
+        (channel) =>
+          channel.channelName &&
+          channel.channelName !== "Unknown channel" &&
+          !known[channel.channelName] &&
+          !avatarTried.has(channel.channelName) &&
+          misses[channel.channelName] === undefined
+      )
       .slice(0, AVATAR_FETCHES_PER_RUN);
+    if (missing.length === 0) return;
     const found: Record<string, string> = {};
     for (const channel of missing) {
       avatarTried.add(channel.channelName);
@@ -134,11 +149,13 @@ function fillChannelAvatars(channels: { channelName: string; videoId: string }[]
         if (response.url.includes("/sorry")) break;
         const avatar = avatarFromWatchHtml(await response.text());
         if (avatar) found[channel.channelName] = avatar;
+        else misses[channel.channelName] = now;
       } catch (error) {
         console.warn("[Study Harvester] channel avatar:", error);
       }
     }
     await recordChannelAvatars(found);
+    await browser.storage.local.set({ [AVATAR_MISSES_KEY]: misses });
   }).catch(() => {});
 }
 
@@ -195,10 +212,7 @@ const storeReady: Promise<void> = loadPrefsAndMetadataCache().then(({ prefs, met
   storeMetadataCache = metadataCache;
 });
 
-function broadcastStoreUpdate(patch: {
-  prefs?: UserPrefs;
-  metadataCache?: Record<string, CachedMetadata>;
-}): void {
+function broadcastStoreUpdate(patch: Omit<StoreUpdatedMessage, "action">): void {
   void browser.runtime
     .sendMessage({ action: "store-updated", ...patch })
     .catch(() => {});
@@ -228,9 +242,11 @@ async function applyBatchCacheUpdates(
   if (batch.size === 0) return;
   await storeReady;
   const normalized = normalizeMetadataBatch(batch);
-  applyMetadataBatchToCache(storeMetadataCache, normalized);
+  const delta = applyMetadataBatchToCache(storeMetadataCache, normalized);
+  // Only timestamps moved: they live on in memory and reach storage with the next real change.
+  if (Object.keys(delta.changed).length === 0 && delta.removed.length === 0) return;
   await persistMetadataCache();
-  broadcastStoreUpdate({ metadataCache: storeMetadataCache });
+  broadcastStoreUpdate({ metadataPatch: delta });
 }
 
 async function patchPrefs(updates: Partial<UserPrefs>): Promise<void> {
@@ -267,6 +283,13 @@ export default defineBackground(() => {
 
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (handleApprovalPageMessage(message, sender, sendResponse)) {
+      return true;
+    }
+
+    if (message.action === "get-language-today") {
+      void Promise.all([withWatchLog((log) => [...log]), loadLanguageLimits(), loadLanguageOverrides()])
+        .then(([log, limits, overrides]) => sendResponse({ rows: languageTodayRows(limits, log, Date.now(), overrides) }))
+        .catch(() => sendResponse({ rows: [] }));
       return true;
     }
 

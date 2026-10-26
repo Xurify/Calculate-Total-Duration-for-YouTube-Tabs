@@ -49,6 +49,7 @@ import {
   normalizeLanguageCode,
 } from "../../utils/captionLanguage";
 import { requestVideoLanguage } from "../../utils/languageRequest";
+import { languageFlagHtml } from "../../utils/languageFlags";
 import {
   buildTabsFromVideos,
   countItemsByVideoId,
@@ -3315,6 +3316,10 @@ const FACET_ICONS: Record<string, string> = {
 };
 
 function facetIconHtml(row: FacetRow): string {
+  if (row.kind === "language") {
+    const flag = languageFlagHtml(row.label, "lang-flag lang-flag--sm");
+    if (flag) return `<span class="facet-icon">${flag}</span>`;
+  }
   if (row.kind === "language" || (row.kind === "pile" && row.value !== "__unsorted")) {
     return `<span class="facet-icon"><span class="facet-dot" style="background: ${row.color ?? "var(--color-border-hover)"}"></span></span>`;
   }
@@ -3633,6 +3638,7 @@ function openLanguageModal(target: { videoId: string | null; channelName: string
     .map((option) => `
       <label class="language-option">
         <input type="radio" name="language-choice" value="${escapeHtml(option.name)}" data-code="${escapeHtml(option.code ?? "")}" ${current?.name === option.name ? "checked" : ""} />
+        ${languageFlagHtml(option.code || option.name)}
         <span>${escapeHtml(option.name)}</span>
         ${option.code ? `<span class="text-xs text-text-muted uppercase">${escapeHtml(option.code)}</span>` : ""}
       </label>`)
@@ -5771,6 +5777,7 @@ let timePanelWired = false;
 let showAllChannels = false;
 let openChannel: string | null = null;
 let videoRowsShown = 0;
+let dayChartMode: "screen" | "language" = "screen";
 
 const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
 const TIME_RANGES = [7, 30, 90] as const;
@@ -5805,13 +5812,40 @@ function speedWords(rate: number): string {
   return `${rate.toFixed(2).replace(/\.?0+$/, "")}×`;
 }
 
-function timeSectionHeading(title: string, extra = ""): string {
-  return `<div class="flex items-center gap-3"><h2 class="font-display text-[22px] font-medium m-0 flex-1">${escapeHtml(title)}</h2>${extra}</div>`;
+const TIME_ICON_PATHS = {
+  videos: `<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3z"/>`,
+  speed: `<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>`,
+  subtitles: `<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15h4M15 15h2M7 11h2M13 11h4"/>`,
+  background: `<path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3"/>`,
+  streak: `<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>`,
+  ads: `<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>`,
+  day: `<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>`,
+  languages: `<path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/>`,
+  clock: `<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>`,
+  channels: `<rect x="2" y="7" width="20" height="15" rx="2"/><path d="m17 2-5 5-5-5"/>`,
+  list: `<path d="M12 12H3M16 6H3M12 18H3"/><path d="m16 12 5 3-5 3v-6z"/>`,
+  limit: `<path d="M10 2h4M12 14l3-3"/><circle cx="12" cy="14" r="8"/>`,
+};
+
+type TimeIcon = keyof typeof TIME_ICON_PATHS;
+
+function timeIconHtml(icon: TimeIcon, size: number, className = ""): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 ${className}" aria-hidden="true">${TIME_ICON_PATHS[icon]}</svg>`;
 }
 
-function watchStatTile(label: string, value: string, note: string): string {
+function timeSectionHeading(title: string, extra = "", icon?: TimeIcon): string {
+  return `<div class="flex items-center gap-3"><h2 class="font-display text-[22px] font-medium m-0 flex-1 flex items-center gap-2">${icon ? timeIconHtml(icon, 18, "text-text-muted") : ""}${escapeHtml(title)}</h2>${extra}</div>`;
+}
+
+function languageMarkHtml(label: string, color: string): string {
+  return languageFlagHtml(label) || `<span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:${color}"></span>`;
+}
+
+const WEEKDAY_NAMES = Array.from({ length: 7 }, (_item, index) => new Date(2024, 0, 1 + index).toLocaleDateString(undefined, { weekday: "short" }));
+
+function watchStatTile(label: string, value: string, note: string, icon: TimeIcon): string {
   return `<div class="flex flex-col gap-0.5 min-w-0 rounded-[10px] border border-border bg-surface-elevated px-4 py-3">
-    <span class="text-[11px] uppercase tracking-[0.1em] text-text-muted">${escapeHtml(label)}</span>
+    <span class="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.1em] text-text-muted">${timeIconHtml(icon, 13)}${escapeHtml(label)}</span>
     <span class="font-display text-[26px] leading-tight text-text-primary tabular-nums truncate">${escapeHtml(value)}</span>
     <span class="text-xs text-text-muted truncate min-h-4">${escapeHtml(note)}</span>
   </div>`;
@@ -5852,24 +5886,40 @@ function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): strin
   const saved = total.videoSeconds - total.playedSeconds;
   const background = Math.max(0, total.playedSeconds - total.visibleSeconds);
   const tilesHtml = [
-    watchStatTile("Videos", String(total.videos), `${total.completed} finished`),
-    watchStatTile("Speed", speedWords(speed), saved >= 60 ? `${formatMinutesWords(saved)} saved` : ""),
-    watchStatTile("Subtitles", shareWords(total.captionSeconds, total.playedSeconds), formatMinutesWords(total.captionSeconds)),
-    watchStatTile("Background", shareWords(background, total.playedSeconds), formatMinutesWords(background)),
-    watchStatTile("Streak", `${watch.streak.current} ${watch.streak.current === 1 ? "day" : "days"}`, `Best ${watch.streak.longest}`),
-    watchStatTile("Ads", formatMinutesWords(total.adSeconds), ""),
+    watchStatTile("Videos", String(total.videos), `${total.completed} finished`, "videos"),
+    watchStatTile("Speed", speedWords(speed), saved >= 60 ? `${formatMinutesWords(saved)} saved` : "", "speed"),
+    watchStatTile("Subtitles", shareWords(total.captionSeconds, total.playedSeconds), formatMinutesWords(total.captionSeconds), "subtitles"),
+    watchStatTile("Background", shareWords(background, total.playedSeconds), formatMinutesWords(background), "background"),
+    watchStatTile("Streak", `${watch.streak.current} ${watch.streak.current === 1 ? "day" : "days"}`, `Best ${watch.streak.longest}`, "streak"),
+    watchStatTile("Ads", formatMinutesWords(total.adSeconds), "", "ads"),
   ].join("");
+
+  const colorOf = (label: string, index: number) => (label === UNKNOWN_LANGUAGE ? "var(--color-border-hover)" : FACET_PALETTE[index % FACET_PALETTE.length]);
+  const languageColors = new Map(watch.byLanguage.map((row, index) => [row.label, colorOf(row.label, index)]));
+  const languageOrder = new Map(watch.byLanguage.map((row, index) => [row.label, index]));
 
   const peakDay = Math.max(60, ...watch.days.map((day) => day.seconds));
   const dense = watch.days.length > 30;
+  const byLanguage = dayChartMode === "language";
   const daysHtml = watch.days
     .map((day, index) => {
       const behind = Math.max(0, day.seconds - day.visible);
       const label = timeRange === 7 ? dayLetter(day.key) : !dense || index % 15 === 0 ? day.key.slice(dense ? 5 : 8) : "";
-      return `<div class="flex flex-col items-center gap-1.5 min-w-0" title="${escapeHtml(day.key)}: ${formatMinutesWords(day.visible)} on screen${behind > 0 ? `, ${formatMinutesWords(behind)} in the background` : ""}">
-        <div class="w-full h-24 flex flex-col justify-end rounded-md bg-surface-elevated overflow-hidden">
-          <div class="w-full bg-accent/35" style="height:${Math.round((behind / peakDay) * 100)}%"></div>
-          <div class="w-full bg-accent" style="height:${Math.round((day.visible / peakDay) * 100)}%"></div>
+      // Biggest language at the bottom of every column, so the stacks line up day to day.
+      const dayLanguages = Object.entries(day.languages ?? {}).sort((first, second) => (languageOrder.get(first[0]) ?? 99) - (languageOrder.get(second[0]) ?? 99));
+      const title = byLanguage
+        ? [day.key, ...dayLanguages.map(([language, seconds]) => `${language}: ${formatMinutesWords(seconds)}`)].join("\n")
+        : `${day.key}: ${formatMinutesWords(day.visible)} on screen${behind > 0 ? `, ${formatMinutesWords(behind)} in the background` : ""}`;
+      const barsHtml = byLanguage
+        ? dayLanguages
+            .reverse()
+            .map(([language, seconds]) => `<div class="w-full shrink-0" style="height:${((seconds / peakDay) * 100).toFixed(2)}%;background:${languageColors.get(language) ?? "var(--color-border-hover)"}"></div>`)
+            .join("")
+        : `<div class="w-full bg-accent/35" style="height:${Math.round((behind / peakDay) * 100)}%"></div>
+          <div class="w-full bg-accent" style="height:${Math.round((day.visible / peakDay) * 100)}%"></div>`;
+      return `<div class="flex flex-col items-center gap-1.5 min-w-0" title="${escapeHtml(title)}">
+        <div class="w-full h-24 flex flex-col justify-end rounded-md bg-surface-elevated overflow-hidden${byLanguage ? " gap-px" : ""}">
+          ${barsHtml}
         </div>
         <span class="text-[11px] text-text-muted tabular-nums whitespace-nowrap">${label || "&nbsp;"}</span>
         ${dense ? "" : `<span class="text-[11px] text-text-secondary tabular-nums">${day.seconds >= 60 ? formatMinutesWords(day.seconds) : "·"}</span>`}
@@ -5877,29 +5927,59 @@ function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): strin
     })
     .join("");
 
-  const colorOf = (label: string, index: number) => (label === UNKNOWN_LANGUAGE ? "var(--color-border-hover)" : FACET_PALETTE[index % FACET_PALETTE.length]);
-  const languageColors = new Map(watch.byLanguage.map((row, index) => [row.label, colorOf(row.label, index)]));
   const longestLanguage = watch.byLanguage[0]?.seconds ?? 1;
   const languagesHtml = watch.byLanguage
     .map(
       (row) => `<li class="grid grid-cols-[minmax(0,12rem)_minmax(0,1fr)_auto] items-center gap-3 text-sm">
-        <span class="truncate font-medium text-text-primary flex items-center gap-2"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:${languageColors.get(row.label)}"></span>${escapeHtml(row.label)}</span>
+        <span class="truncate font-medium text-text-primary flex items-center gap-2">${languageMarkHtml(row.label, languageColors.get(row.label) ?? "")}<span class="truncate">${escapeHtml(row.label)}</span></span>
         <span class="h-2 rounded-full bg-surface-elevated overflow-hidden flex"><span class="h-full" style="width:${Math.max(2, (row.seconds / longestLanguage) * 100)}%;background:${languageColors.get(row.label)}"></span></span>
         <span class="text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(row.seconds)} <span class="text-text-muted">· ${shareWords(row.seconds, total.playedSeconds)} · ${row.videos} ${row.videos === 1 ? "video" : "videos"}</span></span>
       </li>`
     )
     .join("");
+  const languageShareHtml =
+    watch.byLanguage.length > 1
+      ? `<div class="flex h-3 gap-0.5 rounded-full overflow-hidden" role="img" aria-label="${escapeHtml(watch.byLanguage.map((row) => `${row.label} ${shareWords(row.seconds, total.playedSeconds)}`).join(", "))}">${watch.byLanguage
+          .map((row) => `<span class="h-full" style="flex:${Math.max(1, Math.round(row.seconds))} 1 0px;background:${languageColors.get(row.label)}" title="${escapeHtml(row.label)}: ${shareWords(row.seconds, total.playedSeconds)}"></span>`)
+          .join("")}</div>`
+      : "";
+  const dayLegendHtml = byLanguage
+    ? watch.byLanguage
+        .slice(0, 6)
+        .map((row) => `<span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm" style="background:${languageColors.get(row.label)}"></span>${escapeHtml(row.label)}</span>`)
+        .join("")
+    : `<span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-accent"></span>On screen</span><span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-accent/35"></span>Background</span>`;
+  const dayModeHtml = `<span class="inline-flex gap-0.5 p-0.5 rounded-full border border-border bg-surface" role="group" aria-label="Split days by">
+    <button type="button" class="time-day-mode budget-chip" data-mode="screen" aria-pressed="${!byLanguage}">Screen</button>
+    <button type="button" class="time-day-mode budget-chip" data-mode="language" aria-pressed="${byLanguage}">Language</button>
+  </span>`;
 
   const peakHourSeconds = Math.max(...watch.byHour);
   const peakHour = watch.byHour.indexOf(peakHourSeconds);
-  const hoursHtml = watch.byHour
+  const hoursHtml = `<span></span>${watch.byHour
     .map(
       (seconds, hour) => `<div class="flex flex-col items-center gap-1 min-w-0" title="${escapeHtml(hourWords(hour))}: ${formatMinutesWords(seconds)}">
         <div class="w-full h-16 flex flex-col justify-end rounded-sm bg-surface-elevated overflow-hidden"><div class="w-full ${hour === peakHour ? "bg-accent" : "bg-accent/50"}" style="height:${peakHourSeconds > 0 ? Math.round((seconds / peakHourSeconds) * 100) : 0}%"></div></div>
         <span class="text-[10px] text-text-muted tabular-nums">${hour % 6 === 0 ? escapeHtml(hourWords(hour)) : "&nbsp;"}</span>
       </div>`
     )
-    .join("");
+    .join("")}`;
+  const peakCell = Math.max(...(watch.byWeekdayHour ?? []).flat());
+  const heatmapHtml =
+    peakCell > 0
+      ? watch.byWeekdayHour
+          .map(
+            (hours, weekday) => `<span class="text-[11px] text-text-muted pr-2 leading-4">${escapeHtml(WEEKDAY_NAMES[weekday])}</span>${hours
+              .map((seconds, hour) => {
+                // Square root keeps a few long evenings from washing every other hour out to blank.
+                const strength = seconds > 0 ? Math.round(12 + 88 * Math.sqrt(seconds / peakCell)) : 0;
+                const fill = strength > 0 ? `color-mix(in srgb, var(--color-accent) ${strength}%, var(--color-surface-elevated))` : "var(--color-surface-elevated)";
+                return `<span class="h-4 rounded-[3px]" style="background:${fill}" title="${escapeHtml(`${WEEKDAY_NAMES[weekday]} ${hourWords(hour)}: ${formatMinutesWords(seconds)}`)}"></span>`;
+              })
+              .join("")}`
+          )
+          .join("")
+      : "";
 
   // The summary names channel-less videos "Unknown channel", so match it the same way.
   const videosByChannel = new Map<string, WatchVideoRow[]>();
@@ -5918,7 +5998,7 @@ function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): strin
         <td class="py-2 pr-3 text-sm text-text-primary max-w-[18rem]">
           <button type="button" class="flex items-center gap-1.5 w-full min-w-0 p-0 border-0 bg-transparent text-left text-inherit cursor-pointer" aria-expanded="${open}"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-text-muted transition-transform${open ? " rotate-90" : ""}" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>${channelAvatarHtml(channel)}<span class="truncate">${escapeHtml(channel.channelName)}</span></button>
         </td>
-        <td class="py-2 pr-3 text-sm text-text-secondary whitespace-nowrap"><span class="inline-flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:${languageColors.get(channel.language) ?? "var(--color-border-hover)"}"></span>${escapeHtml(channel.language)}</span></td>
+        <td class="py-2 pr-3 text-sm text-text-secondary whitespace-nowrap"><span class="inline-flex items-center gap-1.5">${languageMarkHtml(channel.language, languageColors.get(channel.language) ?? "var(--color-border-hover)")}${escapeHtml(channel.language)}</span></td>
         <td class="py-2 pr-3 text-sm text-text-secondary tabular-nums">${channel.videos}</td>
         <td class="py-2 text-sm text-text-secondary tabular-nums whitespace-nowrap text-right">${formatMinutesWords(channel.seconds)}</td>
       </tr>${
@@ -5942,29 +6022,28 @@ function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): strin
   return `
     <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">${tilesHtml}</div>
     <section class="flex flex-col gap-3">
-      ${timeSectionHeading(
-        "By day",
-        `<span class="flex items-center gap-3 text-xs text-text-muted"><span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-accent"></span>On screen</span><span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-accent/35"></span>Background</span></span>`
-      )}
+      ${timeSectionHeading("By day", dayModeHtml, "day")}
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted -mt-1">${dayLegendHtml}</div>
       <div class="grid ${dense ? "gap-px" : "gap-1.5"}" style="grid-template-columns: repeat(${watch.days.length}, minmax(0, 1fr))">${daysHtml}</div>
     </section>
     <section class="flex flex-col gap-3">
-      ${timeSectionHeading("Languages")}
+      ${timeSectionHeading("Languages", "", "languages")}
+      ${languageShareHtml}
       <ul class="m-0 p-0 list-none flex flex-col gap-2">${languagesHtml}</ul>
     </section>
     <section class="flex flex-col gap-3">
-      ${timeSectionHeading("Time of day")}
-      <div class="grid gap-1" style="grid-template-columns: repeat(24, minmax(0, 1fr))">${hoursHtml}</div>
+      ${timeSectionHeading("Time of day", "", "clock")}
+      <div class="grid gap-1" style="grid-template-columns: auto repeat(24, minmax(0, 1fr))">${hoursHtml}${heatmapHtml}</div>
     </section>
     <section class="flex flex-col gap-3">
-      ${timeSectionHeading("Channels", `<span class="text-xs text-text-muted tabular-nums">${watch.byChannel.length}</span>`)}
+      ${timeSectionHeading("Channels", `<span class="text-xs text-text-muted tabular-nums">${watch.byChannel.length}</span>`, "channels")}
       <div>
         <table class="w-full border-collapse"><thead><tr class="text-[11px] uppercase tracking-[0.1em] text-text-muted text-left"><th class="font-semibold pb-1 pr-3">Channel</th><th class="font-semibold pb-1 pr-3">Language</th><th class="font-semibold pb-1 pr-3">Videos</th><th class="font-semibold pb-1 text-right">Watched</th></tr></thead><tbody>${channelsHtml}</tbody></table>
       </div>
       ${channelsToggleHtml}
     </section>
     <section class="flex flex-col gap-3">
-      ${timeSectionHeading("Videos", `<span class="text-xs text-text-muted tabular-nums">${shownVideos < watch.videos.length ? `${shownVideos} of ${watch.videos.length}` : watch.videos.length}</span>`)}
+      ${timeSectionHeading("Videos", `<span class="text-xs text-text-muted tabular-nums">${shownVideos < watch.videos.length ? `${shownVideos} of ${watch.videos.length}` : watch.videos.length}</span>`, "list")}
       <ul class="m-0 p-0 list-none flex flex-col gap-2.5">${videosHtml}</ul>
       ${videosMoreHtml}
     </section>
@@ -5977,7 +6056,7 @@ function languageLimitsHtml(limits: LanguageLimitUsage[], watch: WatchSummary, p
       const share = Math.min(1, limit.usedSeconds / (limit.minutes * 60));
       const barColor = limit.level === "over" ? "var(--color-danger)" : limit.level === "near" ? "var(--color-warning)" : "var(--color-accent)";
       return `<li class="grid grid-cols-[minmax(0,12rem)_minmax(0,1fr)_7rem_auto] items-center gap-3 text-sm">
-        <span class="truncate font-medium text-text-primary">${escapeHtml(limit.language)}</span>
+        <span class="truncate font-medium text-text-primary flex items-center gap-2">${languageFlagHtml(limit.language)}<span class="truncate">${escapeHtml(limit.language)}</span></span>
         <span class="h-2 rounded-full bg-surface-elevated overflow-hidden flex" role="meter" aria-valuemin="0" aria-valuemax="${limit.minutes}" aria-valuenow="${Math.floor(limit.usedSeconds / 60)}" aria-label="${escapeHtml(limit.language)} today"><span class="h-full" style="width:${Math.max(share > 0 ? 2 : 0, share * 100)}%;background:${barColor}"></span></span>
         <span class="text-right text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(limit.usedSeconds)} <span class="text-text-muted">of</span></span>
         <span class="flex items-center gap-2">
@@ -5991,7 +6070,7 @@ function languageLimitsHtml(limits: LanguageLimitUsage[], watch: WatchSummary, p
   const limited = new Set(limits.map((limit) => languageKey(limit.language)));
   const suggestions = watch.byLanguage.filter((row) => row.label !== UNKNOWN_LANGUAGE && !limited.has(languageKey(row.label)));
   return `<section class="flex flex-col gap-3">
-    ${timeSectionHeading("Daily limits")}
+    ${timeSectionHeading("Daily limits", "", "limit")}
     <p class="text-xs text-text-muted m-0">A note shows on the YouTube player at 80% and again at 100%. Time is real time, so 2× speed counts half.${prefs.watchHistory ? "" : " Limits need YouTube history, which is off."}</p>
     ${rowsHtml ? `<ul class="m-0 p-0 list-none flex flex-col gap-2">${rowsHtml}</ul>` : ""}
     <form id="time-limit-add" class="flex flex-wrap items-center gap-2">
@@ -6188,6 +6267,12 @@ function wireTimePanel(panel: HTMLElement): void {
       openChannel = null;
       videoRowsShown = 0;
       await renderTimePanel();
+      return;
+    }
+    const dayMode = target.closest<HTMLElement>(".time-day-mode");
+    if (dayMode) {
+      dayChartMode = dayMode.dataset.mode === "language" ? "language" : "screen";
+      repaintWatchSections(panel);
       return;
     }
     if (target.closest("#time-channels-toggle")) {

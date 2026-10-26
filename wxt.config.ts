@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { defineConfig } from "wxt";
+import { FLAG_FILES } from "./utils/languageFlags";
 
 const ELD_DIR = resolve("node_modules/eld/src");
 
@@ -26,6 +27,10 @@ export default defineConfig({
     "build:publicAssets": async (_wxt, files) => {
       const { ngramsData } = await import(pathToFileURL(`${ELD_DIR}/ngrams/medium.js`).href);
       files.push({ relativeDest: "eld/medium.json", contents: JSON.stringify(ngramsData) });
+      // Only the flags a language maps to; the full flag-icons set is ~270 files.
+      for (const id of FLAG_FILES) {
+        files.push({ relativeDest: `flags/${id}.svg`, absoluteSrc: resolve(`node_modules/flag-icons/flags/4x3/${id}.svg`) });
+      }
     },
   },
   dev: {

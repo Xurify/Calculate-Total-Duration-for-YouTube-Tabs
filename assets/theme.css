@@ -127,3 +127,25 @@
   );
   background-size: 4px 4px;
 }
+
+.lang-flag {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 16px;
+  height: 12px;
+  border-radius: 2px;
+  object-fit: cover;
+  /* Keeps white-edged flags (Japan, Finland) from melting into a light surface. */
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 14%, transparent);
+}
+
+.lang-flag--sm {
+  width: 14px;
+  height: 10.5px;
+}
+
+.lang-flag--xs {
+  width: 12px;
+  height: 9px;
+  border-radius: 1.5px;
+}

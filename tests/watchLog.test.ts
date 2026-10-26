@@ -115,6 +115,16 @@ describe("summarizeWatch", () => {
     expect(summary.videos.find((video) => video.videoId === "zzz999yyy88")?.coverage).toBe(0.5);
   });
 
+  test("splits each day by language and the week by weekday and hour", () => {
+    const summary = summarizeWatch(log, 7, at(20, 22));
+    expect(summary.days.find((day) => day.key === "2026-10-19")?.languages).toEqual({ Estonian: 400 });
+    expect(summary.days.find((day) => day.key === "2026-10-18")?.languages).toEqual({ Slovak: 600 });
+    // 18 October 2026 is a Sunday, 20 October a Tuesday; rows start on Monday.
+    expect(summary.byWeekdayHour[6][21]).toBe(600);
+    expect(summary.byWeekdayHour[1][21]).toBe(60);
+    expect(summary.byWeekdayHour.flat().reduce((sum, seconds) => sum + seconds, 0)).toBe(1060);
+  });
+
   test("gives each channel its stored avatar", () => {
     const byChannel = summarizeWatch(log, 7, at(20, 22), null, { ERR: "https://yt3.ggpht.com/err" }).byChannel;
     expect(byChannel.find((row) => row.channelName === "ERR")?.avatarUrl).toBe("https://yt3.ggpht.com/err");

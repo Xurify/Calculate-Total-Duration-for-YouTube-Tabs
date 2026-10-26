@@ -160,7 +160,7 @@ export interface WatchVideoRow {
 }
 
 export interface WatchSummary {
-  days: { key: string; seconds: number; visible: number }[];
+  days: { key: string; seconds: number; visible: number; languages: Record<string, number> }[];
   total: {
     playedSeconds: number;
     videoSeconds: number;
@@ -177,6 +177,8 @@ export interface WatchSummary {
   byLanguage: { label: string; seconds: number; videos: number }[];
   byChannel: { channelName: string; avatarUrl: string | null; seconds: number; videos: number; language: string }[];
   byHour: number[];
+  /** Seven rows, Monday first, of 24 hours each. */
+  byWeekdayHour: number[][];
   videos: WatchVideoRow[];
   streak: { current: number; longest: number };
 }
@@ -230,7 +232,7 @@ export function summarizeWatch(
     date.setDate(start.getDate() + offset);
     dayKeys.push(dateKeyOf(date.getTime()));
   }
-  const perDay = new Map(dayKeys.map((key) => [key, { key, seconds: 0, visible: 0 }]));
+  const perDay = new Map(dayKeys.map((key) => [key, { key, seconds: 0, visible: 0, languages: {} as Record<string, number> }]));
   const total: WatchSummary["total"] = {
     playedSeconds: 0,
     videoSeconds: 0,
@@ -245,6 +247,7 @@ export function summarizeWatch(
     activeDays: 0,
   };
   const byHour = Array.from({ length: 24 }, () => 0);
+  const byWeekdayHour = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
   const videos = new Map<string, WatchVideoRow>();
   const languages = new Map<string, { label: string; seconds: number; videoIds: Set<string> }>();
   const channels = new Map<string, { channelName: string; seconds: number; videoIds: Set<string>; languages: Map<string, number> }>();
@@ -262,12 +265,17 @@ export function summarizeWatch(
     if (entry.isShort) total.shortsSeconds += entry.playedSeconds;
     if (entry.isLive) total.liveSeconds += entry.playedSeconds;
     if (entry.playedSeconds > 0) total.sittings += 1;
+    const weekday = (new Date(entry.startedAt).getDay() + 6) % 7;
     for (const [hour, seconds] of Object.entries(entry.hours ?? {})) {
       const index = Number(hour);
-      if (index >= 0 && index < 24) byHour[index] += seconds;
+      if (index >= 0 && index < 24) {
+        byHour[index] += seconds;
+        byWeekdayHour[weekday][index] += seconds;
+      }
     }
 
     const language = entryLanguage(entry, overrides);
+    if (entry.playedSeconds > 0) day.languages[language] = (day.languages[language] ?? 0) + entry.playedSeconds;
     const video = videos.get(entry.videoId) ?? {
       videoId: entry.videoId,
       title: entry.title,
@@ -333,6 +341,7 @@ export function summarizeWatch(
       }))
       .sort((first, second) => second.seconds - first.seconds),
     byHour,
+    byWeekdayHour,
     videos: videoRows.sort((first, second) => second.lastAt - first.lastAt),
     streak: streaksOf(entries, now),
   };

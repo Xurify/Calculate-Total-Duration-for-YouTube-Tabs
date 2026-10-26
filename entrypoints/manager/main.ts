@@ -2004,10 +2004,17 @@ function urlAtPosition(video: VideoData): string {
   }
 }
 
-async function reopenClosedVideos(videos: VideoData[]): Promise<void> {
-  for (const video of [...videos].sort((first, second) => first.index - second.index)) {
+interface ClosedVideo {
+  video: VideoData;
+  windowId?: number;
+  tabIndex?: number;
+}
+
+async function reopenClosedVideos(closed: ClosedVideo[]): Promise<void> {
+  // Lowest index first, so each reopened tab lands where it was before the next one goes in.
+  for (const { video, windowId, tabIndex } of [...closed].sort((first, second) => (first.tabIndex ?? 0) - (second.tabIndex ?? 0))) {
     try {
-      await browser.tabs.create({ url: urlAtPosition(video), windowId: video.windowId, index: video.index, active: false });
+      await browser.tabs.create({ url: urlAtPosition(video), windowId, index: tabIndex, active: false });
     } catch {
       await browser.tabs.create({ url: urlAtPosition(video), active: false });
     }
@@ -2017,9 +2024,15 @@ async function reopenClosedVideos(videos: VideoData[]): Promise<void> {
 
 async function closeVideoTabs(videos: VideoData[]): Promise<void> {
   if (videos.length === 0) return;
+  const closed: ClosedVideo[] = await Promise.all(
+    videos.map(async (video) => {
+      const tab = await browser.tabs.get(video.id).catch(() => null);
+      return { video, windowId: tab?.windowId ?? video.windowId, tabIndex: tab?.index };
+    })
+  );
   await browser.tabs.remove(videos.map((video) => video.id));
   const message = videos.length === 1 ? `Closed "${videos[0].title || "1 tab"}"` : `Closed ${plural(videos.length, "tab")}`;
-  showToast(message, { label: "Undo", run: () => reopenClosedVideos(videos) });
+  showToast(message, { label: "Undo", run: () => reopenClosedVideos(closed) });
 }
 
 async function restoreSessionTabs(sessionId: string, tabs: SavedSessionTab[]): Promise<void> {

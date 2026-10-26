@@ -15,6 +15,8 @@ export interface BankSentence {
   clozeWord: string | null;
   translation: string;
   language: string;
+  /** The caption track's code, such as "sk"; older saves only have the label. */
+  languageCode?: string | null;
   videoId: string;
   videoTitle: string;
   channelName: string;
@@ -27,12 +29,15 @@ export interface BankSentence {
   dueAt: number;
   reviews: number;
   lastReviewedAt: number | null;
+  /** When it was added to a Clozemaster collection, and which one. */
+  clozemasterAt?: number | null;
+  clozemasterCollection?: string | null;
 }
 
 export type NewBankSentence = Pick<
   BankSentence,
   "text" | "clozeWord" | "translation" | "language" | "videoId" | "videoTitle" | "channelName" | "startSeconds" | "endSeconds" | "source"
->;
+> & { languageCode?: string | null };
 
 export const SENTENCE_BANK_KEY = "sentenceBank";
 /** Days until the next review after each "Got it"; the gaps roughly double, as in most spaced-repetition schedules. */
@@ -69,6 +74,7 @@ export function addToBank(bank: readonly BankSentence[], input: NewBankSentence,
       text: input.text.length > existing.text.length ? input.text : existing.text,
       clozeWord: input.clozeWord ?? existing.clozeWord,
       translation: input.translation || existing.translation,
+      languageCode: input.languageCode || existing.languageCode,
       endSeconds: Math.max(existing.endSeconds, input.endSeconds),
       source: existing.source === "cloze" || input.source === "cloze" ? "cloze" : "listening",
       // Saving a sentence again says it is still a problem.
@@ -97,6 +103,30 @@ export function reviewSentence(bank: readonly BankSentence[], id: string, grade:
     const dueAt = grade === "good" ? dueAfterDays(REVIEW_STEPS_DAYS[Math.min(sentence.step, REVIEW_STEPS_DAYS.length - 1)], now) : dueAfterDays(1, now);
     return { ...sentence, step, dueAt, reviews: sentence.reviews + 1, lastReviewedAt: now };
   });
+}
+
+export interface SentenceEdit {
+  id: string;
+  clozeWord?: string;
+  translation?: string;
+}
+
+export function editSentences(bank: readonly BankSentence[], edits: readonly SentenceEdit[]): BankSentence[] {
+  const byId = new Map(edits.map((edit) => [edit.id, edit]));
+  return bank.map((sentence) => {
+    const edit = byId.get(sentence.id);
+    if (!edit) return sentence;
+    return {
+      ...sentence,
+      clozeWord: edit.clozeWord?.trim() || sentence.clozeWord,
+      translation: edit.translation !== undefined ? edit.translation.trim() : sentence.translation,
+    };
+  });
+}
+
+export function markInClozemaster(bank: readonly BankSentence[], ids: readonly string[], collection: string, now: number = Date.now()): BankSentence[] {
+  const sent = new Set(ids);
+  return bank.map((sentence) => (sent.has(sentence.id) ? { ...sentence, clozemasterAt: now, clozemasterCollection: collection } : sentence));
 }
 
 export function dueSentences(bank: readonly BankSentence[], now: number = Date.now()): BankSentence[] {

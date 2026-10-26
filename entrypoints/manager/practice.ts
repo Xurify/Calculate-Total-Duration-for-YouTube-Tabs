@@ -2,6 +2,7 @@ import { escapeHtml } from "../../utils/timeUi";
 import { languageFlagHtml } from "../../utils/languageFlags";
 import { daysUntil, dueSentences, isLearned, nextDueAt, splitAtWord, type BankSentence, type ReviewGrade } from "../../utils/sentenceBank";
 import { caughtShare, checkCount, type ListeningSummary, type ListeningTotals } from "../../utils/listening";
+import { clozemasterSectionHtml, wireClozemaster } from "./clozemasterSend";
 
 /**
  * The desk's Practice page: saved sentences reviewed with the speaker's own voice, and the results of
@@ -246,7 +247,7 @@ function sentenceListHtml(now: number): string {
         ${playButtonHtml(sentence, "practice-row-play", `Play “${sentence.text}”`)}
         <span class="min-w-0 flex flex-col gap-0.5">
           <span class="text-sm text-text-primary">${sentenceTextHtml(sentence)}</span>
-          <span class="text-xs text-text-muted truncate">${escapeHtml([sentence.language, sentence.videoTitle, formatClock(sentence.startSeconds), sourceWords(sentence)].filter(Boolean).join(" · "))}</span>
+          <span class="text-xs text-text-muted truncate">${escapeHtml([sentence.language, sentence.videoTitle, formatClock(sentence.startSeconds), sourceWords(sentence), sentence.clozemasterAt ? "In Clozemaster" : ""].filter(Boolean).join(" · "))}</span>
           ${clipMessage?.id === sentence.id ? `<span class="text-xs text-danger" role="status">${escapeHtml(clipMessage.text)}</span>` : ""}
         </span>
         <span class="practice-due${isLearned(sentence) ? " practice-due--learned" : ""}">${dueWords(sentence, now)}</span>
@@ -264,6 +265,27 @@ function sentenceListHtml(now: number): string {
   </section>`;
 }
 
+const FOCUS_KEYS = ["practiceAction", "cmAction", "cmField", "id", "word"] as const;
+
+/** The whole page is re-rendered on each change; this finds the same control again afterwards. */
+function focusedControl(panel: HTMLElement): { selector: string; caret: number | null } | null {
+  const active = document.activeElement as HTMLElement | null;
+  if (!active || !panel.contains(active)) return null;
+  const parts = FOCUS_KEYS.filter((key) => active.dataset[key] !== undefined).map(
+    (key) => `[data-${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}="${CSS.escape(active.dataset[key]!)}"]`
+  );
+  if (parts.length === 0) return null;
+  return { selector: parts.join(""), caret: active instanceof HTMLInputElement && active.type === "text" ? active.selectionStart : null };
+}
+
+function restoreFocus(panel: HTMLElement, focus: ReturnType<typeof focusedControl>): void {
+  if (!focus) return;
+  const element = panel.querySelector<HTMLElement>(focus.selector);
+  if (!element || (element as HTMLButtonElement).disabled) return;
+  element.focus();
+  if (focus.caret !== null && element instanceof HTMLInputElement) element.setSelectionRange(focus.caret, focus.caret);
+}
+
 function paint(): void {
   const panel = panelRef;
   if (!panel || !data) return;
@@ -277,10 +299,10 @@ function paint(): void {
       ? ""
       : [plural(data.bank.length, "sentence") + " saved", `${learned} learned`, checks > 0 ? `${plural(checks, "listening check")}` : ""].filter(Boolean).join(" · ")
   );
-  const focusedAction = (document.activeElement as HTMLElement | null)?.dataset?.practiceAction;
-  panel.innerHTML = `${reviewCardHtml(now)}${listeningSectionHtml()}${sentenceListHtml(now)}`;
+  const focus = focusedControl(panel);
+  panel.innerHTML = `${reviewCardHtml(now)}${clozemasterSectionHtml()}${listeningSectionHtml()}${sentenceListHtml(now)}`;
   panel.setAttribute("aria-busy", "false");
-  if (focusedAction) panel.querySelector<HTMLElement>(`.practice-card [data-practice-action="${focusedAction}"]`)?.focus();
+  restoreFocus(panel, focus);
   updatePracticeBadge(due);
 }
 
@@ -365,6 +387,13 @@ function reveal(): void {
 function wire(panel: HTMLElement): void {
   if (wired) return;
   wired = true;
+  wireClozemaster(panel, {
+    bank: () => data?.bank ?? [],
+    setBank: (bank) => {
+      if (data) data.bank = bank;
+    },
+    repaint: paint,
+  });
   panel.addEventListener("click", (event) => {
     const button = (event.target as HTMLElement).closest<HTMLElement>("[data-practice-action]");
     if (!button) return;

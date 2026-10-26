@@ -83,7 +83,20 @@ import {
 import { languageOverrideFor, loadLanguageOverrides, type LanguageOverrides } from "../utils/languageOverrides";
 import { archiveEntries, languageHoursRows, loadLanguageHours, saveLanguageHours, setEarlierHours } from "../utils/languageHours";
 import { loadListeningLog, recordCheck, saveListeningLog, summarizeListening, type CheckResult } from "../utils/listening";
-import { addToBank, cleanBank, loadSentenceBank, reviewSentence, saveSentenceBank, type NewBankSentence, type ReviewGrade } from "../utils/sentenceBank";
+import {
+  addToBank,
+  cleanBank,
+  editSentences,
+  loadSentenceBank,
+  markInClozemaster,
+  reviewSentence,
+  saveSentenceBank,
+  type NewBankSentence,
+  type ReviewGrade,
+  type SentenceEdit,
+} from "../utils/sentenceBank";
+import { clozemasterCard, DEFAULT_COLLECTION_NAME, sentenceLanguageCode } from "../utils/clozemasterExport";
+import { MAX_CARDS_PER_CALL } from "../utils/clozemasterTools";
 
 /** Tells every open Mandala tab there is time to take; the tab asks for it and posts it to the page. */
 async function notifyMandalaTabsOfPendingTime(): Promise<void> {
@@ -150,7 +163,7 @@ function videoLanguageLabel(overrides: LanguageOverrides, videoId: string, chann
   return languageLabelOf(typeof name === "string" ? name : null, typeof code === "string" ? code : null);
 }
 
-function cleanNewSentence(raw: unknown, language: string): NewBankSentence | null {
+function cleanNewSentence(raw: unknown, language: string, code: unknown): NewBankSentence | null {
   const sentence = raw as Partial<NewBankSentence> | null;
   if (!sentence || typeof sentence.text !== "string" || !sentence.text.trim() || typeof sentence.videoId !== "string") return null;
   if (typeof sentence.startSeconds !== "number" || typeof sentence.endSeconds !== "number" || sentence.endSeconds <= sentence.startSeconds) return null;
@@ -160,6 +173,7 @@ function cleanNewSentence(raw: unknown, language: string): NewBankSentence | nul
     clozeWord: text(sentence.clozeWord, 100) || null,
     translation: text(sentence.translation, 500),
     language,
+    languageCode: typeof code === "string" && /^[a-z]{2,3}(?:-[a-z0-9]+)*$/i.test(code) ? code : null,
     videoId: sentence.videoId,
     videoTitle: text(sentence.videoTitle, 300),
     channelName: text(sentence.channelName, 200),
@@ -173,7 +187,7 @@ async function addSentenceToBank(raw: unknown, code: unknown, name: unknown): Pr
   const overrides = await loadLanguageOverrides();
   const partial = raw as Partial<NewBankSentence> | null;
   const language = videoLanguageLabel(overrides, String(partial?.videoId ?? ""), String(partial?.channelName ?? ""), code, name);
-  const sentence = cleanNewSentence(raw, language);
+  const sentence = cleanNewSentence(raw, language, code);
   if (!sentence) return false;
   return withPracticeStore(async () => {
     const result = addToBank(await loadSentenceBank(), sentence);
@@ -521,6 +535,42 @@ export default defineBackground(() => {
       })
         .then((bank) => sendResponse({ success: true, bank }))
         .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "bank-edit") {
+      if (!isExtensionPageSender(sender)) return;
+      const edits = cleanEdits(message.edits);
+      void withPracticeStore(async () => {
+        const next = editSentences(await loadSentenceBank(), edits);
+        await saveSentenceBank(next);
+        return next;
+      })
+        .then((bank) => sendResponse({ success: true, bank }))
+        .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "clozemaster-pairs") {
+      if (!isExtensionPageSender(sender)) return;
+      void visitedClozemasterPairs()
+        .then((pairs) => sendResponse({ pairs }))
+        .catch(() => sendResponse({ pairs: [] }));
+      return true;
+    }
+
+    if (message.action === "clozemaster-send") {
+      if (!isExtensionPageSender(sender)) return;
+      void sendBankToClozemaster(message, sender)
+        .then(sendResponse)
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            reason: error instanceof ClozemasterRemoteError ? error.reason : "request_failed",
+            errorMessage: error instanceof Error ? error.message : String(error),
+            ...(error instanceof ClozemasterRemoteError ? error.details : {}),
+          })
+        );
       return true;
     }
 
@@ -1395,6 +1445,75 @@ async function handleClozemasterRemote(message: ClozemasterRemoteMessage, sender
   } finally {
     if (opened) void browser.tabs.remove(tabId).catch(() => {});
   }
+}
+
+function cleanEdits(raw: unknown): SentenceEdit[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((edit): edit is SentenceEdit => Boolean(edit) && typeof edit.id === "string")
+    .map((edit) => ({
+      id: edit.id,
+      clozeWord: typeof edit.clozeWord === "string" ? edit.clozeWord.slice(0, 100) : undefined,
+      translation: typeof edit.translation === "string" ? edit.translation.slice(0, 500) : undefined,
+    }));
+}
+
+interface ClozemasterSendResult {
+  success?: boolean;
+  reason?: string;
+  errorMessage?: string;
+  instruction?: string;
+  collection?: { name: string; playUrl: string | null };
+  results?: Array<{ index: number; added: boolean; error?: string }>;
+}
+
+/**
+ * Adds saved sentences to a collection for one language pair. The cards are built here from the
+ * stored text, so the page only chooses the blank and the translation.
+ */
+async function sendBankToClozemaster(message: Record<string, unknown>, sender: Browser.runtime.MessageSender) {
+  const languagePair = typeof message.languagePair === "string" ? message.languagePair : "";
+  const collectionName = (typeof message.collectionName === "string" ? message.collectionName.trim().slice(0, 100) : "") || DEFAULT_COLLECTION_NAME;
+  const edits = cleanEdits(message.items).filter((edit) => edit.clozeWord && edit.translation);
+  // Saved first, so the translations typed in stay even when Clozemaster can't be reached.
+  const bank = await withPracticeStore(async () => {
+    const next = editSentences(await loadSentenceBank(), edits);
+    await saveSentenceBank(next);
+    return next;
+  });
+  const chosen = edits
+    .map((edit) => bank.find((sentence) => sentence.id === edit.id))
+    .filter((sentence): sentence is NonNullable<typeof sentence> => Boolean(sentence));
+  if (chosen.length === 0) return { success: false, reason: "invalid_input", errorMessage: "Pick at least one sentence with a translation." };
+
+  const added: string[] = [];
+  const failed: Array<{ id: string; error: string }> = [];
+  let collection: ClozemasterSendResult["collection"];
+  for (let start = 0; start < chosen.length; start += MAX_CARDS_PER_CALL) {
+    const batch = chosen.slice(start, start + MAX_CARDS_PER_CALL);
+    const cards = batch.map((sentence) => clozemasterCard(sentence, sentence.clozeWord ?? "", sentence.translation, sentenceLanguageCode(sentence)));
+    const result = (await handleClozemasterRemote({ op: "add", payload: { languagePair, collectionName, cards } }, sender)) as ClozemasterSendResult;
+    if (!result.results) {
+      // Nothing was attempted: signed out, no Pro, or no Clozemaster tab. Keep what was sent so far.
+      if (added.length === 0) return { ...result, success: false, bank };
+      break;
+    }
+    collection = result.collection ?? collection;
+    for (const row of result.results) {
+      const sentence = batch[row.index];
+      if (!sentence) continue;
+      if (row.added) added.push(sentence.id);
+      else failed.push({ id: sentence.id, error: row.error ?? "Not added." });
+    }
+  }
+
+  const next = await withPracticeStore(async () => {
+    const marked = markInClozemaster(await loadSentenceBank(), added, collection?.name ?? collectionName);
+    await saveSentenceBank(marked);
+    return marked;
+  });
+  const playUrl = collection?.playUrl ? new URL(collection.playUrl, "https://www.clozemaster.com").href : null;
+  return { success: added.length > 0, bank: next, addedCount: added.length, failed, collection: { name: collection?.name ?? collectionName, playUrl } };
 }
 
 async function handleCheckMandalaStatus(rawUrl: string): Promise<MandalaStatus> {

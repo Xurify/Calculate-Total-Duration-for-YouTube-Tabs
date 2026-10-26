@@ -105,9 +105,15 @@
   color: var(--color-text-muted);
   border: 0;
   background: transparent;
+  cursor: pointer;
   transition:
     background-color 0.15s ease,
     color 0.15s ease;
+}
+
+.theme-option--small {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.7rem;
 }
 
 .theme-option:hover {

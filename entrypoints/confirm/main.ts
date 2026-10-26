@@ -67,7 +67,9 @@ function render(request: ApprovalRequest) {
 }
 
 function renderExpired() {
-  titleElement.textContent = "This request has expired.";
+  originElement.parentElement?.classList.add("hidden");
+  document.getElementById("warning")?.classList.add("hidden");
+  titleElement.textContent = "This request has expired";
   summaryElement.textContent = "Nothing was shared or changed. Ask the agent again if you still want this.";
   allowButton.hidden = true;
   denyButton.textContent = "Close";

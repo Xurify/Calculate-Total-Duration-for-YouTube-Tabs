@@ -71,15 +71,19 @@
               <div id="current-view-stats" class="text-sm text-text-secondary truncate min-h-5">&nbsp;</div>
             </div>
             <div class="flex-1"></div>
-            <div id="selection-actions" class="hidden items-center gap-2 shrink-0">
-              <span id="selection-count" class="text-xs font-semibold text-accent whitespace-nowrap">0 selected</span>
+            <div id="selection-actions" class="selection-bar hidden" role="toolbar" aria-label="Selected videos">
+              <button type="button" id="btn-clear-selection" class="selection-bar-clear" title="Clear selection">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+              </button>
+              <span id="selection-count" class="text-[13px] font-semibold text-text-primary whitespace-nowrap tabular-nums pr-1">0 selected</span>
+              <span class="w-px h-5 bg-border" aria-hidden="true"></span>
               <button type="button" id="btn-stage-study-selected" class="chip chip--accent whitespace-nowrap" title="Start a study session with the selected tabs">
                 <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                 Study selected
               </button>
               <div id="move-to-section-wrap" class="relative hidden">
                 <button type="button" id="btn-move-to-section" class="chip whitespace-nowrap">Move to pile…</button>
-                <div id="move-to-section-popover" role="menu" aria-label="Move to pile" class="menu-panel menu-panel-animate menu-panel-animate--from-right custom-scrollbar hidden absolute right-0 top-full z-50 mt-1.5 max-h-64 min-w-[220px] overflow-y-auto"></div>
+                <div id="move-to-section-popover" role="menu" aria-label="Move to pile" class="menu-panel menu-panel-animate custom-scrollbar hidden absolute left-1/2 -translate-x-1/2 bottom-full z-50 mb-2 max-h-64 min-w-[220px] overflow-y-auto"></div>
               </div>
               <button type="button" id="btn-close-selected" class="chip chip--danger whitespace-nowrap">Close selected</button>
             </div>
@@ -135,7 +139,7 @@
           </div>
         </div>
 
-        <div id="tab-list" class="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-8 py-5">
+        <div id="tab-list" class="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-8 pt-5 pb-24">
           <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 p-3" aria-hidden="true">
             <div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div>
           </div>
@@ -159,72 +163,87 @@
     </main>
 
     <!-- Settings Modal -->
-    <div id="settings-modal" class="hidden fixed inset-0 z-50 bg-scrim backdrop-blur-sm animate-in fade-in duration-200">
-        <div class="bg-surface-elevated border border-border rounded-lg shadow-xl w-full max-w-sm p-5 animate-in zoom-in-95 duration-200 relative">
-            <button id="close-settings" class="absolute top-3 right-3 w-8 h-8 flex items-center justify-center rounded hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors active:scale-[0.96]">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>
+    <div id="settings-modal" class="hidden fixed inset-0 z-50 bg-scrim backdrop-blur-sm animate-in fade-in duration-200" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div class="bg-surface-elevated border border-border rounded-2xl shadow-xl w-full max-w-md max-h-[calc(100vh-4rem)] overflow-y-auto custom-scrollbar p-6 animate-in zoom-in-95 duration-200 relative">
+            <button type="button" id="close-settings" class="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors active:scale-[0.96] cursor-pointer" title="Close">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>
             </button>
-            <h3 class="font-display text-xl font-medium text-text-primary mb-4">Settings</h3>
-            
-            <div class="space-y-4">
-                 <div class="flex items-center justify-between gap-4">
+            <h3 id="settings-title" class="font-display text-2xl font-medium text-text-primary mb-2">Settings</h3>
+
+            <div class="settings-group-label">Display</div>
+            <div class="settings-group">
+                <div class="flex items-center justify-between gap-4 py-3">
                     <div>
                         <div class="text-sm font-medium text-text-primary">Appearance</div>
-                        <div class="text-[11px] text-text-muted">System follows your OS setting</div>
+                        <div class="text-xs text-text-muted">System follows your computer</div>
                     </div>
-                    <div id="appearance-control"></div>
-                 </div>
-
-                 <div class="flex items-center justify-between pt-4 border-t border-border">
+                    <div id="appearance-control" class="shrink-0"></div>
+                </div>
+                <div class="flex items-center justify-between gap-4 py-3 border-t border-border">
                     <div>
-                        <div class="text-sm font-medium text-text-primary">Thumbnail Quality</div>
-                        <div class="text-[11px] text-text-muted">Higher quality uses more bandwidth</div>
+                        <div class="text-sm font-medium text-text-primary">Thumbnail quality</div>
+                        <div class="text-xs text-text-muted">High looks sharper and loads more data</div>
                     </div>
-                    <div class="flex bg-surface rounded-md p-0.5 border border-border">
-                        <button id="quality-standard" class="px-3 py-1 text-xs font-medium rounded hover:bg-surface-hover text-text-muted transition-colors">Standard</button>
-                        <button id="quality-high" class="px-3 py-1 text-xs font-medium rounded hover:bg-surface-hover text-text-muted transition-colors">High</button>
+                    <div class="inline-flex shrink-0 gap-0.5 rounded-lg border border-border bg-surface p-0.5" role="group" aria-label="Thumbnail quality">
+                        <button type="button" id="quality-standard" class="theme-option" aria-pressed="false">Standard</button>
+                        <button type="button" id="quality-high" class="theme-option" aria-pressed="false">High</button>
                     </div>
-                 </div>
-
-                 <div class="pt-4 border-t border-border">
-                     <div class="text-[10px] uppercase font-semibold text-text-muted tracking-[0.12em] mb-2">Saved sessions</div>
-                     <div class="flex gap-2">
-                       <button type="button" id="btn-export-sessions" class="flex-1 px-3 py-2 text-xs font-medium rounded-md border border-border bg-surface-hover hover:bg-surface text-text-secondary hover:text-text-primary transition-colors cursor-pointer active:scale-[0.96]">Export JSON</button>
-                       <label class="flex-1 px-3 py-2 text-xs font-medium rounded-md border border-border bg-surface-hover hover:bg-surface text-text-secondary hover:text-text-primary transition-colors cursor-pointer text-center active:scale-[0.96]">
-                         Import
-                         <input type="file" id="import-sessions-file" accept="application/json,.json" class="hidden" />
-                       </label>
-                     </div>
-                 </div>
-
-                 <div class="pt-4 border-t border-border">
-                     <button id="btn-clear-cache" class="w-full text-left px-4 py-3 rounded-lg border border-border bg-surface-hover/20 hover:bg-danger/10 hover:border-danger group/clear transition-[background-color,border-color,color]">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <div class="text-sm font-semibold group-hover/clear:text-danger transition-colors">Clear Metadata Cache</div>
-                                <div class="text-[11px] text-text-muted">Reset all stored titles and durations</div>
-                            </div>
-                            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-text-muted group-hover/clear:text-danger transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                        </div>
-                     </button>
-                 </div>
-
-                 <div class="pt-4 border-t border-border">
-                     <div class="text-[10px] uppercase font-semibold text-text-muted tracking-[0.12em] mb-2">Developer</div>
-                     <div class="space-y-2 text-[11px] font-mono text-text-secondary mb-3">
-                         <div class="flex justify-between gap-4"><span>Extension</span><span id="dev-version">—</span></div>
-                         <div class="flex justify-between gap-4"><span>Content script debounce</span><span id="dev-debounce">150 ms</span></div>
-                         <div class="flex justify-between gap-4"><span>Observer target</span><span class="text-[10px]">#primary / #content</span></div>
-                     </div>
-                     <div class="flex items-center justify-between gap-2 mb-2">
-                         <span class="text-[11px] text-text-muted">Per-tab MutationObserver stats</span>
-                         <button id="btn-perf-refresh" class="px-2 py-1 text-[10px] font-medium rounded bg-surface-hover hover:bg-surface text-text-muted hover:text-text-primary border border-border cursor-pointer transition-colors">Refresh</button>
-                     </div>
-                     <div id="dev-perf-list" class="max-h-32 overflow-y-auto rounded border border-border bg-surface/50 p-2 text-[10px] font-mono text-text-muted space-y-1">
-                         <div class="text-text-muted/70">Open YouTube tabs and click Refresh</div>
-                     </div>
-                 </div>
+                </div>
             </div>
+
+            <div class="settings-group-label">Saved sessions</div>
+            <div class="settings-group">
+                <div class="flex items-center justify-between gap-4 py-3">
+                    <div>
+                        <div class="text-sm font-medium text-text-primary">Back up or move sessions</div>
+                        <div class="text-xs text-text-muted">A JSON file you can import on another computer</div>
+                    </div>
+                    <div class="flex shrink-0 gap-2">
+                        <button type="button" id="btn-export-sessions" class="chip">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>
+                            Export
+                        </button>
+                        <label class="chip">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></svg>
+                            Import
+                            <input type="file" id="import-sessions-file" accept="application/json,.json" class="sr-only" />
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-group-label">Storage</div>
+            <div class="settings-group">
+                <div class="flex items-center justify-between gap-4 py-3">
+                    <div>
+                        <div class="text-sm font-medium text-text-primary">Clear video details</div>
+                        <div class="text-xs text-text-muted">Forget saved titles and lengths. They load again when needed.</div>
+                    </div>
+                    <button type="button" id="btn-clear-cache" class="chip chip--danger shrink-0">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        Clear
+                    </button>
+                </div>
+            </div>
+
+            <details class="settings-details mt-5">
+                <summary class="settings-details-summary">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+                    Developer details
+                    <span id="dev-version" class="ml-auto font-normal normal-case tracking-normal tabular-nums">—</span>
+                </summary>
+                <div class="pt-3 space-y-2 text-xs text-text-secondary">
+                    <div class="flex justify-between gap-4"><span>Content script debounce</span><span id="dev-debounce" class="tabular-nums">150 ms</span></div>
+                    <div class="flex justify-between gap-4"><span>Observer target</span><code class="text-[11px]">#primary / #content</code></div>
+                    <div class="flex items-center justify-between gap-2 pt-1">
+                        <span>Per-tab MutationObserver stats</span>
+                        <button type="button" id="btn-perf-refresh" class="chip h-7 px-2.5 text-xs">Refresh</button>
+                    </div>
+                    <div id="dev-perf-list" class="max-h-32 overflow-y-auto custom-scrollbar rounded-lg border border-border bg-surface/50 p-2 text-[11px] font-mono text-text-muted space-y-1">
+                        <div class="text-text-muted/70">Open YouTube tabs and press Refresh</div>
+                    </div>
+                </div>
+            </details>
         </div>
     </div>
 

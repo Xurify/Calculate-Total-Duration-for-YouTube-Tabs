@@ -821,24 +821,20 @@ function renderNow(): void {
               </button>
               <h2 class="font-display text-[18px] font-medium text-text-primary m-0">Settings</h2>
             </div>
-            <div class="space-y-3">
-              <div class="flex items-center justify-between gap-3">
+            <div class="rounded-xl border border-border bg-surface-elevated px-3">
+              <div class="flex items-center justify-between gap-3 py-2.5">
                 <div>
                   <div class="text-[12px] font-semibold text-text-primary">Appearance</div>
-                  <div class="text-[10px] text-text-muted">System follows your OS setting</div>
+                  <div class="text-[10px] text-text-muted">System follows your computer</div>
                 </div>
-                <div id="appearance-control"></div>
+                <div id="appearance-control" class="shrink-0"></div>
               </div>
-              <div class="pt-3 border-t border-border">
-                <button id="btn-clear-cache" class="w-full text-left p-3 rounded-lg border border-border bg-surface-hover/20 hover:bg-danger/10 hover:border-danger group/clear transition-[background-color,border-color,color] cursor-pointer active:scale-[0.96]">
-                  <div class="flex items-center justify-between">
-                    <div>
-                      <div class="text-[12px] font-semibold group-hover/clear:text-danger transition-colors">Clear Metadata Cache</div>
-                      <div class="text-[10px] text-text-muted">Reset all stored titles and durations</div>
-                    </div>
-                    <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 text-text-muted group-hover/clear:text-danger transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                  </div>
-                </button>
+              <div class="flex items-center justify-between gap-3 py-2.5 border-t border-border">
+                <div>
+                  <div class="text-[12px] font-semibold text-text-primary">Clear video details</div>
+                  <div class="text-[10px] text-text-muted">Titles and lengths load again from open tabs</div>
+                </div>
+                <button type="button" id="btn-clear-cache" class="chip chip--danger h-7 px-2.5 text-[12px] shrink-0">Clear</button>
               </div>
             </div>
             <div class="mt-3 pt-3 pb-0 border-t border-border/50 text-center">
@@ -851,7 +847,7 @@ function renderNow(): void {
               <p id="popup-confirm-message" class="text-xs text-text-secondary mb-4"></p>
               <div class="flex justify-end gap-2">
                 <button type="button" id="popup-confirm-cancel" class="px-3 py-1.5 text-xs font-medium rounded-md border border-border bg-surface-hover text-text-primary hover:bg-surface cursor-pointer">Cancel</button>
-                <button type="button" id="popup-confirm-ok" class="px-3 py-1.5 text-xs font-medium rounded-md border-0 bg-danger text-on-accent hover:bg-danger-hover cursor-pointer transition-colors">Clear cache</button>
+                <button type="button" id="popup-confirm-ok" class="px-3 py-1.5 text-xs font-medium rounded-md border-0 bg-danger text-on-accent hover:bg-danger-hover cursor-pointer transition-colors">Clear</button>
               </div>
             </div>
           </div>
@@ -868,8 +864,8 @@ function renderNow(): void {
 
     document.getElementById("btn-clear-cache")?.addEventListener("click", async () => {
       const confirmed = await showConfirm({
-        title: "Clear metadata cache",
-        message: "Clear all cached titles and durations? Tabs will be re-probed when needed.",
+        title: "Clear video details?",
+        message: "Saved titles and lengths are forgotten and load again from open tabs. Sessions, history and settings stay.",
       });
       if (confirmed) {
         await clearCache();
@@ -1201,10 +1197,12 @@ function setupApp() {
         <p id="np-also-playing" class="hidden px-1 pt-1.5 text-[11px] text-text-muted truncate m-0"></p>
       </section>
 
-      <div id="up-next-divider" class="flex items-baseline gap-3 px-4 pt-4 pb-1 shrink-0">
+      <div id="up-next-divider" class="flex items-center gap-3 px-4 pt-4 pb-1 shrink-0">
         <span class="font-display text-[17px] font-medium text-text-primary flex-1">Up next</span>
-        <button id="sort-order" type="button">Tab order</button>
-        <button id="sort-duration" type="button">Longest first</button>
+        <span class="inline-flex gap-0.5 rounded-lg border border-border bg-surface p-0.5" role="group" aria-label="Order">
+          <button id="sort-order" type="button" class="theme-option theme-option--small" aria-pressed="true">Tab order</button>
+          <button id="sort-duration" type="button" class="theme-option theme-option--small" aria-pressed="false">Longest first</button>
+        </span>
       </div>
 
       <div id="video-list" class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-2 pb-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent"></div>
@@ -1560,12 +1558,8 @@ function updateHeaderStats(
 
   const btnTab = document.getElementById("sort-order");
   const btnLen = document.getElementById("sort-duration");
-  const sortActive = "text-[12px] font-semibold text-text-primary border-0 bg-transparent p-0 cursor-pointer";
-  const sortIdle = "text-[12px] font-medium text-text-muted hover:text-text-secondary border-0 bg-transparent p-0 cursor-pointer transition-colors";
-  if (btnTab && btnLen) {
-    btnTab.className = !sortByDuration ? sortActive : sortIdle;
-    btnLen.className = sortByDuration ? sortActive : sortIdle;
-  }
+  btnTab?.setAttribute("aria-pressed", String(!sortByDuration));
+  btnLen?.setAttribute("aria-pressed", String(sortByDuration));
 
   void queryReadingList(false).then((items) => {
     const badgeElement = document.getElementById("popup-reading-count");

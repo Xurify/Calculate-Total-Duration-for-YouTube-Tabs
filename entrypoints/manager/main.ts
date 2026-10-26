@@ -964,6 +964,7 @@ function formatDuplicateStatsSuffix(summary: DuplicateSummary): string {
 }
 
 function formatViewStats(count: number, durationSec: number, summary: DuplicateSummary): string {
+  if (count === 0) return "";
   const dupSuffix = formatDuplicateStatsSuffix(summary);
   if (showDuplicatesOnly && summary.duplicateVideoCount > 0) {
     return `${count} duplicate tab${count === 1 ? "" : "s"} · ${formatTime(durationSec)} total duration`;
@@ -1038,6 +1039,16 @@ function updateDuplicatesFilterButton(summary: DuplicateSummary): void {
 }
 
 function emptyListMessage(): string {
+  const query = searchQuery.trim();
+  if (query) {
+    return `
+      <div class="flex flex-col items-center justify-center py-16 px-6 text-center">
+        <div class="font-display text-xl text-text-primary">Nothing matches “${escapeHtml(query)}”</div>
+        <div class="text-sm text-text-muted mt-1 max-w-sm">Search looks at titles and channel names${facetCrumbText() ? ` in ${escapeHtml(facetCrumbText())}` : ""}.</div>
+        <button type="button" data-empty-action="clear-search" class="chip mt-4">Clear search</button>
+      </div>
+    `;
+  }
   if (showDuplicatesOnly) {
     return `
       <div class="flex flex-col items-center justify-center py-16 px-6 text-center">
@@ -1184,7 +1195,7 @@ async function showSaveSessionModal(options: SaveSessionModalOptions): Promise<S
     }
 
     input.value = options.defaultName;
-    const summaryParts = [`Saving ${options.tabCount} tab${options.tabCount === 1 ? "" : "s"} (hidden/excluded tabs omitted)`];
+    const summaryParts = [`Saving ${options.tabCount} tab${options.tabCount === 1 ? "" : "s"} from this view`];
     if (options.duplicateExtraTabs > 0) {
       summaryParts.push(
         `${options.duplicateExtraTabs} duplicate tab${options.duplicateExtraTabs === 1 ? "" : "s"} will be merged into one entry per video`
@@ -1693,7 +1704,7 @@ function renderSessionTabsInnerHtml(
                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
                 </button>
                 <div class="flex-1 min-w-0 flex items-center gap-2 font-medium text-xs text-text-secondary nested-group-toggle cursor-pointer" data-nested-group="${escapeHtml(ck)}">${groupingMode === "channel" ? deskAvatarHtml(groupName, "w-5 h-5 text-[9px]") : ""}<span class="truncate">${escapeHtml(groupName)}</span></div>
-                <div class="aggregate-group-stats text-[10px] text-text-muted font-mono flex items-center gap-2" data-group-name="${escapeHtml(groupName)}">
+                <div class="aggregate-group-stats text-[10px] text-text-muted tabular-nums flex items-center gap-2" data-group-name="${escapeHtml(groupName)}">
                   <span>${tabList.length} videos</span>
                   <span class="w-px h-3 bg-border"></span>
                   <span>${formatTime(groupDuration)}</span>
@@ -1748,7 +1759,7 @@ function renderLiveVideosInnerHtml(
                        </div>
                     </div>
                     <div class="flex-1 min-w-0 flex items-center gap-2 font-medium text-xs text-text-secondary nested-group-toggle cursor-pointer" data-nested-group="${escapeHtml(ck)}">${groupingMode === "channel" ? deskAvatarHtml(groupName, "w-5 h-5 text-[9px]") : ""}<span class="truncate">${escapeHtml(groupName)}</span></div>
-                    <div class="aggregate-group-stats text-[10px] text-text-muted font-mono flex items-center gap-2" data-group-name="${escapeHtml(groupName)}">
+                    <div class="aggregate-group-stats text-[10px] text-text-muted tabular-nums flex items-center gap-2" data-group-name="${escapeHtml(groupName)}">
                         <span>${groupVideos.length} videos</span>
                         <span class="w-px h-3 bg-border"></span>
                         <span>${formatTime(groupDuration)}</span>
@@ -2104,7 +2115,7 @@ function renderReadingListCard(item: ReadingListItem): string {
       </span>`;
 
   const timeHtml = addedTime
-    ? `<span class="text-[10px] text-text-muted font-mono">${escapeHtml(addedTime)}</span>`
+    ? `<span class="text-[10px] text-text-muted tabular-nums">${escapeHtml(addedTime)}</span>`
     : "";
 
   return `
@@ -2117,7 +2128,7 @@ function renderReadingListCard(item: ReadingListItem): string {
         <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" class="reading-list-title text-sm font-semibold text-text-primary hover:text-accent transition-colors truncate block" title="${escapeHtml(item.title || item.url)}">
           ${escapeHtml(item.title || item.url)}
         </a>
-        <div class="text-[11px] text-text-muted truncate mt-0.5 font-mono opacity-60">${escapeHtml(item.url)}</div>
+        <div class="text-[11px] text-text-muted truncate mt-0.5 tabular-nums opacity-60">${escapeHtml(item.url)}</div>
       </div>
       <div class="flex items-center gap-2 shrink-0">
         <button type="button" class="reading-list-open-btn px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-surface-elevated text-text-secondary hover:text-text-primary text-xs font-semibold border border-border flex items-center gap-1.5 transition-colors cursor-pointer active:scale-95" title="Open in new tab">
@@ -2195,6 +2206,11 @@ function setDeskHero(options: { kicker: string; title: string; value: string; su
   if (kicker) kicker.textContent = options.kicker;
   if (value) value.textContent = options.value;
   if (suffix) suffix.textContent = options.suffix;
+}
+
+function liveHeroTime(videos: VideoData[]): { value: string; suffix: string } {
+  if (videos.length === 0) return searchQuery.trim() ? { value: "No", suffix: "matches" } : { value: "No", suffix: "videos open" };
+  return { value: formatDurationWords(liveRemainingSeconds(videos)), suffix: leftSuffix() };
 }
 
 function liveRemainingSeconds(videos: VideoData[]): number {
@@ -2395,6 +2411,33 @@ function sessionLanguageBarHtml(tabs: SavedSessionTab[]): string {
     <div class="session-langs">${legend}${more > 0 ? `<span class="text-text-muted">+${more} more</span>` : ""}</div>`;
 }
 
+const SESSION_THUMBS = 4;
+
+function sessionThumbStripHtml(tabs: SavedSessionTab[]): string {
+  const shown = tabs.slice(0, SESSION_THUMBS);
+  if (shown.length === 0) return "";
+  const more = tabs.length - shown.length;
+  const cells = shown
+    .map((tab, index) => {
+      const { src } = getThumbnailSrc(getVideoIdFromUrl(tab.url), "mqdefault.jpg");
+      const overlay = index === shown.length - 1 && more > 0 ? `<span class="session-thumb-more">+${more}</span>` : "";
+      return `<span class="session-thumb">${src ? `<img src="${src}" alt="" loading="lazy" decoding="async" draggable="false" />` : ""}${overlay}</span>`;
+    })
+    .join("");
+  const filler = `<span class="session-thumb"></span>`.repeat(SESSION_THUMBS - shown.length);
+  return `<div class="session-thumbs" aria-hidden="true">${cells}${filler}</div>`;
+}
+
+function sessionAvatarStackHtml(tabs: SavedSessionTab[]): string {
+  const channels = Array.from(tally(tabs, (tab) => tab.channelName?.trim() || "", (tab) => tab.seconds ?? 0).entries())
+    .filter(([name]) => name !== "")
+    .sort((a, b) => b[1].seconds - a[1].seconds)
+    .map(([name]) => name);
+  if (channels.length === 0) return "";
+  const shown = channels.slice(0, 4);
+  return `<span class="session-avatars" title="${escapeHtml(channels.join(", "))}">${shown.map((name) => deskAvatarHtml(name, "w-5 h-5 text-[9px]")).join("")}</span>`;
+}
+
 function sessionCardHtml(session: SavedSession, active: boolean): string {
   const tabs = session.tabs ?? [];
   const { title, custom } = sessionDisplayName(session);
@@ -2402,9 +2445,11 @@ function sessionCardHtml(session: SavedSession, active: boolean): string {
   const pinIcon = `<svg class="shrink-0 w-3.5 h-3.5 text-accent" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>`;
   return `
     <article class="session-card sidebar-item${active ? " session-card--active" : ""}" data-sidebar-type="session" data-session-id="${escapeHtml(session.id)}" data-pinned="${session.pinned ? "1" : "0"}" tabindex="0" role="button" aria-label="Open ${escapeHtml(title)} on the desk">
+      ${sessionThumbStripHtml(tabs)}
       <div class="session-card-head">
         <h3 class="session-card-title${custom ? "" : " session-card-title--auto"}" title="${escapeHtml(session.name)}">${escapeHtml(title)}</h3>
         ${session.pinned ? pinIcon : ""}
+        ${sessionAvatarStackHtml(tabs)}
       </div>
       <div class="session-card-sub">
         <span class="tabular-nums">${tabs.length} videos · ${formatDurationWords(sessionTotalSeconds(tabs))}</span>
@@ -2537,9 +2582,9 @@ function updateCurrentViewStatsFromState(): void {
   setDeskHero({
     kicker: facetCrumbText() || "On the desk",
     title: "",
-    value: formatDurationWords(liveRemainingSeconds(videosToShow)),
-    suffix: leftSuffix(),
+    ...liveHeroTime(videosToShow),
   });
+  renderTimeBar();
   renderPlanner();
 }
 
@@ -2746,6 +2791,8 @@ function tabListStructureFingerprint(): string {
       .map((s) => `${s.id}:${s.name}:${s.order}:${s.emoji ?? ""}:${s.colorIndex ?? 0}`)
       .join("|"),
     liveAssignmentsFingerprintSig(),
+    // Row offsets ("+21 min") and the plan badges come from durations, which arrive after the first render.
+    videosToShow.map((video) => Math.round(video.seconds / 60)).join(","),
   ].join("\x1f");
   if (videosToShow.length === 0 && !usesSectionLayoutForLive()) return `${state}\x1fempty`;
   if (usesSectionLayoutForLive()) {
@@ -2882,6 +2929,7 @@ function renderMain() {
     if (isSettingsOpen) {
       settingsModal.classList.remove("hidden", "fade-out");
       settingsModal.classList.add("flex", "items-center", "justify-center", "animate-in", "fade-in");
+      if (!settingsModal.contains(document.activeElement)) (document.getElementById("close-settings") as HTMLElement | null)?.focus();
       const devVersion = document.getElementById("dev-version");
       if (devVersion) devVersion.textContent = `v${packageJson.version}`;
     } else {
@@ -2892,19 +2940,8 @@ function renderMain() {
     const btnQualityStd = document.getElementById("quality-standard");
     const btnQualityHigh = document.getElementById("quality-high");
 
-    if (btnQualityStd && btnQualityHigh) {
-      if (thumbnailQuality === 'standard') {
-        btnQualityStd.classList.add('text-accent', 'bg-surface-hover');
-        btnQualityStd.classList.remove('text-text-muted');
-        btnQualityHigh.classList.remove('text-accent', 'bg-surface-hover');
-        btnQualityHigh.classList.add('text-text-muted');
-      } else {
-        btnQualityHigh.classList.add('text-accent', 'bg-surface-hover');
-        btnQualityHigh.classList.remove('text-text-muted');
-        btnQualityStd.classList.remove('text-accent', 'bg-surface-hover');
-        btnQualityStd.classList.add('text-text-muted');
-      }
-    }
+    btnQualityStd?.setAttribute("aria-pressed", String(thumbnailQuality === "standard"));
+    btnQualityHigh?.setAttribute("aria-pressed", String(thumbnailQuality !== "standard"));
   }
   const btnGroupNone = document.getElementById('view-list');
   const btnGroupChannel = document.getElementById('view-channel');
@@ -3084,8 +3121,7 @@ function renderMain() {
   setDeskHero({
     kicker: facetCrumbText() || "On the desk",
     title: "",
-    value: formatDurationWords(liveRemainingSeconds(videosToShow)),
-    suffix: leftSuffix(),
+    ...liveHeroTime(videosToShow),
   });
 
   const fpLive = tabListStructureFingerprint();
@@ -3596,7 +3632,8 @@ function renderPlanner(): void {
   const summary = document.getElementById("plan-summary");
   if (!planner || !startButton || !summary) return;
 
-  const live = !isReadingListView && !isSessionsView && !isTimeView && selectedSession == null;
+  const live =
+    !isReadingListView && !isSessionsView && !isTimeView && selectedSession == null && getLiveVideosForCurrentView().length > 0;
   planner.classList.toggle("hidden", !live);
   planner.classList.toggle("flex", live);
   if (!live) {
@@ -3769,8 +3806,12 @@ function anyDialogOpen(): boolean {
 function handleDeskKeydown(event: KeyboardEvent): void {
   if (event.ctrlKey || event.metaKey || event.altKey) return;
   if (anyDialogOpen()) return;
-  if (keyboardTargetIsTyping(event)) {
-    if (event.key === "Escape") (event.target as HTMLElement).blur();
+  const onCheckbox = event.target instanceof HTMLInputElement && event.target.type === "checkbox";
+  if (keyboardTargetIsTyping(event) && !(onCheckbox && event.key === "Escape")) {
+    if (event.key !== "Escape") return;
+    const target = event.target as HTMLInputElement;
+    if (target.id === "search-input" && target.value !== "") document.getElementById("search-clear-btn")?.click();
+    else target.blur();
     return;
   }
   switch (event.key) {
@@ -3817,6 +3858,8 @@ function handleDeskKeydown(event: KeyboardEvent): void {
       if (focusedRowKey) {
         focusedRowKey = null;
         applyRowFocus();
+      } else if (selectedTabIds.size > 0 || selectedSessionTabUrls.size > 0) {
+        document.getElementById("btn-clear-selection")?.click();
       } else if (hasAnyFacet()) {
         toggleFacet("all");
       }
@@ -3965,7 +4008,7 @@ function renderSessionGrid(tabs: SavedSessionTab[], sectionColorIndex?: number |
         ? `<img ${imgAttr} class="manager-card-thumb w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="eager" decoding="async" alt=""${imgDragOff} />`
         : `<div class="w-full h-full flex items-center justify-center text-text-muted/20"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="12" cy="12" r="3"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>`
       }
-          <div class="absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-mono font-medium text-white backdrop-blur-sm tabular-nums">
+          <div class="absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-medium text-white backdrop-blur-sm tabular-nums">
             ${formatCompact(sec)}
           </div>
           <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
@@ -3989,7 +4032,7 @@ function renderSessionGrid(tabs: SavedSessionTab[], sectionColorIndex?: number |
         <div class="p-2 session-video-click-target cursor-pointer">
           <h3 class="text-xs font-medium text-text-primary line-clamp-2 leading-snug mb-1 min-h-[2.5em]" title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
           <div class="flex items-center justify-between gap-2">
-            <div class="text-[10px] text-text-muted flex items-center gap-1.5 min-w-0">${deskAvatarHtml(tab.channelName, "w-3.5 h-3.5 text-[7px]")}<span class="truncate">${escapeHtml(channel)}</span></div>
+            <div class="text-[10px] text-text-muted flex items-center gap-1.5 min-w-0">${deskAvatarHtml(tab.channelName)}<span class="truncate">${escapeHtml(channel)}</span></div>
             <div class="flex items-center gap-1 shrink-0">
               ${duplicateBadgeHtml(tab.url)}
               ${tab.languageName ? `<div class="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0">${escapeHtml(tab.languageName.split('(')[0].trim())}</div>` : ''}
@@ -4065,7 +4108,7 @@ function renderVideoGrid(videos: VideoData[], sectionColorIndex?: number | "unso
         ? `<img ${imgAttr} class="manager-card-thumb w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="eager" decoding="async" alt=""${imgDragOff} />`
         : `<div class="w-full h-full flex items-center justify-center text-text-muted/20"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="12" cy="12" r="3"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>`
       }
-                    <div class="manager-card-duration absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-mono font-medium text-white backdrop-blur-sm tabular-nums">
+                    <div class="manager-card-duration absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-medium text-white backdrop-blur-sm tabular-nums">
                         ${video.isLive ? 'LIVE' : formatCompact(video.seconds)}
                     </div>
 
@@ -4085,19 +4128,19 @@ function renderVideoGrid(videos: VideoData[], sectionColorIndex?: number | "unso
                     </div>
 
                     <div class="absolute top-1 right-1 z-10 flex gap-1 opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 transition-opacity duration-200">
-                         <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center bg-black/40 hover:bg-accent text-white rounded-md backdrop-blur-sm border border-white/10 hover:border-accent transition-[background-color,border-color] duration-200 active:scale-[0.96] jump-btn" title="Go to Tab">
+                         <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center bg-black/40 hover:bg-accent text-white rounded-md backdrop-blur-sm border border-white/10 hover:border-accent transition-[background-color,border-color] duration-200 active:scale-[0.96] jump-btn" title="Go to tab">
                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
                          </button>
-                         <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center bg-black/40 hover:bg-accent text-white rounded-md backdrop-blur-sm border border-white/10 hover:border-accent transition-[background-color,border-color] duration-200 active:scale-[0.96] close-btn" title="Close Tab">
+                         <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center bg-black/40 hover:bg-accent text-white rounded-md backdrop-blur-sm border border-white/10 hover:border-accent transition-[background-color,border-color] duration-200 active:scale-[0.96] close-btn" title="Close tab">
                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>
                          </button>
                     </div>
                 </div>
 
                 <div class="p-2 video-click-target cursor-pointer">
-                    <h3 class="manager-card-title text-xs font-medium text-text-primary line-clamp-2 leading-snug mb-1 min-h-[2.5em]" title="${video.title}">${video.title}</h3>
+                    <h3 class="manager-card-title text-xs font-medium text-text-primary line-clamp-2 leading-snug mb-1 min-h-[2.5em]" title="${escapeHtml(video.title)}">${escapeHtml(video.title)}</h3>
                     <div class="flex items-center justify-between text-[10px] text-text-muted gap-2">
-                        <span class="manager-card-channel truncate hover:text-text-secondary transition-colors">${video.channelName}</span>
+                        <span class="flex items-center gap-1.5 min-w-0">${deskAvatarHtml(video.channelName)}<span class="manager-card-channel truncate hover:text-text-secondary transition-colors">${escapeHtml(video.channelName)}</span></span>
                         <div class="flex items-center gap-1 shrink-0">
                           ${windowBadgeHtml(video)}
                           ${duplicateBadgeHtml(video.url)}
@@ -4318,9 +4361,8 @@ function updateSelectionUI() {
 
   if (selectionSize > 0 && !isReadingListView) {
     bar?.classList.remove("hidden");
-    bar?.classList.add("flex");
     if (count) count.innerText = `${selectionSize} selected`;
-    if (closeBtn) closeBtn.textContent = inSessionView ? "Remove from session" : "Close Selected";
+    if (closeBtn) closeBtn.textContent = inSessionView ? "Remove from session" : "Close tabs";
     if (moveWrap) {
       if (hasSections) {
         moveWrap.classList.remove("hidden");
@@ -4329,7 +4371,6 @@ function updateSelectionUI() {
     }
   } else {
     bar?.classList.add("hidden");
-    bar?.classList.remove("flex");
     moveWrap?.classList.add("hidden");
     document.getElementById("move-to-section-popover")?.classList.add("hidden");
   }
@@ -4427,9 +4468,9 @@ function openStudySessionModal(targetTabIds?: number[]): void {
         .map(
           (video, index) => `
           <div class="flex items-center gap-2 p-1.5 rounded bg-surface-elevated/50 border border-border/40 text-xs text-text-primary" data-queue-tab-id="${video.id}">
-            <span class="w-4 text-center font-mono text-[10px] text-text-muted shrink-0">${index + 1}</span>
+            <span class="w-4 text-center tabular-nums text-[10px] text-text-muted shrink-0">${index + 1}</span>
             <span class="truncate flex-1 font-medium">${escapeHtml(video.title)}</span>
-            <span class="text-[10px] font-mono text-text-muted shrink-0 px-1.5 py-0.5 rounded bg-surface border border-border">${formatTime(video.seconds)}</span>
+            <span class="text-[10px] tabular-nums text-text-muted shrink-0 px-1.5 py-0.5 rounded bg-surface border border-border">${formatTime(video.seconds)}</span>
           </div>
         `
         )
@@ -4553,6 +4594,13 @@ function setupListeners() {
 
   document.getElementById("btn-refresh")?.addEventListener("click", () => {
     fetchTabs();
+  });
+
+  document.getElementById("btn-clear-selection")?.addEventListener("click", () => {
+    selectedTabIds.clear();
+    selectedSessionTabUrls.clear();
+    updateSelectionUI();
+    render();
   });
 
   document.getElementById("btn-close-selected")?.addEventListener("click", async () => {
@@ -5247,6 +5295,10 @@ function setupListeners() {
     }, SEARCH_DEBOUNCE_MS);
   });
 
+  document.getElementById("tab-list")?.addEventListener("click", (event) => {
+    if ((event.target as Element).closest('[data-empty-action="clear-search"]')) searchClearBtn?.click();
+  });
+
   searchClearBtn?.addEventListener("click", () => {
     if (searchInput) {
       searchInput.value = "";
@@ -5460,6 +5512,13 @@ function setupListeners() {
     sessionSidebarSearch = (event.target as HTMLInputElement).value;
     lastSavedSessionsFingerprint = "";
     void refreshSavedSessionsSidebar();
+  });
+  document.getElementById("session-sidebar-search")?.addEventListener("keydown", (event) => {
+    const input = event.target as HTMLInputElement;
+    if (event.key !== "Escape" || input.value === "") return;
+    event.stopPropagation();
+    input.value = "";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
   });
 
   function openTabSectionContextMenu(
@@ -5685,9 +5744,18 @@ function setupListeners() {
     isSettingsOpen = true;
     render();
   });
-  document.getElementById("close-settings")?.addEventListener("click", () => {
+  const closeSettings = () => {
+    if (!isSettingsOpen) return;
     isSettingsOpen = false;
     render();
+    document.getElementById("btn-settings")?.focus();
+  };
+  document.getElementById("close-settings")?.addEventListener("click", closeSettings);
+  document.getElementById("settings-modal")?.addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) closeSettings();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && isSettingsOpen && !document.querySelector("#confirm-modal:not(.hidden)")) closeSettings();
   });
 
   document.getElementById("quality-standard")?.addEventListener("click", () => {
@@ -5704,9 +5772,9 @@ function setupListeners() {
 
   document.getElementById("btn-clear-cache")?.addEventListener("click", async () => {
     const confirmed = await showConfirm({
-      title: "Clear metadata cache",
-      message: "Clear all cached titles and durations? The extension will re-probe tabs when needed.",
-      confirmLabel: "Clear cache",
+      title: "Clear video details?",
+      message: "Saved titles and lengths are forgotten and load again from open tabs. Sessions, history and settings stay.",
+      confirmLabel: "Clear",
       confirmDanger: true,
     });
     if (confirmed) {

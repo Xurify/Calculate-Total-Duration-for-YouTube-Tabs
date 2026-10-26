@@ -1013,13 +1013,31 @@ kbd {
   border: 2px solid var(--color-border-hover);
 }
 
+/* A ring in the card's own colour cuts the reached dot out of the fill, so it reads as a step, not a blob. */
 .hours-mark--reached {
-  border-color: var(--hours-color);
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--color-surface-elevated);
   background-color: var(--hours-color);
 }
 
+.hours-mark--reached::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 45%;
+  width: 3.5px;
+  height: 6.5px;
+  border: solid var(--color-surface-elevated);
+  border-width: 0 1.75px 1.75px 0;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
 .hours-mark--next {
+  width: 12px;
+  height: 12px;
   border-color: var(--hours-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--hours-color) 18%, transparent);
 }
 
 .hours-scale {

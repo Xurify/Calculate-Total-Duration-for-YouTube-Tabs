@@ -41,7 +41,6 @@ let wired = false;
 const ICONS = {
   ear: `<path d="M6 8.5a6.5 6.5 0 1 1 13 0c0 6-6 6-6 10a3.5 3.5 0 1 1-7 0"/><path d="M15 8.5a2.5 2.5 0 0 0-5 0v1a2 2 0 1 1 0 4"/>`,
   list: `<path d="M12 12H3M16 6H3M12 18H3"/><path d="m16 12 5 3-5 3v-6z"/>`,
-  eyeOff: `<path d="M10.7 5.1A10.4 10.4 0 0 1 12 5c7 0 10 7 10 7a13 13 0 0 1-1.7 2.7"/><path d="M6.6 6.6A13.5 13.5 0 0 0 2 12s3 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 1 0 4.2 4.2"/><path d="m2 2 20 20"/>`,
 };
 
 function iconHtml(name: keyof typeof ICONS, size: number, className = ""): string {
@@ -112,6 +111,15 @@ function currentSentence(): BankSentence | null {
   return null;
 }
 
+/** Word-shaped bars in place of the hidden text, so the sentence's length and rhythm show before the words do. */
+function redactedHtml(text: string): string {
+  return text
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => `<span class="practice-redacted-word" style="width:${Math.max(1, [...word].length * 0.5).toFixed(2)}em"></span>`)
+    .join(" ");
+}
+
 function playButtonHtml(sentence: BankSentence, className: string, label: string): string {
   const isPlaying = playing?.id === sentence.id;
   const words = isPlaying ? "Playing" : label;
@@ -147,7 +155,7 @@ function reviewCardHtml(now: number): string {
   const status =
     playing?.id === sentence.id
       ? "Playing in YouTube…"
-      : message || (playedThisSession ? "Press Space to hear it again" : "Press Space to play. It opens in a small YouTube window.");
+      : message || (playedThisSession ? "Space plays it again" : "Space plays it in a small YouTube window");
   const translation = sentence.translation ? `<p class="practice-translation">${escapeHtml(sentence.translation)}</p>` : "";
   return `<section class="practice-card" aria-label="Review">
     <div class="flex items-center gap-3 text-xs text-text-muted">
@@ -163,13 +171,12 @@ function reviewCardHtml(now: number): string {
         ${
           revealed
             ? `<p class="practice-text">${sentenceTextHtml(sentence)}</p>${translation}`
-            : `<button type="button" class="practice-hidden" data-practice-action="reveal">
-                 ${iconHtml("eyeOff", 18)}
-                 <span class="flex-1 text-left"><span class="block text-sm font-medium text-text-primary">Text hidden</span><span class="block text-xs text-text-muted">Listen, say it to yourself, then show the text.</span></span>
-                 <span class="practice-hidden-cta">Show text <kbd>T</kbd></span>
-               </button>`
+            : `<button type="button" class="practice-redacted" data-practice-action="reveal" aria-label="Text hidden. Show text (T)" title="Show text (T)">${redactedHtml(sentence.text)}</button>`
         }
-        <p class="text-xs m-0 ${message ? "text-danger" : "text-text-muted"}" role="status">${escapeHtml(status)}</p>
+        <p class="practice-status${message ? " text-danger" : ""}" role="status">
+          <span>${escapeHtml(status)}</span>
+          ${revealed ? "" : `<button type="button" class="link-btn" data-practice-action="reveal">Show text <kbd>T</kbd></button>`}
+        </p>
       </div>
     </div>
     <div class="practice-actions">

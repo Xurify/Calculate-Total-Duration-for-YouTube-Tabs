@@ -26,7 +26,9 @@ let namedCodes: Map<string, string> | null = null;
 function codesByName(): Map<string, string> {
   if (namedCodes) return namedCodes;
   namedCodes = new Map();
-  const locales = [...new Set(["en", typeof navigator === "undefined" ? "en" : navigator.language])];
+  // YouTube names caption tracks in its own UI language, which can differ from the browser's ("slovaki" on
+  // Estonian YouTube), so every language's own locale is tried after English and the browser's.
+  const locales = [...new Set(["en", typeof navigator === "undefined" ? "en" : navigator.language, ...Object.keys(LANGUAGE_COUNTRIES)])];
   for (const locale of locales) {
     let names: Intl.DisplayNames;
     try {

@@ -10,6 +10,13 @@ describe("languageFlagId", () => {
     expect(languageFlagId("EN")).toBe("gb");
   });
 
+  test("knows names YouTube gives in another UI language", () => {
+    expect(languageFlagId("slovaki")).toBe("sk");
+    expect(languageFlagId("inglise")).toBe("gb");
+    expect(languageFlagId("tšehhi")).toBe("cz");
+    expect(languageFlagId("estónčina")).toBe("ee");
+  });
+
   test("prefers the region a code names", () => {
     expect(languageFlagId("en-US")).toBe("us");
     expect(languageFlagId("pt_BR")).toBe("br");

@@ -23,7 +23,7 @@ import { formatTime, formatCompact, formatDurationWords, formatStartsIn, parseTi
 import { queryReadingList } from "../../utils/readingList";
 import { loadCachedMandalaSummary, type CachedMandalaSummary } from "../../utils/storage";
 import { hostOf, isTrackableUrl, pagePrefixOf, pillarColor, type SiteRule } from "../../utils/timeLog";
-import { languageFlagHtml } from "../../utils/languageFlags";
+import { languageCodeOf, languageFlagHtml } from "../../utils/languageFlags";
 import { isGoal, languageKey, type LanguageTodayRow } from "../../utils/languageLimits";
 import { actionSelectOptions, escapeHtml as escapeText, matchWords, pillarChoices, pillarSelectOptions, type CurrentSiteResponse } from "../../utils/timeUi";
 import { closeAllCustomSelects, mountCustomSelect } from "../manager/custom-select";
@@ -1154,13 +1154,18 @@ function setupApp() {
           <button id="go-to-settings" type="button" class="popup-icon" title="Settings" aria-label="Settings"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
         </div>
         <div class="mt-2 flex flex-col gap-1.5">
-          <div class="font-display text-[32px] leading-none tracking-[-0.02em] text-text-primary"><span id="stat-remaining">0 min</span> <span class="text-text-muted">left</span></div>
-          <div class="flex items-center justify-between gap-2 text-[12px] text-text-secondary tabular-nums">
-            <span id="stat-video-count">0 videos</span>
-            <span><span id="stat-watched-pct" class="font-semibold text-text-primary">0%</span> watched</span>
+          <div class="flex items-baseline justify-between gap-3">
+            <div class="font-display text-[32px] leading-none tracking-[-0.02em] text-text-primary"><span id="stat-remaining">0 min</span> <span class="text-text-muted">left</span></div>
+            <span class="text-[12px] text-text-secondary tabular-nums whitespace-nowrap"><span id="stat-watched-pct" class="font-semibold text-text-primary">0 %</span> watched</span>
           </div>
-          <div id="popup-lang-bar" class="popup-lang-bar" role="img" aria-label="Time by language"></div>
-          <div id="popup-today" class="hidden grid grid-cols-3 gap-1.5" aria-label="Watched today"></div>
+          <div class="popup-langs" role="table" aria-label="Time by language">
+            <div class="popup-langs-row popup-langs-head" role="row">
+              <span id="stat-video-count" class="col-span-2 truncate normal-case tracking-normal text-[12px] font-normal text-text-secondary" role="cell">0 videos</span>
+              <span class="text-right" role="columnheader">Left</span>
+              <span class="text-right" role="columnheader">Today</span>
+            </div>
+            <div id="popup-langs-body" class="contents"></div>
+          </div>
           <span id="stat-total" class="hidden"></span>
         </div>
       </header>
@@ -1221,7 +1226,7 @@ function setupApp() {
     </div>
   `;
 
-  renderLanguageToday();
+  renderPopupLanguages();
   document.getElementById("go-to-settings")?.addEventListener("click", goToSettings);
   document.getElementById("open-manager")?.addEventListener("click", () => {
     void openManager();
@@ -1572,7 +1577,7 @@ function updateHeaderStats(
     setText(watchedPctEl, rounded >= 100 ? "Done" : `${rounded} %`);
     watchedPctEl.title = `${formatDurationWords(totalWatched)} watched`;
   }
-  renderPopupLanguageBar();
+  renderPopupLanguages();
 
   const btnTab = document.getElementById("sort-order");
   const btnLen = document.getElementById("sort-duration");
@@ -1622,73 +1627,134 @@ function popupLanguageLabel(video: VideoData): string | null {
   return null;
 }
 
-/**
- * One strip for the whole queue, split by language like the desk. Each part darkens as it is watched, so the
- * strip is also the progress bar.
- */
-function renderPopupLanguageBar(): void {
-  const bar = document.getElementById("popup-lang-bar");
-  if (!bar) return;
-  const totals = new Map<string, { seconds: number; watched: number }>();
+interface PopupLanguageRow {
+  key: string;
+  label: string;
+  flagSource: string;
+  seconds: number;
+  watched: number;
+  today: LanguageTodayRow | null;
+  color: string;
+}
+
+/** The queue and the watch log can name one language differently ("Slovak", "slovaki", "sk"), so rows meet on the code. */
+function popupLanguageKey(label: string): string {
+  return languageCodeOf(label) ?? languageKey(label);
+}
+
+let languageDisplayNames: Intl.DisplayNames | null = null;
+
+function popupLanguageName(row: PopupLanguageRow): string {
+  const code = languageCodeOf(row.flagSource) ?? languageCodeOf(row.label);
+  let name = row.label;
+  if (code) {
+    try {
+      languageDisplayNames ??= new Intl.DisplayNames([navigator.language, "en"], { type: "language" });
+      name = languageDisplayNames.of(code) ?? name;
+    } catch {}
+  }
+  return name.charAt(0).toLocaleUpperCase() + name.slice(1);
+}
+
+const POPUP_LANGUAGE_ROWS = 4;
+
+function popupLanguageRows(): PopupLanguageRow[] {
+  const rows = new Map<string, PopupLanguageRow>();
   for (const video of videoData) {
     if (video.excluded || video.isLive || video.seconds <= 0) continue;
     const label = popupLanguageLabel(video) ?? "Unknown";
-    const row = totals.get(label) ?? { seconds: 0, watched: 0 };
+    const key = label === "Unknown" ? "" : popupLanguageKey(video.language || label);
+    const row = rows.get(key) ?? { key, label, flagSource: video.language || label, seconds: 0, watched: 0, today: null, color: "" };
     row.seconds += video.seconds;
     row.watched += getEffectiveWatchedSeconds(video);
-    totals.set(label, row);
+    rows.set(key, row);
   }
-  const entries = Array.from(totals.entries()).sort((a, b) => b[1].seconds - a[1].seconds);
-  const total = entries.reduce((sum, [, row]) => sum + row.seconds, 0);
-
-  const html =
-    total <= 0
-      ? `<span class="popup-lang-seg flex-1 bg-border"></span>`
-      : entries
-    .map(([label, row], index) => {
-      const share = (row.seconds / total) * 100;
-      const left = Math.max(0, row.seconds - row.watched);
-      const color = label === "Unknown" ? "var(--color-border-hover)" : POPUP_LANGUAGE_PALETTE[index % POPUP_LANGUAGE_PALETTE.length];
-      const safeLabel = escapeText(label);
-      const text = share >= 24 ? `${safeLabel} ${formatDurationWords(left)}` : share >= 12 ? safeLabel : "";
-      return `<span class="popup-lang-seg" style="width: ${share.toFixed(1)}%; background: ${color}" title="${safeLabel}: ${formatDurationWords(left)} left of ${formatDurationWords(row.seconds)}"><span class="popup-lang-done" style="width: ${((row.watched / row.seconds) * 100).toFixed(1)}%"></span>${text ? `<span class="popup-lang-label">${text}</span>` : ""}</span>`;
-        })
-        .join("");
-  if (html === lastLanguageBarHtml && bar.childElementCount > 0) return;
-  lastLanguageBarHtml = html;
-  bar.innerHTML = html;
+  const queued = Array.from(rows.values()).sort((a, b) => b.seconds - a.seconds);
+  let colorIndex = 0;
+  for (const row of queued) {
+    row.color = !row.key ? "var(--color-border-hover)" : POPUP_LANGUAGE_PALETTE[colorIndex++ % POPUP_LANGUAGE_PALETTE.length];
+  }
+  // Rules come first from the background, so a language with a goal or limit keeps that row over a plain one.
+  for (const today of languageToday) {
+    const key = popupLanguageKey(today.language);
+    const row = rows.get(key);
+    if (row) {
+      row.today ??= today;
+    } else {
+      const extra = { key, label: today.language, flagSource: today.language, seconds: 0, watched: 0, today, color: "" };
+      rows.set(key, extra);
+      queued.push(extra);
+    }
+  }
+  if (queued.length <= POPUP_LANGUAGE_ROWS) return queued;
+  // A language with a rule stays visible so its warning colour isn't folded away.
+  const keep = new Set(queued.filter((row) => row.today?.minutes != null).slice(0, POPUP_LANGUAGE_ROWS - 1));
+  for (const row of queued) if (keep.size < POPUP_LANGUAGE_ROWS - 1) keep.add(row);
+  const shown = queued.filter((row) => keep.has(row));
+  const rest = queued.filter((row) => !shown.includes(row));
+  const other: PopupLanguageRow = {
+    key: "",
+    label: `${rest.length} more`,
+    flagSource: "",
+    seconds: rest.reduce((sum, row) => sum + row.seconds, 0),
+    watched: rest.reduce((sum, row) => sum + row.watched, 0),
+    today: null,
+    color: "var(--color-border-hover)",
+  };
+  const otherToday = rest.reduce((sum, row) => sum + (row.today?.usedSeconds ?? 0), 0);
+  if (otherToday > 0) other.today = { language: other.label, usedSeconds: otherToday, level: null };
+  return [...shown, other];
 }
 
-let lastLanguageBarHtml = "";
+function popupTodayCellHtml(row: PopupLanguageRow): string {
+  const today = row.today;
+  if (!today || (today.minutes == null && today.usedSeconds < 60)) return `<span class="popup-langs-num text-text-muted" role="cell">–</span>`;
+  if (today.minutes == null) return `<span class="popup-langs-num" role="cell">${formatDurationWords(today.usedSeconds)}</span>`;
+  const used = Math.floor(today.usedSeconds / 60);
+  const tone = today.level === "over" ? "text-danger" : today.level === "near" ? "text-warning" : today.level === "met" ? "text-success" : "";
+  const what = isGoal(today) ? "goal" : "limit";
+  return `<span class="popup-langs-num ${tone}" role="cell" title="${used} of ${today.minutes} min ${what} today">${used}<span class="text-text-muted font-normal">/${today.minutes} min</span></span>`;
+}
+
+/** One line per language: how much of the queue it is, what's left, and how long it played today. */
+function renderPopupLanguages(): void {
+  const body = document.getElementById("popup-langs-body");
+  if (!body) return;
+  const rows = popupLanguageRows();
+  const largest = Math.max(1, ...rows.map((row) => row.seconds));
+  const html = rows
+    .map((row) => {
+      const name = row.flagSource ? popupLanguageName(row) : row.label;
+      const safeName = escapeText(name);
+      const flag = row.flagSource ? languageFlagHtml(row.flagSource, "lang-flag lang-flag--xs shrink-0") : "";
+      const left = Math.max(0, row.seconds - row.watched);
+      const leftText = row.seconds <= 0 ? "–" : left <= 0 ? "Done" : formatDurationWords(left);
+      const bar = row.seconds > 0
+        ? `<span class="popup-langs-fill" style="width: ${((row.seconds / largest) * 100).toFixed(1)}%; background: ${row.color}"><span class="popup-lang-done" style="width: ${((row.watched / row.seconds) * 100).toFixed(1)}%"></span></span>`
+        : "";
+      return `<div class="popup-langs-row" role="row"${row.seconds > 0 ? ` title="${safeName}: ${formatDurationWords(left)} left of ${formatDurationWords(row.seconds)}"` : ""}>
+        <span class="flex items-center gap-1.5 min-w-0" role="cell">${flag}<span class="truncate text-text-primary">${safeName}</span></span>
+        <span class="popup-langs-track" aria-hidden="true">${bar}</span>
+        <span class="popup-langs-num ${row.seconds <= 0 ? "text-text-muted" : ""}" role="cell">${leftText}</span>
+        ${popupTodayCellHtml(row)}
+      </div>`;
+    })
+    .join("");
+  if (html === lastLanguagesHtml && body.childElementCount > 0) return;
+  lastLanguagesHtml = html;
+  body.innerHTML = html;
+}
+
+let lastLanguagesHtml = "";
 
 let languageToday: LanguageTodayRow[] = [];
-
-function languageTodayChipHtml(row: LanguageTodayRow): string {
-  const flag = languageFlagHtml(row.language, "lang-flag lang-flag--xs shrink-0");
-  const used = Math.floor(row.usedSeconds / 60);
-  const name = escapeText(row.language);
-  if (row.minutes == null) {
-    return `<div class="popup-today" title="${name}: ${formatDurationWords(row.usedSeconds)} today">${flag}<span class="font-semibold text-text-primary">${formatDurationWords(row.usedSeconds)}</span><span class="truncate">today</span></div>`;
-  }
-  const share = Math.min(100, (row.usedSeconds / (row.minutes * 60)) * 100);
-  const tone = row.level === "over" ? "popup-today--over" : row.level === "near" ? "popup-today--near" : row.level === "met" ? "popup-today--met" : "";
-  const what = isGoal(row) ? "goal" : "limit";
-  return `<div class="popup-today ${tone}" title="${name}: ${used} of ${row.minutes} min ${what} today">${flag}<span class="font-semibold popup-today-value">${used} / ${row.minutes} min</span><span class="popup-today-meter"><span style="width: ${share.toFixed(0)}%"></span></span></div>`;
-}
-
-function renderLanguageToday(): void {
-  const strip = document.getElementById("popup-today");
-  if (!strip) return;
-  strip.classList.toggle("hidden", languageToday.length === 0);
-  strip.innerHTML = languageToday.map(languageTodayChipHtml).join("");
-}
 
 function loadLanguageToday(): void {
   void browser.runtime
     .sendMessage({ action: "get-language-today" })
     .then((response: { rows?: LanguageTodayRow[] } | undefined) => {
       languageToday = response?.rows ?? [];
-      renderLanguageToday();
+      renderPopupLanguages();
       updateVideoListCardsFromState();
     })
     .catch(() => {});
@@ -1697,7 +1763,7 @@ function loadLanguageToday(): void {
 function isOverLimitToday(video: VideoData): boolean {
   const label = popupLanguageLabel(video);
   if (!label) return false;
-  return languageToday.some((row) => row.level === "over" && !isGoal(row) && languageKey(row.language) === languageKey(label));
+  return languageToday.some((row) => row.level === "over" && !isGoal(row) && popupLanguageKey(row.language) === popupLanguageKey(video.language || label));
 }
 
 /** Rows that fit in the popup without scrolling load their thumbnails at once; lazy ones wait for layout. */

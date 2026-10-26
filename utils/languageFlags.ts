@@ -59,6 +59,6 @@ export function languageFlagId(language: string | null | undefined): string | nu
 export function languageFlagHtml(language: string | null | undefined, className = "lang-flag"): string {
   const id = languageFlagId(language);
   if (!id) return "";
-  const url = browser.runtime.getURL(`/flags/${id}.svg` as PublicPath);
+  const url = browser.runtime.getURL(`/flags/${id}.png` as PublicPath);
   return `<img src="${url}" alt="" width="16" height="12" class="${className}" draggable="false">`;
 }

@@ -36,6 +36,7 @@ import {
   applyStorePatch,
   fetchStoreState,
   isStoreUpdatedMessage,
+  type StoreUpdatedMessage,
   type StoreState,
 } from "../../utils/store";
 import { formatTime, formatCompact, formatDurationWords, formatOffset, formatShortDuration, parseTimeParam, getVideoIdFromUrl, normalizeText, isYoutubeWatchOrShortsUrl } from "../../utils/format";
@@ -229,10 +230,10 @@ function applyStoreMetadataToVideos(): void {
   });
 }
 
-function handleStoreUpdated(message: { prefs?: StoreState["prefs"]; metadataCache?: StoreState["metadataCache"] }): void {
+function handleStoreUpdated(message: StoreUpdatedMessage): void {
   applyStorePatch(storeState, message);
   if (message.prefs) applyPrefsFromStore();
-  if (allVideos.length > 0 && (message.prefs || message.metadataCache)) {
+  if (allVideos.length > 0 && (message.prefs || message.metadataCache || message.metadataPatch)) {
     applyStoreMetadataToVideos();
     scheduleProbeResultsToUi();
   }
@@ -253,51 +254,8 @@ function applyCachedMetadataToVideo(video: VideoData, cached: CachedMetadata): v
   video.chapters = cached.chapters;
 }
 
-const THUMBNAIL_CACHE_MAX = 60;
-const thumbnailBlobCache = new Map<string, string>();
-
-function getThumbnailSrc(videoId: string | null, quality: string): { src: string; cacheKey: string | null } {
-  if (!videoId) return { src: "", cacheKey: null };
-  const key = `${videoId}/${quality}`;
-  const blobUrl = thumbnailBlobCache.get(key);
-  if (blobUrl) return { src: blobUrl, cacheKey: null };
-  const normalUrl = `https://i.ytimg.com/vi/${videoId}/${quality}`;
-  return { src: normalUrl, cacheKey: key };
-}
-
-function thumbnailCacheBackfill(container: HTMLElement) {
-  container.querySelectorAll<HTMLImageElement>("img[data-thumbnail-key]").forEach((img) => {
-    const key = img.getAttribute("data-thumbnail-key");
-    if (!key || thumbnailBlobCache.has(key)) return;
-    const cacheFromSrc = () => {
-      fetch(img.src)
-        .then((response) => response.blob())
-        .then((blob) => {
-          const blobUrl = URL.createObjectURL(blob);
-          while (thumbnailBlobCache.size >= THUMBNAIL_CACHE_MAX) {
-            const oldest = thumbnailBlobCache.keys().next().value;
-            if (oldest === undefined) break;
-            const oldUrl = thumbnailBlobCache.get(oldest);
-            if (oldUrl) URL.revokeObjectURL(oldUrl);
-            thumbnailBlobCache.delete(oldest);
-          }
-          thumbnailBlobCache.set(key, blobUrl);
-          img.removeAttribute("data-thumbnail-key");
-        })
-        .catch(() => {
-          img.removeAttribute("data-thumbnail-key");
-        });
-    };
-    if (img.complete && img.naturalWidth > 0) {
-      cacheFromSrc();
-    } else {
-      const onLoad = () => {
-        img.removeEventListener("load", onLoad);
-        cacheFromSrc();
-      };
-      img.addEventListener("load", onLoad);
-    }
-  });
+function getThumbnailSrc(videoId: string | null, quality: string): string {
+  return videoId ? `https://i.ytimg.com/vi/${videoId}/${quality}` : "";
 }
 
 async function fetchTabs(skipInitialRender = false) {
@@ -2504,7 +2462,7 @@ function sessionThumbStripHtml(tabs: SavedSessionTab[]): string {
   const more = tabs.length - shown.length;
   const cells = shown
     .map((tab, index) => {
-      const { src } = getThumbnailSrc(getVideoIdFromUrl(tab.url), "mqdefault.jpg");
+      const src = getThumbnailSrc(getVideoIdFromUrl(tab.url), "mqdefault.jpg");
       const overlay = index === shown.length - 1 && more > 0 ? `<span class="session-thumb-more">+${more}</span>` : "";
       return `<span class="session-thumb">${src ? `<img src="${src}" alt="" loading="lazy" decoding="async" draggable="false" />` : ""}${overlay}</span>`;
     })
@@ -3177,7 +3135,6 @@ function renderMain() {
     } else {
       const sorted = sortSessionTabsForDisplay(tabsToShow);
       setTabListInnerHTML(container, layoutMode === "grid" ? renderSessionGrid(sorted) : `<div class="queue-card">${renderSessionList(sorted)}</div>`);
-      thumbnailCacheBackfill(container);
     }
     applyRowFocus();
     lastTabListFingerprint = fpSession;
@@ -3221,7 +3178,6 @@ function renderMain() {
   } else {
     const sortedVideos = sortVideosForDisplay(videosToShow);
     setTabListInnerHTML(container, layoutMode === "grid" ? renderVideoGrid(sortedVideos) : `<div class="queue-card">${renderVideoList(sortedVideos)}</div>`);
-    thumbnailCacheBackfill(container);
   }
   renderPlanner();
   applyRowFocus();
@@ -4054,10 +4010,9 @@ function handleDeskKeydown(event: KeyboardEvent): void {
 
 function queueThumbHtml(videoId: string | null, draggableOff: boolean): string {
   const thumbQuality = thumbnailQuality === "high" ? "hqdefault.jpg" : "mqdefault.jpg";
-  const { src, cacheKey } = getThumbnailSrc(videoId, thumbQuality);
+  const src = getThumbnailSrc(videoId, thumbQuality);
   if (!src) return "";
-  const keyAttr = cacheKey ? ` data-thumbnail-key="${cacheKey}"` : "";
-  return `<img src="${src}"${keyAttr} class="manager-card-thumb w-full h-full object-cover" loading="lazy" decoding="async" alt=""${draggableOff ? ` draggable="false"` : ""} />`;
+  return `<img src="${src}" class="manager-card-thumb w-full h-full object-cover" loading="lazy" decoding="async" alt=""${draggableOff ? ` draggable="false"` : ""} />`;
 }
 
 function queueCheckboxHtml(toggleClass: string, checked: boolean, title: string): string {
@@ -4176,10 +4131,8 @@ function renderSessionGrid(tabs: SavedSessionTab[], sectionColorIndex?: number |
   const imgDragOff = sectionColorIndex !== undefined ? ` draggable="false"` : "";
   const cardsHtml = tabs.map((tab) => {
     const videoId = getVideoIdFromUrl(tab.url);
-    const { src: thumbnailUrl, cacheKey: thumbnailCacheKey } = getThumbnailSrc(videoId, thumbQuality);
-    const imgAttr = thumbnailCacheKey
-      ? `src="${thumbnailUrl}" data-thumbnail-key="${thumbnailCacheKey}"`
-      : `src="${thumbnailUrl}"`;
+    const thumbnailUrl = getThumbnailSrc(videoId, thumbQuality);
+    const imgAttr = `src="${thumbnailUrl}"`;
     const title = tab.title ?? "Untitled";
     const channel = tab.channelName ?? "";
     const sec = tab.seconds ?? 0;
@@ -4189,7 +4142,7 @@ function renderSessionGrid(tabs: SavedSessionTab[], sectionColorIndex?: number |
       <div class="group relative flex flex-col rounded-lg border border-transparent overflow-hidden hover:border-border hover:bg-surface-hover/50 transition-[background-color,border-color] ${isSelected ? "bg-surface-hover border-border ring-1 ring-accent/50" : ""}${dnd.extraClass}" data-session-tab-url="${urlAttr}"${dnd.draggableAttr}>
         <div class="relative w-full aspect-video bg-surface-elevated/50 overflow-hidden session-video-click-target cursor-pointer">
           ${thumbnailUrl
-        ? `<img ${imgAttr} class="manager-card-thumb w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="eager" decoding="async" alt=""${imgDragOff} />`
+        ? `<img ${imgAttr} class="manager-card-thumb w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" decoding="async" alt=""${imgDragOff} />`
         : `<div class="w-full h-full flex items-center justify-center text-text-muted/20"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="12" cy="12" r="3"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>`
       }
           <div class="absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-medium text-white backdrop-blur-sm tabular-nums">
@@ -4280,16 +4233,14 @@ function renderVideoGrid(videos: VideoData[], sectionColorIndex?: number | "unso
     const isSelected = selectedTabIds.has(video.id);
     const watchedPercent = video.seconds > 0 ? (video.currentTime / video.seconds) * 100 : 0;
     const videoId = getVideoIdFromUrl(video.url);
-    const { src: thumbnailUrl, cacheKey: thumbnailCacheKey } = getThumbnailSrc(videoId, thumbQuality);
-    const imgAttr = thumbnailCacheKey
-      ? `src="${thumbnailUrl}" data-thumbnail-key="${thumbnailCacheKey}"`
-      : `src="${thumbnailUrl}"`;
+    const thumbnailUrl = getThumbnailSrc(videoId, thumbQuality);
+    const imgAttr = `src="${thumbnailUrl}"`;
 
     return `
             <div class="group relative flex flex-col rounded-lg border border-transparent overflow-hidden hover:border-border hover:bg-surface-hover/50 transition-[background-color,border-color] ${isSelected ? 'bg-surface-hover border-border ring-1 ring-accent/50' : ''}${dnd.extraClass}" data-id="${video.id}"${dnd.draggableAttr}>
                 <div class="relative w-full aspect-video bg-surface-elevated/50 overflow-hidden video-click-target cursor-pointer">
                     ${thumbnailUrl
-        ? `<img ${imgAttr} class="manager-card-thumb w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="eager" decoding="async" alt=""${imgDragOff} />`
+        ? `<img ${imgAttr} class="manager-card-thumb w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" decoding="async" alt=""${imgDragOff} />`
         : `<div class="w-full h-full flex items-center justify-center text-text-muted/20"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="12" cy="12" r="3"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>`
       }
                     <div class="manager-card-duration absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-medium text-white backdrop-blur-sm tabular-nums">

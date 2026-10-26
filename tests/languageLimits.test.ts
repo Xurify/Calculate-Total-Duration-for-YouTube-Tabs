@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { cleanLanguageLimits, levelOf, limitUsage, newLimitWarnings } from "../utils/languageLimits";
+import { cleanLanguageLimits, languageTodayRows, levelOf, limitUsage, newLimitWarnings } from "../utils/languageLimits";
 import type { WatchEntry } from "../utils/watchLog";
 
 const at = (day: number, hour: number, minute = 0) => new Date(2026, 9, day, hour, minute).getTime();
@@ -75,6 +75,25 @@ describe("limitUsage", () => {
     const overrides = { videos: { abc123def45: { code: "sk", name: "Slovak" } }, channels: {} };
     const [english] = limitUsage([{ language: "English", minutes: 30 }], [entry()], at(25, 20), overrides);
     expect(english.usedSeconds).toBe(0);
+  });
+});
+
+describe("languageTodayRows", () => {
+  test("lists rules first, then today's other languages by time", () => {
+    const now = at(25, 20);
+    const entries = [
+      entry({ startedAt: at(25, 9), playedSeconds: 4700 }),
+      entry({ startedAt: at(25, 13), language: "sk", languageName: "Slovak", playedSeconds: 3900 }),
+      entry({ startedAt: at(25, 14), language: "et", languageName: "Estonian", playedSeconds: 720 }),
+      entry({ startedAt: at(24, 14), language: "cs", languageName: "Czech", playedSeconds: 9000 }),
+    ];
+    const rows = languageTodayRows([{ language: "English", minutes: 90 }], entries, now);
+    expect(rows.map((row) => [row.language, row.usedSeconds, row.level])).toEqual([
+      ["English", 4700, "near"],
+      ["Slovak", 3900, null],
+      ["Estonian", 720, null],
+    ]);
+    expect(rows[1].minutes).toBeUndefined();
   });
 });
 

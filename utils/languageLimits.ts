@@ -118,6 +118,44 @@ export function limitUsage(
   });
 }
 
+export interface LanguageTodayRow {
+  language: string;
+  usedSeconds: number;
+  /** Set when the row comes from a rule. */
+  minutes?: number;
+  kind?: "goal";
+  level: LimitLevel | null;
+}
+
+/** The popup's "today" strip: every rule first, then the most-watched languages that have no rule. */
+export function languageTodayRows(
+  limits: readonly LanguageLimit[],
+  entries: readonly WatchEntry[],
+  now: number = Date.now(),
+  overrides: LanguageOverrides | null = null,
+  max = 3
+): LanguageTodayRow[] {
+  const today = dateKeyOf(now);
+  const watched = new Map<string, { language: string; usedSeconds: number }>();
+  for (const entry of entries) {
+    if (entry.playedSeconds <= 0 || dateKeyOf(entry.startedAt) !== today) continue;
+    const language = entryLanguage(entry, overrides);
+    if (language === UNKNOWN_LANGUAGE) continue;
+    const row = watched.get(languageKey(language)) ?? { language, usedSeconds: 0 };
+    row.usedSeconds += entry.playedSeconds;
+    watched.set(languageKey(language), row);
+  }
+  const rules: LanguageTodayRow[] = limitUsage(limits, entries, now, overrides).sort(
+    (a, b) => Number(isGoal(a)) - Number(isGoal(b)) || b.usedSeconds / (b.minutes * 60) - a.usedSeconds / (a.minutes * 60)
+  );
+  const ruled = new Set(rules.map((rule) => languageKey(rule.language)));
+  const others: LanguageTodayRow[] = [...watched.entries()]
+    .filter(([key]) => !ruled.has(key))
+    .map(([, row]) => ({ ...row, level: null }))
+    .sort((a, b) => b.usedSeconds - a.usedSeconds);
+  return [...rules, ...others].slice(0, max);
+}
+
 /**
  * Warnings that are new since `shown`, plus what to store next. A level that drops (the limit was raised)
  * is forgotten, so crossing it again warns again.

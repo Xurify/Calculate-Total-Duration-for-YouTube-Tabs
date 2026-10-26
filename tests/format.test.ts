@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   formatDurationWords,
   formatOffset,
+  formatStartsIn,
   formatShortDuration,
   formatTime,
   getVideoIdFromUrl,
@@ -63,6 +64,12 @@ describe("time formatting", () => {
     expect(formatOffset(30)).toBe("next");
     expect(formatOffset(600)).toBe("+10 min");
     expect(formatOffset(5580)).toBe("+1 h 33");
+  });
+
+  test("formatStartsIn", () => {
+    expect(formatStartsIn(30)).toBe("Next");
+    expect(formatStartsIn(600)).toBe("in 10 min");
+    expect(formatStartsIn(5580)).toBe("in 1 h 33");
   });
 });
 

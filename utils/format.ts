@@ -45,6 +45,16 @@ export function formatOffset(totalSeconds: number): string {
   return `+${minutes} min`;
 }
 
+/** When a queued video starts: "Next" under a minute, else "in 10 min" / "in 1 h 33". */
+export function formatStartsIn(totalSeconds: number): string {
+  const total = Math.max(0, Math.floor(totalSeconds));
+  if (total < 60) return "Next";
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (hours > 0) return `in ${hours} h ${minutes.toString().padStart(2, "0")}`;
+  return `in ${minutes} min`;
+}
+
 export function parseTimeParam(url: string): number {
   try {
     const urlObj = new URL(url);

@@ -177,8 +177,8 @@ function reviewCardHtml(now: number): string {
         <span class="min-w-0 flex flex-col"><span class="truncate text-text-primary">${escapeHtml(sentence.videoTitle || sentence.videoId)}</span><span class="text-text-muted tabular-nums">${formatClock(sentence.startSeconds)}${sentence.channelName ? ` · ${escapeHtml(sentence.channelName)}` : ""}</span></span>
       </a>
       <span class="flex-1"></span>
-      <button type="button" class="chip h-9" data-practice-action="again" title="See it again tomorrow, and once more before this sitting ends">Again <kbd>A</kbd></button>
-      <button type="button" class="btn-primary h-9" data-practice-action="good" title="Push it further out: 1, 3, 7, 16, then 35 days">Got it <kbd class="practice-kbd--accent">G</kbd></button>
+      <button type="button" class="practice-grade" data-practice-action="again" title="See it again tomorrow, and once more before this sitting ends">Again <kbd>A</kbd></button>
+      <button type="button" class="practice-grade practice-grade--good" data-practice-action="good" title="Push it further out: 1, 3, 7, 16, then 35 days">Got it <kbd>G</kbd></button>
     </div>
   </section>`;
 }

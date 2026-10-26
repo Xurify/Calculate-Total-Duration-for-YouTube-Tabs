@@ -1261,7 +1261,49 @@ kbd {
   font: 600 10px/1 var(--font-sans);
 }
 
-.practice-card .btn-primary kbd.practice-kbd--accent {
+.practice-grade {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-width: 7.5rem;
+  height: 2.5rem;
+  padding: 0 0.625rem 0 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background-color: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+  font: 600 14px/1 var(--font-sans);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.practice-grade:hover {
+  border-color: var(--color-border-hover);
+  background-color: var(--color-surface-hover);
+}
+
+.practice-grade:active {
+  transform: scale(0.98);
+}
+
+.practice-grade:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.practice-grade--good {
+  border-color: transparent;
+  background-color: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.practice-grade--good:hover {
+  border-color: transparent;
+  background-color: var(--color-accent-hover);
+}
+
+.practice-card .practice-grade--good kbd {
   border-color: transparent;
   background-color: color-mix(in srgb, var(--color-on-accent) 22%, transparent);
   color: var(--color-on-accent);

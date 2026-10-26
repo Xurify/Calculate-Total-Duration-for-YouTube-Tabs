@@ -736,6 +736,7 @@ function showListenCard(state: ListenCheckState, index: number): void {
   card.id = "study-harvester-listen-card";
   card.setAttribute("role", "dialog");
   card.setAttribute("aria-label", "Listen first check");
+  card.setAttribute("aria-live", "polite");
 
   const head = element("div", "sh-listen-head");
   const tallyText = () => {
@@ -852,6 +853,8 @@ function showListenCard(state: ListenCheckState, index: number): void {
 
   getTargetPlayerContainer().appendChild(card);
   requestAnimationFrame(() => card.classList.add("is-shown"));
+  // Focus on the answer lets Tab reach the card's buttons and screen readers announce the question.
+  primaryButton.focus({ preventScroll: true });
 }
 
 interface ClozeCaptureContext {

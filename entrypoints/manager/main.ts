@@ -3097,10 +3097,16 @@ function renderMain() {
 
   if (isPracticeView && practicePanel) {
     if (viewToolbar) viewToolbar.classList.add("hidden");
-    headerTitle.innerText = "sentences in their speakers' voices";
+    headerTitle.innerText = "in the speakers' own voices";
     headerStats.innerText = "";
     lastTabListFingerprint = "";
-    void renderPracticePanel(practicePanel, setDeskHero);
+    void renderPracticePanel(practicePanel, {
+      hero: setDeskHero,
+      stats: (text) => {
+        if (isPracticeView) headerStats.innerText = text;
+      },
+      toast: showToast,
+    });
     return;
   }
 
@@ -3992,12 +3998,12 @@ function handleDeskKeydown(event: KeyboardEvent): void {
     return;
   }
   if (isPracticeView) {
-    if (handlePracticeKeydown(event)) event.preventDefault();
-    else if (event.key === "?") {
+    if (handlePracticeKeydown(event)) {
       event.preventDefault();
-      openShortcutsDialog();
+      return;
     }
-    return;
+    // Desk shortcuts act on video rows, which this page has none of; help and undo still apply.
+    if (event.key !== "?" && event.key !== "z") return;
   }
   switch (event.key) {
     case "?":
@@ -6572,9 +6578,9 @@ function hoursWords(hours: number): string {
 }
 
 function paceWords(row: LanguageHoursRow): string {
-  if (row.next === null) return `Every milestone passed. ${formatMinutesWords(row.dailySeconds)} a day lately.`;
-  const left = `${hoursWords(row.next - row.hours)} to ${row.next} h`;
-  if (row.daysToNext === null) return `${left}. Watch a little each day to see when you'll get there.`;
+  if (row.next === null) return `Every milestone reached. ${formatMinutesWords(row.dailySeconds)} a day lately.`;
+  const left = `${hoursWords(Math.max(0.1, row.next - row.hours))} more to reach ${row.next} h`;
+  if (row.daysToNext === null) return `${left}. Listen a little each day to see when you'll get there.`;
   const when = row.daysToNext <= 1 ? "about a day" : row.daysToNext < 14 ? `about ${row.daysToNext} days` : row.daysToNext < 60 ? `about ${Math.round(row.daysToNext / 7)} weeks` : `about ${Math.round(row.daysToNext / 30)} months`;
   return `${left}, ${when} at ${formatMinutesWords(row.dailySeconds)} a day.`;
 }
@@ -6584,12 +6590,18 @@ function milestoneTrackHtml(row: LanguageHoursRow, color: string): string {
   const steps = MILESTONE_HOURS.length;
   const passed = MILESTONE_HOURS.filter((milestone) => row.hours >= milestone).length;
   const fill = row.next === null ? 100 : ((passed + row.progress) / steps) * 100;
+  const state = (milestone: number) => (row.hours >= milestone ? "reached" : milestone === row.next ? "next" : "");
   const marks = MILESTONE_HOURS.map((milestone, index) => {
-    const reached = row.hours >= milestone;
-    return `<span class="hours-mark${reached ? " hours-mark--reached" : ""}${milestone === row.next ? " hours-mark--next" : ""}" style="left:${((index + 1) / steps) * 100}%"><span class="hours-mark-label">${milestone}</span></span>`;
+    const kind = state(milestone);
+    return `<span class="hours-mark${kind ? ` hours-mark--${kind}` : ""}" style="left:${((index + 1) / steps) * 100}%"></span>`;
   }).join("");
-  return `<div class="hours-track" role="img" aria-label="${escapeHtml(`${hoursWords(row.hours)} of listening. Milestones at ${MILESTONE_HOURS.join(", ")} hours.`)}" style="--hours-color:${color}">
-    <span class="hours-fill" style="width:${fill.toFixed(1)}%"></span>${marks}
+  const labels = MILESTONE_HOURS.map((milestone, index) => {
+    const kind = state(milestone);
+    return `<span${kind ? ` class="is-${kind}"` : ""} style="left:${((index + 1) / steps) * 100}%">${milestone}</span>`;
+  }).join("");
+  return `<div role="img" aria-label="${escapeHtml(`${hoursWords(row.hours)} of listening. Milestones at ${MILESTONE_HOURS.join(", ")} hours.`)}" style="--hours-color:${color}">
+    <div class="hours-track"><span class="hours-fill" style="width:${fill.toFixed(1)}%"></span>${marks}</div>
+    <div class="hours-scale" aria-hidden="true"><span style="left:0">0</span>${labels}</div>
   </div>`;
 }
 
@@ -6601,11 +6613,11 @@ function languageHoursSectionHtml(rows: LanguageHoursRow[], watch: WatchSummary)
       const color = colorOfLanguage(colors, row.language);
       return `<article class="hours-card">
         <header class="flex items-center gap-2 text-sm font-medium text-text-primary">${languageMarkHtml(row.language, color)}<span class="truncate">${escapeHtml(row.language)}</span>
-          ${row.reached > 0 ? `<span class="rule-kind rule-kind--goal ml-auto" title="Last milestone passed">${row.reached} h passed</span>` : ""}
+          ${row.reached > 0 ? `<span class="rule-kind rule-kind--goal ml-auto" title="The last milestone you reached">${row.reached} h reached</span>` : ""}
         </header>
         <div class="flex items-baseline gap-2"><span class="font-display text-[44px] leading-none tabular-nums text-text-primary">${escapeHtml(hoursWords(row.hours))}</span><span class="text-sm text-text-muted">of listening</span></div>
         ${milestoneTrackHtml(row, color === "var(--color-border-hover)" ? "var(--color-accent)" : color)}
-        <p class="text-xs text-text-secondary m-0 mt-3">${escapeHtml(paceWords(row))}</p>
+        <p class="text-xs text-text-secondary m-0">${escapeHtml(paceWords(row))}</p>
         <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-muted">
           <span>${row.earlierHours > 0 ? `Includes ${escapeHtml(hoursWords(row.earlierHours))} from before` : "Counted since Study Harvester was installed"}</span>
           <button type="button" class="hours-edit link-btn whitespace-nowrap" data-language="${escapeHtml(row.language)}">${row.earlierHours > 0 ? "Change" : "Add earlier hours"}</button>
@@ -6620,9 +6632,9 @@ function languageHoursSectionHtml(rows: LanguageHoursRow[], watch: WatchSummary)
     })
     .join("");
   return `<section class="flex flex-col gap-3">
-    ${timeSectionHeading("Hours of listening", `<span class="text-xs text-text-muted">All time · milestones at ${MILESTONE_HOURS.join(", ")} h</span>`, "clock")}
+    ${timeSectionHeading("Hours of listening", `<span class="text-xs text-text-muted">All time</span>`, "clock")}
     <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">${cards}</div>
-    <p class="text-xs text-text-muted m-0">Milestones are rough markers that comprehensible-input learners count by, not levels. Languages with a daily goal show here.</p>
+    <p class="text-xs text-text-muted m-0">Milestones at ${MILESTONE_HOURS.join(", ")} h are rough markers that comprehensible-input learners count by, not levels. Languages with a daily goal show here.</p>
   </section>`;
 }
 

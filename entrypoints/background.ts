@@ -83,7 +83,7 @@ import {
 import { languageOverrideFor, loadLanguageOverrides, type LanguageOverrides } from "../utils/languageOverrides";
 import { archiveEntries, languageHoursRows, loadLanguageHours, saveLanguageHours, setEarlierHours } from "../utils/languageHours";
 import { loadListeningLog, recordCheck, saveListeningLog, summarizeListening, type CheckResult } from "../utils/listening";
-import { addToBank, loadSentenceBank, reviewSentence, saveSentenceBank, type NewBankSentence, type ReviewGrade } from "../utils/sentenceBank";
+import { addToBank, cleanBank, loadSentenceBank, reviewSentence, saveSentenceBank, type NewBankSentence, type ReviewGrade } from "../utils/sentenceBank";
 
 /** Tells every open Mandala tab there is time to take; the tab asks for it and posts it to the page. */
 async function notifyMandalaTabsOfPendingTime(): Promise<void> {
@@ -501,6 +501,21 @@ export default defineBackground(() => {
       void withPracticeStore(async () => {
         const bank = await loadSentenceBank();
         const next = message.action === "bank-delete" ? bank.filter((sentence) => sentence.id !== id) : reviewSentence(bank, id, grade);
+        await saveSentenceBank(next);
+        return next;
+      })
+        .then((bank) => sendResponse({ success: true, bank }))
+        .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "bank-restore") {
+      if (!isExtensionPageSender(sender)) return;
+      const [restored] = cleanBank([message.sentence]);
+      if (!restored) return;
+      void withPracticeStore(async () => {
+        const bank = await loadSentenceBank();
+        const next = bank.some((sentence) => sentence.id === restored.id) ? bank : [...bank, restored];
         await saveSentenceBank(next);
         return next;
       })

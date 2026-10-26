@@ -14,7 +14,11 @@ interface PracticeResponse {
   errorMessage?: string;
 }
 
-type Hero = (options: { kicker: string; title: string; value: string; suffix: string }) => void;
+export interface PracticeHost {
+  hero: (options: { kicker: string; title: string; value: string; suffix: string }) => void;
+  stats: (text: string) => void;
+  toast: (message: string, action?: { label: string; run: () => void | Promise<void> }) => void;
+}
 
 const LIST_PAGE = 30;
 const RECENT_VIDEOS = 8;
@@ -30,8 +34,22 @@ let playing: { id: string; timer: number } | null = null;
 let clipMessage: { id: string; text: string } | null = null;
 let listShown = LIST_PAGE;
 let panelRef: HTMLElement | null = null;
-let heroRef: Hero | null = null;
+let host: PracticeHost | null = null;
 let wired = false;
+
+const ICONS = {
+  ear: `<path d="M6 8.5a6.5 6.5 0 1 1 13 0c0 6-6 6-6 10a3.5 3.5 0 1 1-7 0"/><path d="M15 8.5a2.5 2.5 0 0 0-5 0v1a2 2 0 1 1 0 4"/>`,
+  list: `<path d="M12 12H3M16 6H3M12 18H3"/><path d="m16 12 5 3-5 3v-6z"/>`,
+  eyeOff: `<path d="M10.7 5.1A10.4 10.4 0 0 1 12 5c7 0 10 7 10 7a13 13 0 0 1-1.7 2.7"/><path d="M6.6 6.6A13.5 13.5 0 0 0 2 12s3 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 1 0 4.2 4.2"/><path d="m2 2 20 20"/>`,
+};
+
+function iconHtml(name: keyof typeof ICONS, size: number, className = ""): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 ${className}" aria-hidden="true">${ICONS[name]}</svg>`;
+}
+
+function sectionHeading(title: string, icon: keyof typeof ICONS, extra = ""): string {
+  return `<div class="flex items-center gap-3 flex-wrap"><h2 class="font-display text-[22px] font-medium m-0 flex-1 flex items-center gap-2">${iconHtml(icon, 18, "text-text-muted")}${escapeHtml(title)}</h2>${extra}</div>`;
+}
 
 function formatClock(totalSeconds: number): string {
   const seconds = Math.max(0, Math.floor(totalSeconds));
@@ -65,7 +83,7 @@ function languageHtml(language: string): string {
 }
 
 function sourceWords(sentence: BankSentence): string {
-  return sentence.source === "cloze" ? "Cloze card" : "Missed by ear";
+  return sentence.source === "cloze" ? "Cloze card" : "Listen first";
 }
 
 function dueWords(sentence: BankSentence, now: number): string {
@@ -95,7 +113,8 @@ function currentSentence(): BankSentence | null {
 
 function playButtonHtml(sentence: BankSentence, className: string, label: string): string {
   const isPlaying = playing?.id === sentence.id;
-  return `<button type="button" class="${className}${isPlaying ? " is-playing" : ""}" data-practice-action="play" data-id="${escapeHtml(sentence.id)}" aria-label="${isPlaying ? "Playing" : label}" title="${isPlaying ? "Playing" : label}">
+  const words = isPlaying ? "Playing" : label;
+  return `<button type="button" class="${className}${isPlaying ? " is-playing" : ""}" data-practice-action="play" data-id="${escapeHtml(sentence.id)}" aria-label="${escapeHtml(words)}" title="${escapeHtml(words)}">
     ${
       isPlaying
         ? `<span class="practice-bars" aria-hidden="true"><span></span><span></span><span></span></span>`
@@ -124,7 +143,10 @@ function reviewCardHtml(now: number): string {
   }
 
   const message = clipMessage?.id === sentence.id ? clipMessage.text : "";
-  const status = playing?.id === sentence.id ? "Playing in YouTube…" : message || (playedThisSession ? "Space plays it again" : "Plays the original moment in a small YouTube window");
+  const status =
+    playing?.id === sentence.id
+      ? "Playing in YouTube…"
+      : message || (playedThisSession ? "Press Space to hear it again" : "Press Space to play. It opens in a small YouTube window.");
   const translation = sentence.translation ? `<p class="practice-translation">${escapeHtml(sentence.translation)}</p>` : "";
   return `<section class="practice-card" aria-label="Review">
     <div class="flex items-center gap-3 text-xs text-text-muted">
@@ -135,16 +157,16 @@ function reviewCardHtml(now: number): string {
       <span class="practice-source practice-source--${sentence.source}">${sourceWords(sentence)}</span>
     </div>
     <div class="practice-stage">
-      <div class="flex flex-col items-center gap-2 shrink-0">
-        ${playButtonHtml(sentence, "practice-play", "Play the sentence")}
-        <kbd class="practice-kbd">Space</kbd>
-      </div>
+      ${playButtonHtml(sentence, "practice-play", "Play the sentence (Space)")}
       <div class="min-w-0 flex-1 flex flex-col gap-2">
         ${
           revealed
             ? `<p class="practice-text">${sentenceTextHtml(sentence)}</p>${translation}`
-            : `<div class="practice-veil" aria-label="Text hidden"><span></span><span></span><span></span></div>
-               <p class="text-sm text-text-secondary m-0">Listen first, then say it to yourself. Show the text when you're ready.</p>`
+            : `<button type="button" class="practice-hidden" data-practice-action="reveal">
+                 ${iconHtml("eyeOff", 18)}
+                 <span class="flex-1 text-left"><span class="block text-sm font-medium text-text-primary">Text hidden</span><span class="block text-xs text-text-muted">Listen, say it to yourself, then show the text.</span></span>
+                 <span class="practice-hidden-cta">Show text <kbd>T</kbd></span>
+               </button>`
         }
         <p class="text-xs m-0 ${message ? "text-danger" : "text-text-muted"}" role="status">${escapeHtml(status)}</p>
       </div>
@@ -155,7 +177,6 @@ function reviewCardHtml(now: number): string {
         <span class="min-w-0 flex flex-col"><span class="truncate text-text-primary">${escapeHtml(sentence.videoTitle || sentence.videoId)}</span><span class="text-text-muted tabular-nums">${formatClock(sentence.startSeconds)}${sentence.channelName ? ` · ${escapeHtml(sentence.channelName)}` : ""}</span></span>
       </a>
       <span class="flex-1"></span>
-      ${revealed ? "" : `<button type="button" class="chip h-9" data-practice-action="reveal">Show text <kbd>T</kbd></button>`}
       <button type="button" class="chip h-9" data-practice-action="again" title="See it again tomorrow, and once more before this sitting ends">Again <kbd>A</kbd></button>
       <button type="button" class="btn-primary h-9" data-practice-action="good" title="Push it further out: 1, 3, 7, 16, then 35 days">Got it <kbd class="practice-kbd--accent">G</kbd></button>
     </div>
@@ -171,12 +192,15 @@ function listeningBarHtml(totals: ListeningTotals, className = "h-2"): string {
 
 function listeningSectionHtml(): string {
   const listening = data?.listening;
-  const heading = `<div class="flex items-center gap-3 flex-wrap"><h2 class="font-display text-[22px] font-medium m-0 flex-1">Listen first</h2>
-    <span class="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-text-muted">
+  const heading = sectionHeading(
+    "Listen first",
+    "ear",
+    `<span class="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-text-muted">
       <span class="flex items-center gap-1.5"><span class="legend-swatch listen-seg--caught"></span>Caught by ear</span>
       <span class="flex items-center gap-1.5"><span class="legend-swatch listen-seg--read"></span>After reading</span>
       <span class="flex items-center gap-1.5"><span class="legend-swatch listen-seg--missed"></span>Missed</span>
-    </span></div>`;
+    </span>`
+  );
   if (!listening || listening.videos.length === 0) {
     return `<section class="flex flex-col gap-3">${heading}
       <p class="text-sm text-text-secondary m-0 max-w-[70ch]">On a YouTube video with captions, press <kbd>E</kbd> or the ear button. Captions hide, the video stops after each bit of speech, and you say whether you caught it. What you catch by ear shows up here, per language and per video.</p>
@@ -219,7 +243,7 @@ function sentenceListHtml(now: number): string {
     .slice(0, listShown)
     .map(
       (sentence) => `<li class="practice-row">
-        ${playButtonHtml(sentence, "practice-row-play", "Play")}
+        ${playButtonHtml(sentence, "practice-row-play", `Play “${sentence.text}”`)}
         <span class="min-w-0 flex flex-col gap-0.5">
           <span class="text-sm text-text-primary">${sentenceTextHtml(sentence)}</span>
           <span class="text-xs text-text-muted truncate">${escapeHtml([sentence.language, sentence.videoTitle, formatClock(sentence.startSeconds), sourceWords(sentence)].filter(Boolean).join(" · "))}</span>
@@ -234,7 +258,7 @@ function sentenceListHtml(now: number): string {
     .join("");
   const more = Math.min(LIST_PAGE, sorted.length - listShown);
   return `<section class="flex flex-col gap-3 pb-6">
-    <div class="flex items-center gap-3"><h2 class="font-display text-[22px] font-medium m-0 flex-1">Saved sentences</h2><span class="text-xs text-text-muted tabular-nums">${sorted.length}</span></div>
+    ${sectionHeading("Saved sentences", "list", `<span class="text-xs text-text-muted tabular-nums">${sorted.length}</span>`)}
     <ul class="m-0 p-0 list-none flex flex-col">${rows}</ul>
     ${more > 0 ? `<button type="button" class="chip h-8 text-xs self-start" data-practice-action="more">Show ${more} more</button>` : ""}
   </section>`;
@@ -245,7 +269,14 @@ function paint(): void {
   if (!panel || !data) return;
   const now = Date.now();
   const due = queue.length;
-  heroRef?.({ kicker: "Practice", title: "", value: due > 0 ? String(due) : "No", suffix: due === 1 ? "sentence to review" : "sentences to review" });
+  host?.hero({ kicker: "Practice", title: "", value: due > 0 ? String(due) : "No", suffix: due === 1 ? "sentence to review" : "sentences to review" });
+  const learned = data.bank.filter(isLearned).length;
+  const checks = data.listening.byLanguage.reduce((sum, row) => sum + checkCount(row), 0);
+  host?.stats(
+    data.bank.length === 0 && checks === 0
+      ? ""
+      : [plural(data.bank.length, "sentence") + " saved", `${learned} learned`, checks > 0 ? `${plural(checks, "listening check")}` : ""].filter(Boolean).join(" · ")
+  );
   const focusedAction = (document.activeElement as HTMLElement | null)?.dataset?.practiceAction;
   panel.innerHTML = `${reviewCardHtml(now)}${listeningSectionHtml()}${sentenceListHtml(now)}`;
   panel.setAttribute("aria-busy", "false");
@@ -306,10 +337,23 @@ async function grade(gradeValue: ReviewGrade): Promise<void> {
 
 async function remove(id: string): Promise<void> {
   if (!data) return;
+  const removed = data.bank.find((sentence) => sentence.id === id);
+  const queuePosition = queue.indexOf(id);
   const response = (await browser.runtime.sendMessage({ action: "bank-delete", id })) as { bank?: BankSentence[] } | undefined;
   if (response?.bank) data.bank = response.bank;
   queue = queue.filter((queued) => queued !== id);
   paint();
+  if (!removed) return;
+  host?.toast("Sentence deleted", {
+    label: "Undo",
+    run: async () => {
+      const restored = (await browser.runtime.sendMessage({ action: "bank-restore", sentence: removed })) as { bank?: BankSentence[] } | undefined;
+      if (!data || !restored?.bank) return;
+      data.bank = restored.bank;
+      if (queuePosition !== -1 && !queue.includes(id)) queue.splice(Math.min(queuePosition, queue.length), 0, id);
+      paint();
+    },
+  });
 }
 
 function reveal(): void {
@@ -337,9 +381,9 @@ function wire(panel: HTMLElement): void {
   });
 }
 
-export async function renderPracticePanel(panel: HTMLElement, hero: Hero): Promise<void> {
+export async function renderPracticePanel(panel: HTMLElement, practiceHost: PracticeHost): Promise<void> {
   panelRef = panel;
-  heroRef = hero;
+  host = practiceHost;
   wire(panel);
   if (!data) panel.setAttribute("aria-busy", "true");
   let response: PracticeResponse | undefined;

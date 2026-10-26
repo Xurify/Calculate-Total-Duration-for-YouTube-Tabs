@@ -70,8 +70,34 @@ import {
   type LanguageLimitUsage,
   type LimitWarning,
 } from "../utils/languageLimits";
-import { cleanWatchSample, loadWatchLog, recordWatchSample, saveWatchLog, summarizeWatch, type WatchEntry, type WatchSample } from "../utils/watchLog";
-import { loadLanguageOverrides } from "../utils/languageOverrides";
+import {
+  cleanWatchSample,
+  languageLabelOf,
+  loadWatchLog,
+  recordWatchSample,
+  saveWatchLog,
+  summarizeWatch,
+  trimWatchLog,
+  type WatchEntry,
+  type WatchSample,
+} from "../utils/watchLog";
+import { languageOverrideFor, loadLanguageOverrides, type LanguageOverrides } from "../utils/languageOverrides";
+import { archiveEntries, languageHoursRows, loadLanguageHours, saveLanguageHours, setEarlierHours } from "../utils/languageHours";
+import { loadListeningLog, recordCheck, saveListeningLog, summarizeListening, type CheckResult } from "../utils/listening";
+import {
+  addToBank,
+  cleanBank,
+  editSentences,
+  loadSentenceBank,
+  markInClozemaster,
+  reviewSentence,
+  saveSentenceBank,
+  type NewBankSentence,
+  type ReviewGrade,
+  type SentenceEdit,
+} from "../utils/sentenceBank";
+import { clozemasterCard, DEFAULT_COLLECTION_NAME, sentenceLanguageCode } from "../utils/clozemasterExport";
+import { MAX_CARDS_PER_CALL } from "../utils/clozemasterTools";
 
 /** Tells every open Mandala tab there is time to take; the tab asks for it and posts it to the page. */
 async function notifyMandalaTabsOfPendingTime(): Promise<void> {
@@ -101,7 +127,7 @@ async function recordWatch(sample: WatchSample): Promise<{ limitWarnings: LimitW
   if (!prefs.watchHistory) return { limitWarnings: [], recommendations: [] };
   const { usage, limits, overrides, log } = await withWatchLog(async (log) => {
     recordWatchSample(log, sample);
-    await saveWatchLog(log);
+    await persistWatchLog(log);
     const limits = await loadLanguageLimits();
     const overrides = await loadLanguageOverrides();
     return { usage: limits.length > 0 ? limitUsage(limits, log, Date.now(), overrides) : [], limits, overrides, log: [...log] };
@@ -110,6 +136,121 @@ async function recordWatch(sample: WatchSample): Promise<{ limitWarnings: LimitW
   const limitWarnings = await takeLimitWarnings(usage);
   const over = limitWarnings.find((warning) => warning.level === "over");
   return { limitWarnings, recommendations: over ? recommendInstead(log, limits, over.language, Date.now(), overrides) : [] };
+}
+
+/** Time in entries the trim drops is kept per language, so lifetime hours do not shrink after a year. */
+async function persistWatchLog(log: WatchEntry[]): Promise<void> {
+  const kept = trimWatchLog(log);
+  if (kept.length < log.length) {
+    const keptIds = new Set(kept.map((entry) => entry.id));
+    const dropped = log.filter((entry) => !keptIds.has(entry.id));
+    await saveLanguageHours(archiveEntries(await loadLanguageHours(), dropped));
+    log.splice(0, log.length, ...kept);
+  }
+  await saveWatchLog(log);
+}
+
+let practiceQueue: Promise<unknown> = Promise.resolve();
+
+function withPracticeStore<T>(work: () => Promise<T>): Promise<T> {
+  const run = practiceQueue.then(work);
+  practiceQueue = run.catch((error) => console.warn("[Study Harvester] practice:", error));
+  return run;
+}
+
+function videoLanguageLabel(overrides: LanguageOverrides, videoId: string, channelName: string, code: unknown, name: unknown): string {
+  const override = languageOverrideFor(overrides, videoId, channelName);
+  if (override) return override.name;
+  return languageLabelOf(typeof name === "string" ? name : null, typeof code === "string" ? code : null);
+}
+
+function cleanNewSentence(raw: unknown, language: string, code: unknown): NewBankSentence | null {
+  const sentence = raw as Partial<NewBankSentence> | null;
+  if (!sentence || typeof sentence.text !== "string" || !sentence.text.trim() || typeof sentence.videoId !== "string") return null;
+  if (typeof sentence.startSeconds !== "number" || typeof sentence.endSeconds !== "number" || sentence.endSeconds <= sentence.startSeconds) return null;
+  const text = (value: unknown, max: number) => (typeof value === "string" ? value.trim().slice(0, max) : "");
+  return {
+    text: text(sentence.text, 1000),
+    clozeWord: text(sentence.clozeWord, 100) || null,
+    translation: text(sentence.translation, 500),
+    language,
+    languageCode: typeof code === "string" && /^[a-z]{2,3}(?:-[a-z0-9]+)*$/i.test(code) ? code : null,
+    videoId: sentence.videoId,
+    videoTitle: text(sentence.videoTitle, 300),
+    channelName: text(sentence.channelName, 200),
+    startSeconds: sentence.startSeconds,
+    endSeconds: sentence.endSeconds,
+    source: sentence.source === "cloze" ? "cloze" : "listening",
+  };
+}
+
+async function addSentenceToBank(raw: unknown, code: unknown, name: unknown): Promise<boolean> {
+  const overrides = await loadLanguageOverrides();
+  const partial = raw as Partial<NewBankSentence> | null;
+  const language = videoLanguageLabel(overrides, String(partial?.videoId ?? ""), String(partial?.channelName ?? ""), code, name);
+  const sentence = cleanNewSentence(raw, language, code);
+  if (!sentence) return false;
+  return withPracticeStore(async () => {
+    const result = addToBank(await loadSentenceBank(), sentence);
+    await saveSentenceBank(result.bank);
+    return result.added;
+  });
+}
+
+const CLIP_MESSAGE_ATTEMPTS = 30;
+const CLIP_RETRY_MS = 500;
+let clipWindowId: number | null = null;
+
+async function sendClipToTab(tabId: number, clip: { videoId: string; startSeconds: number; endSeconds: number }): Promise<{ success: boolean; errorMessage?: string }> {
+  let last: { success: boolean; errorMessage?: string } = { success: false, errorMessage: "YouTube did not answer." };
+  for (let attempt = 0; attempt < CLIP_MESSAGE_ATTEMPTS; attempt++) {
+    try {
+      const response = (await browser.tabs.sendMessage(tabId, { action: "play-clip", ...clip })) as { success: boolean; errorMessage?: string } | undefined;
+      if (response?.success) return response;
+      if (response) last = response;
+      // A tab still on its previous video answers "another video" until the new page takes over.
+      if (response && response.errorMessage !== "This tab shows another video.") return response;
+    } catch {
+      // The content script is not there yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, CLIP_RETRY_MS));
+  }
+  return last;
+}
+
+/**
+ * Plays a saved sentence with the speaker's own voice. A tab that already shows the video is used; otherwise a
+ * small player window, kept for the next clip. Chrome does not load media in a tab that has never been shown,
+ * so a hidden background tab would stay silent.
+ */
+async function playClip(clip: { videoId: string; startSeconds: number; endSeconds: number }): Promise<{ success: boolean; errorMessage?: string }> {
+  const url = `https://www.youtube.com/watch?v=${encodeURIComponent(clip.videoId)}&t=${Math.floor(clip.startSeconds)}s`;
+  const open = await browser.tabs.query({ url: ["*://*.youtube.com/watch*"] });
+  const showing = open.find((tab) => tab.id !== undefined && !tab.discarded && tab.windowId !== clipWindowId && getVideoIdFromUrl(tab.url ?? "") === clip.videoId);
+  if (showing?.id !== undefined) {
+    const result = await sendClipToTab(showing.id, clip);
+    if (result.success) return result;
+  }
+  let tabId: number | undefined;
+  if (clipWindowId !== null) {
+    try {
+      const window = await browser.windows.get(clipWindowId, { populate: true });
+      const tab = window.tabs?.[0];
+      if (tab?.id !== undefined) {
+        tabId = tab.id;
+        if (getVideoIdFromUrl(tab.url ?? "") !== clip.videoId) await browser.tabs.update(tab.id, { url });
+      }
+    } catch {
+      clipWindowId = null;
+    }
+  }
+  if (tabId === undefined) {
+    const window = await browser.windows.create({ url, type: "popup", width: 560, height: 360, focused: false });
+    clipWindowId = window?.id ?? null;
+    tabId = window?.tabs?.[0]?.id;
+  }
+  if (tabId === undefined) return { success: false, errorMessage: "Could not open a YouTube player." };
+  return sendClipToTab(tabId, clip);
 }
 
 const avatarTried = new Set<string>();
@@ -197,7 +338,7 @@ async function fillMissingWatchLanguages(log: WatchEntry[]): Promise<void> {
     entry.languageName = namesByCode.get(normalizeLanguageCode(detected.language)) ?? detected.languageName;
     changed = true;
   }
-  if (changed) await saveWatchLog(log);
+  if (changed) await persistWatchLog(log);
 }
 
 const BATCH_FLUSH_MS = 80;
@@ -308,14 +449,16 @@ export default defineBackground(() => {
         getLiveTabSections(),
         loadChannelAvatars(),
         loadLanguageLimits(),
+        loadLanguageHours(),
       ])
-        .then(([entries, watchEntries, overrides, prefs, rules, mandala, piles, avatars, limits]) => {
+        .then(([entries, watchEntries, overrides, prefs, rules, mandala, piles, avatars, limits, hoursStore]) => {
           const watch = summarizeWatch(watchEntries, days, Date.now(), overrides, avatars);
           sendResponse({
             summary: summarize(entries, days),
             watch,
             limits: limitUsage(limits, watchEntries, Date.now(), overrides),
             streaks: goalStreaks(watchEntries, limits, Date.now(), overrides),
+            hours: languageHoursRows(watchEntries, hoursStore, limits, Date.now(), overrides),
             prefs,
             rules,
             mandala,
@@ -348,6 +491,129 @@ export default defineBackground(() => {
       }
       void recordWatch(sample)
         .then((result) => sendResponse({ success: true, ...result }))
+        .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "listening-check") {
+      const result = message.result as CheckResult;
+      const video = message.video as { videoId?: unknown; title?: unknown; channelName?: unknown; language?: unknown; languageName?: unknown } | undefined;
+      if (!video || typeof video.videoId !== "string" || !["caught", "read", "missed"].includes(result)) {
+        sendResponse({ success: false });
+        return;
+      }
+      const videoId = video.videoId;
+      const title = typeof video.title === "string" ? video.title.slice(0, 300) : "";
+      const channelName = typeof video.channelName === "string" ? video.channelName.slice(0, 200) : "";
+      void loadLanguageOverrides()
+        .then(async (overrides) => {
+          const language = videoLanguageLabel(overrides, videoId, channelName, video.language, video.languageName);
+          await withPracticeStore(async () => saveListeningLog(recordCheck(await loadListeningLog(), { videoId, title, channelName, language }, result)));
+          const added = message.sentence ? await addSentenceToBank(message.sentence, video.language, video.languageName) : false;
+          sendResponse({ success: true, added });
+        })
+        .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "bank-add") {
+      void addSentenceToBank(message.sentence, message.languageCode, message.languageName)
+        .then((added) => sendResponse({ success: true, added }))
+        .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "get-practice") {
+      if (!isExtensionPageSender(sender)) return;
+      void Promise.all([loadSentenceBank(), loadListeningLog()])
+        .then(([bank, listening]) => sendResponse({ bank, listening: summarizeListening(listening) }))
+        .catch((error) => sendResponse({ errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "bank-review" || message.action === "bank-delete") {
+      if (!isExtensionPageSender(sender) || typeof message.id !== "string") return;
+      const id = message.id;
+      const grade: ReviewGrade = message.grade === "again" ? "again" : "good";
+      void withPracticeStore(async () => {
+        const bank = await loadSentenceBank();
+        const next = message.action === "bank-delete" ? bank.filter((sentence) => sentence.id !== id) : reviewSentence(bank, id, grade);
+        await saveSentenceBank(next);
+        return next;
+      })
+        .then((bank) => sendResponse({ success: true, bank }))
+        .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "bank-restore") {
+      if (!isExtensionPageSender(sender)) return;
+      const [restored] = cleanBank([message.sentence]);
+      if (!restored) return;
+      void withPracticeStore(async () => {
+        const bank = await loadSentenceBank();
+        const next = bank.some((sentence) => sentence.id === restored.id) ? bank : [...bank, restored];
+        await saveSentenceBank(next);
+        return next;
+      })
+        .then((bank) => sendResponse({ success: true, bank }))
+        .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "bank-edit") {
+      if (!isExtensionPageSender(sender)) return;
+      const edits = cleanEdits(message.edits);
+      void withPracticeStore(async () => {
+        const next = editSentences(await loadSentenceBank(), edits);
+        await saveSentenceBank(next);
+        return next;
+      })
+        .then((bank) => sendResponse({ success: true, bank }))
+        .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "clozemaster-pairs") {
+      if (!isExtensionPageSender(sender)) return;
+      void visitedClozemasterPairs()
+        .then((pairs) => sendResponse({ pairs }))
+        .catch(() => sendResponse({ pairs: [] }));
+      return true;
+    }
+
+    if (message.action === "clozemaster-send") {
+      if (!isExtensionPageSender(sender)) return;
+      void sendBankToClozemaster(message, sender)
+        .then(sendResponse)
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            reason: error instanceof ClozemasterRemoteError ? error.reason : "request_failed",
+            errorMessage: error instanceof Error ? error.message : String(error),
+            ...(error instanceof ClozemasterRemoteError ? error.details : {}),
+          })
+        );
+      return true;
+    }
+
+    if (message.action === "play-clip") {
+      if (!isExtensionPageSender(sender) || typeof message.videoId !== "string") return;
+      const startSeconds = Number(message.startSeconds);
+      const endSeconds = Number(message.endSeconds);
+      if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) || endSeconds <= startSeconds) return;
+      void playClip({ videoId: message.videoId, startSeconds, endSeconds })
+        .then(sendResponse)
+        .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "set-earlier-hours") {
+      if (!isExtensionPageSender(sender) || typeof message.language !== "string") return;
+      const language = message.language;
+      void loadLanguageHours()
+        .then((store) => saveLanguageHours(setEarlierHours(store, language, Number(message.hours))))
+        .then(() => sendResponse({ success: true }))
         .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
       return true;
     }
@@ -395,6 +661,8 @@ export default defineBackground(() => {
         withWatchLog(async (log) => {
           log.length = 0;
           await saveWatchLog(log);
+          const hours = await loadLanguageHours();
+          await saveLanguageHours({ ...hours, archived: {} });
         }),
       ])
         .then(() => sendResponse({ success: true }))
@@ -1200,6 +1468,75 @@ async function handleClozemasterRemote(message: ClozemasterRemoteMessage, sender
   } finally {
     if (opened) void browser.tabs.remove(tabId).catch(() => {});
   }
+}
+
+function cleanEdits(raw: unknown): SentenceEdit[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((edit): edit is SentenceEdit => Boolean(edit) && typeof edit.id === "string")
+    .map((edit) => ({
+      id: edit.id,
+      clozeWord: typeof edit.clozeWord === "string" ? edit.clozeWord.slice(0, 100) : undefined,
+      translation: typeof edit.translation === "string" ? edit.translation.slice(0, 500) : undefined,
+    }));
+}
+
+interface ClozemasterSendResult {
+  success?: boolean;
+  reason?: string;
+  errorMessage?: string;
+  instruction?: string;
+  collection?: { name: string; playUrl: string | null };
+  results?: Array<{ index: number; added: boolean; error?: string }>;
+}
+
+/**
+ * Adds saved sentences to a collection for one language pair. The cards are built here from the
+ * stored text, so the page only chooses the blank and the translation.
+ */
+async function sendBankToClozemaster(message: Record<string, unknown>, sender: Browser.runtime.MessageSender) {
+  const languagePair = typeof message.languagePair === "string" ? message.languagePair : "";
+  const collectionName = (typeof message.collectionName === "string" ? message.collectionName.trim().slice(0, 100) : "") || DEFAULT_COLLECTION_NAME;
+  const edits = cleanEdits(message.items).filter((edit) => edit.clozeWord && edit.translation);
+  // Saved first, so the translations typed in stay even when Clozemaster can't be reached.
+  const bank = await withPracticeStore(async () => {
+    const next = editSentences(await loadSentenceBank(), edits);
+    await saveSentenceBank(next);
+    return next;
+  });
+  const chosen = edits
+    .map((edit) => bank.find((sentence) => sentence.id === edit.id))
+    .filter((sentence): sentence is NonNullable<typeof sentence> => Boolean(sentence));
+  if (chosen.length === 0) return { success: false, reason: "invalid_input", errorMessage: "Pick at least one sentence with a translation." };
+
+  const added: string[] = [];
+  const failed: Array<{ id: string; error: string }> = [];
+  let collection: ClozemasterSendResult["collection"];
+  for (let start = 0; start < chosen.length; start += MAX_CARDS_PER_CALL) {
+    const batch = chosen.slice(start, start + MAX_CARDS_PER_CALL);
+    const cards = batch.map((sentence) => clozemasterCard(sentence, sentence.clozeWord ?? "", sentence.translation, sentenceLanguageCode(sentence)));
+    const result = (await handleClozemasterRemote({ op: "add", payload: { languagePair, collectionName, cards } }, sender)) as ClozemasterSendResult;
+    if (!result.results) {
+      // Nothing was attempted: signed out, no Pro, or no Clozemaster tab. Keep what was sent so far.
+      if (added.length === 0) return { ...result, success: false, bank };
+      break;
+    }
+    collection = result.collection ?? collection;
+    for (const row of result.results) {
+      const sentence = batch[row.index];
+      if (!sentence) continue;
+      if (row.added) added.push(sentence.id);
+      else failed.push({ id: sentence.id, error: row.error ?? "Not added." });
+    }
+  }
+
+  const next = await withPracticeStore(async () => {
+    const marked = markInClozemaster(await loadSentenceBank(), added, collection?.name ?? collectionName);
+    await saveSentenceBank(marked);
+    return marked;
+  });
+  const playUrl = collection?.playUrl ? new URL(collection.playUrl, "https://www.clozemaster.com").href : null;
+  return { success: added.length > 0, bank: next, addedCount: added.length, failed, collection: { name: collection?.name ?? collectionName, playUrl } };
 }
 
 async function handleCheckMandalaStatus(rawUrl: string): Promise<MandalaStatus> {

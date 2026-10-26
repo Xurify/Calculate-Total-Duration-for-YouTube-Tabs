@@ -45,6 +45,8 @@ import { actionSelectOptions, formatMinutesWords, pillarChoices, pillarSelectOpt
 import type { WatchSummary, WatchVideoRow } from "../../utils/watchLog";
 import { isGoal, languageKey, MAX_LIMIT_MINUTES, ruleKey, type LanguageLimit, type LanguageLimitUsage } from "../../utils/languageLimits";
 import { CALENDAR_WEEKS, type GoalStreaks } from "../../utils/goals";
+import { MILESTONE_HOURS, type LanguageHoursRow } from "../../utils/languageHours";
+import { handlePracticeKeydown, refreshPracticeBadge, renderPracticePanel } from "./practice";
 import { CSV_COLUMNS, DEFAULT_CSV_COLUMNS, type CsvColumn } from "../../utils/watchCsv";
 import { CHANNEL_AVATARS_KEY, loadChannelAvatars, type ChannelAvatars } from "../../utils/channelAvatars";
 import { installDialogs, installTooltips, stepperHtml, wireCombobox, wireSteppers } from "../../utils/controls";
@@ -87,6 +89,7 @@ let isReadingListView = false;
 /** Top-nav "Saved sessions" view: lists sessions instead of the board. */
 let isSessionsView = false;
 let isTimeView = false;
+let isPracticeView = false;
 let savedSessionsCount = 0;
 let readingListItems: ReadingListItem[] = [];
 let selectedPlaybackSpeed = 1.0;
@@ -2223,17 +2226,18 @@ function renderSidebar() {
 
 function syncTopNavState(): void {
   const states: [string, boolean][] = [
-    ["nav-desk", !isReadingListView && !isSessionsView && !isTimeView && selectedSession == null],
+    ["nav-desk", !isReadingListView && !isSessionsView && !isTimeView && !isPracticeView && selectedSession == null],
     ["nav-reading-list", isReadingListView],
     ["nav-sessions", isSessionsView || selectedSession != null],
     ["nav-time", isTimeView],
+    ["nav-practice", isPracticeView],
   ];
   for (const [id, active] of states) {
     const element = document.getElementById(id);
     element?.classList.toggle("bg-surface-hover", active);
     element?.classList.toggle("text-text-primary", active);
   }
-  document.getElementById("windows-block")?.classList.toggle("hidden", isReadingListView || isSessionsView || isTimeView || selectedSession != null);
+  document.getElementById("windows-block")?.classList.toggle("hidden", isReadingListView || isSessionsView || isTimeView || isPracticeView || selectedSession != null);
 }
 
 function setDeskHero(options: { kicker: string; title: string; value: string; suffix: string }): void {
@@ -3029,12 +3033,12 @@ function renderMain() {
   const viewToolbar = document.getElementById("view-toolbar");
 
   syncTopNavState();
-  if (!isReadingListView && !isSessionsView && !isTimeView) pruneStaleFacets();
+  if (!isReadingListView && !isSessionsView && !isTimeView && !isPracticeView) pruneStaleFacets();
   renderFacetRail();
   renderTimeBar();
   renderFacetCrumb();
   renderPlanner();
-  container.classList.toggle("hidden", isSessionsView || isTimeView);
+  container.classList.toggle("hidden", isSessionsView || isTimeView || isPracticeView);
 
   const sessionsPanel = document.getElementById("sessions-panel");
   sessionsPanel?.classList.toggle("hidden", !isSessionsView);
@@ -3043,7 +3047,26 @@ function renderMain() {
   const timePanel = document.getElementById("time-panel");
   timePanel?.classList.toggle("hidden", !isTimeView);
   timePanel?.classList.toggle("flex", isTimeView);
-  document.getElementById("time-bar-skeleton")?.classList.toggle("hidden", isTimeView);
+  document.getElementById("time-bar-skeleton")?.classList.toggle("hidden", isTimeView || isPracticeView);
+
+  const practicePanel = document.getElementById("practice-panel");
+  practicePanel?.classList.toggle("hidden", !isPracticeView);
+  practicePanel?.classList.toggle("flex", isPracticeView);
+
+  if (isPracticeView && practicePanel) {
+    if (viewToolbar) viewToolbar.classList.add("hidden");
+    headerTitle.innerText = "in the speakers' own voices";
+    headerStats.innerText = "";
+    lastTabListFingerprint = "";
+    void renderPracticePanel(practicePanel, {
+      hero: setDeskHero,
+      stats: (text) => {
+        if (isPracticeView) headerStats.innerText = text;
+      },
+      toast: showToast,
+    });
+    return;
+  }
 
   if (isTimeView) {
     if (viewToolbar) viewToolbar.classList.add("hidden");
@@ -3482,7 +3505,7 @@ let lastFacetRailHtml = "";
 function renderFacetRail(): void {
   const rail = document.getElementById("facet-rail");
   if (!rail) return;
-  const live = !isReadingListView && !isSessionsView && !isTimeView && selectedSession == null;
+  const live = !isReadingListView && !isSessionsView && !isTimeView && !isPracticeView && selectedSession == null;
   const session = selectedSession != null && !isSessionsView && !isReadingListView;
   rail.classList.toggle("hidden", !live && !session);
   if (!live && !session) return;
@@ -3526,7 +3549,7 @@ function saveDeskSnapshot(): void {
 
 function writeDeskSnapshot(): void {
   deskSnapshotTimeout = null;
-  if (hasAnyFacet() || currentWindowId !== "all" || searchQuery || selectedSession || isReadingListView || isSessionsView || isTimeView) return;
+  if (hasAnyFacet() || currentWindowId !== "all" || searchQuery || selectedSession || isReadingListView || isSessionsView || isTimeView || isPracticeView) return;
   const html = (id: string) => document.getElementById(id)?.innerHTML ?? "";
   const text = (id: string) => document.getElementById(id)?.textContent ?? "";
   const visible = (id: string) => !document.getElementById(id)?.classList.contains("hidden");
@@ -3588,7 +3611,7 @@ function renderTimeBar(): void {
   const bar = document.getElementById("time-bar");
   const rest = document.getElementById("time-bar-rest");
   if (!bar) return;
-  const live = !isReadingListView && !isSessionsView && !isTimeView && selectedSession == null;
+  const live = !isReadingListView && !isSessionsView && !isTimeView && !isPracticeView && selectedSession == null;
   const session = selectedSession != null && !isSessionsView && !isReadingListView;
   bar.classList.toggle("hidden", !live && !session);
   rest?.classList.toggle("hidden", !live && !session);
@@ -3678,7 +3701,7 @@ function renderPlanner(): void {
   if (!planner || !startButton || !summary) return;
 
   const live =
-    !isReadingListView && !isSessionsView && !isTimeView && selectedSession == null && getLiveVideosForCurrentView().length > 0;
+    !isReadingListView && !isSessionsView && !isTimeView && !isPracticeView && selectedSession == null && getLiveVideosForCurrentView().length > 0;
   planner.classList.toggle("hidden", !live);
   planner.classList.toggle("flex", live);
   if (!live) {
@@ -3908,7 +3931,7 @@ function undoFromToast(): boolean {
   return true;
 }
 
-const VIEW_SHORTCUTS: Record<string, string> = { "1": "nav-desk", "2": "nav-sessions", "3": "nav-reading-list", "4": "nav-time" };
+const VIEW_SHORTCUTS: Record<string, string> = { "1": "nav-desk", "2": "nav-sessions", "3": "nav-reading-list", "4": "nav-time", "5": "nav-practice" };
 
 function handleDeskKeydown(event: KeyboardEvent): void {
   if (anyDialogOpen()) return;
@@ -3929,6 +3952,14 @@ function handleDeskKeydown(event: KeyboardEvent): void {
     event.preventDefault();
     clickIfShown(VIEW_SHORTCUTS[event.key]);
     return;
+  }
+  if (isPracticeView) {
+    if (handlePracticeKeydown(event)) {
+      event.preventDefault();
+      return;
+    }
+    // Desk shortcuts act on video rows, which this page has none of; help and undo still apply.
+    if (event.key !== "?" && event.key !== "z") return;
   }
   switch (event.key) {
     case "?":
@@ -4941,6 +4972,19 @@ function setupListeners() {
     const item = (event.target as HTMLElement).closest(".sidebar-item");
     if (!item) return;
     const type = item.getAttribute("data-sidebar-type");
+    if (type === "practice") {
+      isPracticeView = true;
+      isTimeView = false;
+      isSessionsView = false;
+      isReadingListView = false;
+      selectedSession = null;
+      selectedSessionTabUrls.clear();
+      selectedTabIds.clear();
+      updateSelectionUI();
+      render();
+      return;
+    }
+    isPracticeView = false;
     if (type === "time") {
       isTimeView = true;
       isSessionsView = false;
@@ -6480,6 +6524,71 @@ function streakSectionHtml(streaks: GoalStreaks, watch: WatchSummary): string {
   </section>`;
 }
 
+function hoursWords(hours: number): string {
+  return hours < 10 ? `${(Math.floor(hours * 10) / 10).toLocaleString()} h` : `${Math.floor(hours).toLocaleString()} h`;
+}
+
+function paceWords(row: LanguageHoursRow): string {
+  if (row.next === null) return `Every milestone reached. ${formatMinutesWords(row.dailySeconds)} a day lately.`;
+  const left = `${hoursWords(Math.max(0.1, row.next - row.hours))} more to reach ${row.next} h`;
+  if (row.daysToNext === null) return `${left}. Listen a little each day to see when you'll get there.`;
+  const when = row.daysToNext <= 1 ? "about a day" : row.daysToNext < 14 ? `about ${row.daysToNext} days` : row.daysToNext < 60 ? `about ${Math.round(row.daysToNext / 7)} weeks` : `about ${Math.round(row.daysToNext / 30)} months`;
+  return `${left}, ${when} at ${formatMinutesWords(row.dailySeconds)} a day.`;
+}
+
+/** Equal steps between milestones, so the early ones are not squeezed into a sliver of the bar. */
+function milestoneTrackHtml(row: LanguageHoursRow, color: string): string {
+  const steps = MILESTONE_HOURS.length;
+  const passed = MILESTONE_HOURS.filter((milestone) => row.hours >= milestone).length;
+  const fill = row.next === null ? 100 : ((passed + row.progress) / steps) * 100;
+  const state = (milestone: number) => (row.hours >= milestone ? "reached" : milestone === row.next ? "next" : "");
+  const marks = MILESTONE_HOURS.map((milestone, index) => {
+    const kind = state(milestone);
+    return `<span class="hours-mark${kind ? ` hours-mark--${kind}` : ""}" style="left:${((index + 1) / steps) * 100}%"></span>`;
+  }).join("");
+  const labels = MILESTONE_HOURS.map((milestone, index) => {
+    const kind = state(milestone);
+    return `<span${kind ? ` class="is-${kind}"` : ""} style="left:${((index + 1) / steps) * 100}%">${milestone}</span>`;
+  }).join("");
+  return `<div role="img" aria-label="${escapeHtml(`${hoursWords(row.hours)} of listening. Milestones at ${MILESTONE_HOURS.join(", ")} hours.`)}" style="--hours-color:${color}">
+    <div class="hours-track"><span class="hours-fill" style="width:${fill.toFixed(1)}%"></span>${marks}</div>
+    <div class="hours-scale" aria-hidden="true"><span style="left:0">0</span>${labels}</div>
+  </div>`;
+}
+
+function languageHoursSectionHtml(rows: LanguageHoursRow[], watch: WatchSummary): string {
+  if (rows.length === 0) return "";
+  const colors = languageColorMap(watch);
+  const cards = rows
+    .map((row) => {
+      const color = colorOfLanguage(colors, row.language);
+      return `<article class="hours-card">
+        <header class="flex items-center gap-2 text-sm font-medium text-text-primary">${languageMarkHtml(row.language, color)}<span class="truncate">${escapeHtml(row.language)}</span>
+          ${row.reached > 0 ? `<span class="rule-kind rule-kind--goal ml-auto" title="The last milestone you reached">${row.reached} h reached</span>` : ""}
+        </header>
+        <div class="flex items-baseline gap-2"><span class="font-display text-[44px] leading-none tabular-nums text-text-primary">${escapeHtml(hoursWords(row.hours))}</span><span class="text-sm text-text-muted">of listening</span></div>
+        ${milestoneTrackHtml(row, color === "var(--color-border-hover)" ? "var(--color-accent)" : color)}
+        <p class="text-xs text-text-secondary m-0">${escapeHtml(paceWords(row))}</p>
+        <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-muted">
+          <span>${row.earlierHours > 0 ? `Includes ${escapeHtml(hoursWords(row.earlierHours))} from before` : "Counted since Study Harvester was installed"}</span>
+          <button type="button" class="hours-edit link-btn whitespace-nowrap" data-language="${escapeHtml(row.language)}">${row.earlierHours > 0 ? "Change" : "Add earlier hours"}</button>
+        </div>
+        <form class="hours-form hidden items-center gap-2" data-language="${escapeHtml(row.language)}">
+          <label class="text-xs text-text-secondary" for="hours-${escapeHtml(languageKey(row.language))}">Hours before</label>
+          <input id="hours-${escapeHtml(languageKey(row.language))}" name="hours" type="number" min="0" max="20000" step="0.5" value="${row.earlierHours || ""}" placeholder="0" class="ui-field w-24 tabular-nums" />
+          <button type="submit" class="chip h-8 text-xs">Save</button>
+          <button type="button" class="hours-cancel chip h-8 text-xs">Cancel</button>
+        </form>
+      </article>`;
+    })
+    .join("");
+  return `<section class="flex flex-col gap-3">
+    ${timeSectionHeading("Hours of listening", `<span class="text-xs text-text-muted">All time</span>`, "clock")}
+    <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">${cards}</div>
+    <p class="text-xs text-text-muted m-0">Milestones at ${MILESTONE_HOURS.join(", ")} h are rough markers that comprehensible-input learners count by, not levels. Languages with a daily goal show here.</p>
+  </section>`;
+}
+
 async function saveDailyRules(rules: LanguageLimit[]): Promise<void> {
   await browser.runtime.sendMessage({ action: "set-language-limits", limits: rules });
   await renderTimePanel();
@@ -6691,6 +6800,7 @@ async function renderTimePanel(): Promise<void> {
   panel.innerHTML = `
     ${dailyRulesHtml(data.limits ?? [], watch, prefs)}
     ${data.streaks ? streakSectionHtml(data.streaks, watch) : ""}
+    ${languageHoursSectionHtml(data.hours ?? [], watch)}
     <div class="flex items-center justify-between gap-3 pt-2 border-t border-border"><span class="text-sm text-text-secondary">Everything below covers the last</span>${rangeHtml}</div>
     <div id="time-watch" class="contents">${watchSectionsHtml(watch, prefs)}</div>
     ${mandalaSectionHtml(data)}
@@ -6847,6 +6957,18 @@ function wireTimePanel(panel: HTMLElement): void {
 
   panel.addEventListener("click", async (event) => {
     const target = event.target as HTMLElement;
+    const hoursToggle = target.closest<HTMLElement>(".hours-edit, .hours-cancel");
+    if (hoursToggle) {
+      const card = hoursToggle.closest<HTMLElement>(".hours-card");
+      const form = card?.querySelector<HTMLFormElement>(".hours-form");
+      const opening = hoursToggle.classList.contains("hours-edit");
+      form?.classList.toggle("hidden", !opening);
+      form?.classList.toggle("flex", opening);
+      card?.querySelector<HTMLElement>(".hours-edit")?.parentElement?.classList.toggle("hidden", opening);
+      if (opening) form?.querySelector<HTMLInputElement>("input")?.focus();
+      else card?.querySelector<HTMLElement>(".hours-edit")?.focus();
+      return;
+    }
     const range = target.closest<HTMLElement>(".time-range");
     if (range) {
       timeRange = TIME_RANGES.find((days) => String(days) === range.dataset.days) ?? 7;
@@ -6939,6 +7061,13 @@ function wireTimePanel(panel: HTMLElement): void {
 
   panel.addEventListener("submit", async (event) => {
     const form = event.target;
+    if (form instanceof HTMLFormElement && form.classList.contains("hours-form")) {
+      event.preventDefault();
+      const hours = Number(new FormData(form).get("hours"));
+      await browser.runtime.sendMessage({ action: "set-earlier-hours", language: form.dataset.language ?? "", hours: Number.isFinite(hours) ? hours : 0 });
+      await renderTimePanel();
+      return;
+    }
     if (!(form instanceof HTMLFormElement) || form.id !== "time-rule-add") return;
     event.preventDefault();
     const fields = new FormData(form);
@@ -7026,6 +7155,10 @@ document.addEventListener("DOMContentLoaded", () => {
   if (urlParameters.get("view") === "time") {
     isTimeView = true;
   }
+  if (urlParameters.get("view") === "practice") {
+    isPracticeView = true;
+  }
+  void refreshPracticeBadge();
   void loadReadingList();
   void loadLanguageOverrides().then((overrides) => {
     languageOverrides = overrides;

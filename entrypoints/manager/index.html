@@ -21,6 +21,9 @@
           Reading list <span id="reading-list-badge" class="nav-badge">0</span>
         </button>
         <button type="button" id="nav-time" aria-keyshortcuts="4" class="sidebar-item nav-pill" data-sidebar-type="time">Time</button>
+        <button type="button" id="nav-practice" aria-keyshortcuts="5" class="sidebar-item nav-pill" data-sidebar-type="practice" title="Review saved sentences in the speaker's own voice">
+          Practice <span id="practice-badge" class="nav-badge nav-badge--accent hidden">0</span>
+        </button>
       </nav>
       <div class="flex-1"></div>
       <div class="relative group w-72">
@@ -148,6 +151,8 @@
         <script src="/desk-init.js"></script>
 
         <section id="time-panel" class="hidden flex-col gap-6 px-8 py-6 overflow-y-auto custom-scrollbar min-h-0" aria-busy="true"></section>
+
+        <section id="practice-panel" class="hidden flex-col gap-6 px-8 py-6 overflow-y-auto custom-scrollbar min-h-0" aria-busy="true"></section>
 
         <section id="sessions-panel" class="hidden flex-col gap-5 px-8 py-6 overflow-y-auto custom-scrollbar min-h-0">
           <div class="flex items-center gap-3">
@@ -335,7 +340,7 @@
             <div class="settings-group-label">On the desk</div>
             <dl class="shortcut-list">
             <div class="shortcut-row"><dt>Show this list</dt><dd><kbd>?</kbd></dd></div>
-            <div class="shortcut-row"><dt>Desk, Saved sessions, Reading list, Time</dt><dd><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></dd></div>
+            <div class="shortcut-row"><dt>Desk, Saved sessions, Reading list, Time, Practice</dt><dd><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd><kbd>5</kbd></dd></div>
             <div class="shortcut-row"><dt>Search</dt><dd><kbd>/</kbd></dd></div>
             <div class="shortcut-row"><dt>Next or previous video</dt><dd><kbd>J</kbd><kbd>K</kbd></dd></div>
             <div class="shortcut-row"><dt>Go to the video&#39;s tab</dt><dd><kbd>Enter</kbd></dd></div>
@@ -353,6 +358,20 @@
             <div class="shortcut-row"><dt>Replay the sentence just spoken</dt><dd><kbd>A</kbd></dd></div>
             <div class="shortcut-row"><dt>Skip to the next sentence</dt><dd><kbd>D</kbd></dd></div>
             <div class="shortcut-row"><dt>Make a cloze card</dt><dd><kbd>X</kbd></dd></div>
+            <div class="shortcut-row"><dt>Listen first: hide captions and check what you caught</dt><dd><kbd>E</kbd></dd></div>
+            </dl>
+            <div class="settings-group-label">In a Listen first check</div>
+            <dl class="shortcut-list">
+            <div class="shortcut-row"><dt>Caught it, or got it after reading</dt><dd><kbd>Enter</kbd></dd></div>
+            <div class="shortcut-row"><dt>Show the text, or still lost</dt><dd><kbd>S</kbd><kbd>N</kbd></dd></div>
+            <div class="shortcut-row"><dt>Replay this bit</dt><dd><kbd>A</kbd></dd></div>
+            <div class="shortcut-row"><dt>Keep watching without answering</dt><dd><kbd>Space</kbd></dd></div>
+            </dl>
+            <div class="settings-group-label">On the Practice page</div>
+            <dl class="shortcut-list">
+            <div class="shortcut-row"><dt>Play the sentence</dt><dd><kbd>Space</kbd></dd></div>
+            <div class="shortcut-row"><dt>Show the text</dt><dd><kbd>T</kbd></dd></div>
+            <div class="shortcut-row"><dt>Again, or got it</dt><dd><kbd>A</kbd><kbd>G</kbd></dd></div>
             </dl>
             <div class="settings-group-label">In the cloze card</div>
             <dl class="shortcut-list">

@@ -42,6 +42,15 @@ function codesByName(): Map<string, string> {
   return namedCodes;
 }
 
+/** The two-letter code for a label or tag, such as "Slovak" or "sk-SK"; null when unknown. */
+export function languageCodeOf(language: string | null | undefined): string | null {
+  const text = language?.trim();
+  if (!text) return null;
+  const tag = /^([a-z]{2,3})(?:[-_][a-z0-9]+)*$/i.exec(text);
+  if (tag && LANGUAGE_COUNTRIES[tag[1].toLowerCase()]) return tag[1].toLowerCase();
+  return codesByName().get(text.split("(")[0].trim().toLowerCase()) ?? null;
+}
+
 export function languageFlagId(language: string | null | undefined): string | null {
   const text = language?.trim();
   if (!text) return null;

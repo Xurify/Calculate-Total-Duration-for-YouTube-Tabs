@@ -4,6 +4,7 @@ import type { LiveTabSectionsState } from "./storage";
 import type { LanguageLimitUsage } from "./languageLimits";
 import type { GoalStreaks } from "./goals";
 import type { WatchSummary } from "./watchLog";
+import type { LanguageHoursRow } from "./languageHours";
 
 /** What the popup and the desk ask the background for, and what comes back. */
 export interface TimeSummaryResponse {
@@ -11,6 +12,7 @@ export interface TimeSummaryResponse {
   watch: WatchSummary;
   limits: LanguageLimitUsage[];
   streaks: GoalStreaks;
+  hours?: LanguageHoursRow[];
   prefs: TimeTrackingPrefs;
   rules: SiteRule[];
   mandala: CachedMandalaSummary | null;

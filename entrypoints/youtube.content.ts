@@ -32,6 +32,14 @@ import type { LimitWarning } from "../utils/languageLimits";
 import type { Recommendation } from "../utils/recommendations";
 import { cleanChannelAvatarUrl } from "../utils/channelAvatars";
 import { formatMinutesWords } from "../utils/timeUi";
+import {
+  checkpointAt,
+  checkpointText,
+  listeningCheckpoints,
+  LISTEN_FIRST_KEY,
+  type CheckResult,
+  type ListeningCheckpoint,
+} from "../utils/listening";
 
 const DEBOUNCE_MS = 150;
 
@@ -613,7 +621,7 @@ async function replaySentence(): Promise<void> {
 
   const sentence = loaded.sentences[sentenceIndexAt(loaded.sentences, currentTime)];
   playSentence(sentence);
-  showImmersionToast(`“${truncateText(sentence.text, 60)}”`);
+  showImmersionToast(listenFirst ? "Replaying the sentence" : `“${truncateText(sentence.text, 60)}”`);
 }
 
 async function skipToNextSentence(): Promise<void> {
@@ -629,7 +637,221 @@ async function skipToNextSentence(): Promise<void> {
     return;
   }
   playSentence(nextSentence);
-  showImmersionToast(`“${truncateText(nextSentence.text, 60)}”`);
+  showImmersionToast(listenFirst ? "Next sentence" : `“${truncateText(nextSentence.text, 60)}”`);
+}
+
+interface ListenCheckState {
+  videoId: string;
+  checkpoints: ListeningCheckpoint[];
+  sentences: TranscriptSentence[];
+}
+
+let listenFirst = false;
+let listenState: ListenCheckState | null = null;
+let listenPreviousTime: number | null = null;
+let listenVideoTally = { caught: 0, read: 0, missed: 0 };
+let listenNoTranscriptVideoId: string | null = null;
+let closeListenCard: ((resume: boolean) => void) | null = null;
+let handleListenCardKey: ((keyboardEvent: KeyboardEvent) => boolean) | null = null;
+/** Lets the last word ring out before the pause, since sentence ends come from caption timing. */
+const LISTEN_PAUSE_TAIL_SECONDS = 0.25;
+/** A jump bigger than a tick is a seek, and seeking past a checkpoint should not stop on it. */
+const LISTEN_SEEK_SECONDS = 1.5;
+
+function applyListenFirstClass(): void {
+  document.documentElement.classList.toggle("sh-listen-first", listenFirst && isWatchOrShorts());
+}
+
+async function prepareListenFirst(): Promise<ListenCheckState | null> {
+  const videoId = getVideoIdFromLocation();
+  if (!videoId) return null;
+  if (listenState?.videoId === videoId) return listenState;
+  const loaded = await loadImmersionTranscript();
+  if (!loaded || loaded.videoId !== videoId) {
+    if (listenFirst && listenNoTranscriptVideoId !== videoId && pendingTranscript === null) {
+      listenNoTranscriptVideoId = videoId;
+      showImmersionToast("Listen first needs captions, and this video has none");
+    }
+    return null;
+  }
+  listenState = { videoId, checkpoints: listeningCheckpoints(loaded.sentences), sentences: loaded.sentences };
+  return listenState;
+}
+
+async function setListenFirst(enabled: boolean): Promise<void> {
+  listenFirst = enabled;
+  listenPreviousTime = null;
+  applyListenFirstClass();
+  updateImmersionHud();
+  void browser.storage.local.set({ [LISTEN_FIRST_KEY]: enabled });
+  if (!enabled) {
+    closeListenCard?.(false);
+    showImmersionToast("Listen first is off. Captions are back.");
+    return;
+  }
+  const state = await prepareListenFirst();
+  if (state) showImmersionToast("Listen first: captions hidden. The video stops after each bit of speech.");
+}
+
+function checkListenFirst(videoElement: HTMLVideoElement): void {
+  const currentTime = videoElement.currentTime;
+  const previousTime = listenPreviousTime;
+  listenPreviousTime = currentTime;
+  if (!listenFirst || sentencePlayback || closeListenCard || closeOpenClozeModal || previousTime === null) return;
+  const state = listenState;
+  if (!state || state.videoId !== getVideoIdFromLocation()) {
+    void prepareListenFirst();
+    return;
+  }
+  if (currentTime <= previousTime || currentTime - previousTime > LISTEN_SEEK_SECONDS) return;
+  const index = checkpointAt(state.checkpoints, previousTime - LISTEN_PAUSE_TAIL_SECONDS);
+  const checkpoint = state.checkpoints[index];
+  if (!checkpoint || currentTime < checkpoint.endSeconds + LISTEN_PAUSE_TAIL_SECONDS) return;
+  videoElement.pause();
+  showListenCard(state, index);
+}
+
+function replayCheckpoint(checkpoint: ListeningCheckpoint): void {
+  playSentence({ text: "", startSeconds: checkpoint.startSeconds, endSeconds: checkpoint.endSeconds }, { pauseAtEnd: true });
+}
+
+function kbdHint(text: string): HTMLElement {
+  return element("kbd", "sh-listen-kbd", text);
+}
+
+function listenCardButton(label: string, key: string, className = ""): HTMLButtonElement {
+  const button = element("button", `sh-listen-btn${className ? ` ${className}` : ""}`);
+  button.type = "button";
+  button.append(element("span", "", label), kbdHint(key));
+  return button;
+}
+
+function showListenCard(state: ListenCheckState, index: number): void {
+  closeListenCard?.(false);
+  const checkpoint = state.checkpoints[index];
+  const text = checkpointText(state.sentences, checkpoint);
+  let revealed = false;
+
+  const card = element("div", "");
+  card.id = "study-harvester-listen-card";
+  card.setAttribute("role", "dialog");
+  card.setAttribute("aria-label", "Listen first check");
+
+  const head = element("div", "sh-listen-head");
+  const tallyText = () => {
+    const total = listenVideoTally.caught + listenVideoTally.read + listenVideoTally.missed;
+    return total > 0 ? `Caught ${listenVideoTally.caught} of ${total} by ear` : "First check in this video";
+  };
+  head.append(element("span", "sh-listen-kicker", "Listen first"), element("span", "sh-listen-meta", `${index + 1} of ${state.checkpoints.length} · ${tallyText()}`));
+  const offButton = element("button", "sh-listen-off", "Turn off");
+  offButton.type = "button";
+  offButton.title = "Turn Listen first off and bring captions back (E)";
+  head.append(offButton);
+
+  const body = element("div", "sh-listen-body");
+  const prompt = element("p", "sh-listen-prompt", "Did you catch that?");
+  body.append(prompt);
+
+  const actions = element("div", "sh-listen-actions");
+  const replayButton = listenCardButton("Replay", "A");
+  replayButton.prepend(hudIcon("replay"));
+  const secondButton = listenCardButton("Show text", "S");
+  const primaryButton = listenCardButton("Caught it", "↵", "is-accent");
+  actions.append(replayButton, element("span", "sh-listen-spacer"), secondButton, primaryButton);
+  card.append(head, body, actions);
+
+  const close = (resume: boolean) => {
+    card.remove();
+    closeListenCard = null;
+    handleListenCardKey = null;
+    const videoElement = document.querySelector("video");
+    if (videoElement) {
+      finishSentencePlayback(videoElement);
+      // Resume from the end of the checkpoint, so a replay does not make it ask again.
+      if (resume) {
+        if (videoElement.currentTime < checkpoint.endSeconds) videoElement.currentTime = checkpoint.endSeconds + LISTEN_PAUSE_TAIL_SECONDS;
+        listenPreviousTime = null;
+        void videoElement.play();
+      }
+    }
+  };
+
+  const record = (result: CheckResult) => {
+    listenVideoTally[result] += 1;
+    const videoId = state.videoId;
+    const sentence =
+      result === "caught"
+        ? null
+        : {
+            text,
+            clozeWord: null,
+            translation: "",
+            language: "",
+            videoId,
+            videoTitle: lastMetadata.title,
+            channelName: lastMetadata.channelName,
+            startSeconds: checkpoint.startSeconds,
+            endSeconds: checkpoint.endSeconds,
+            source: "listening" as const,
+          };
+    void browser.runtime
+      .sendMessage({
+        action: "listening-check",
+        result,
+        video: { videoId, title: lastMetadata.title, channelName: lastMetadata.channelName, language: lastMetadata.language ?? null, languageName: lastMetadata.languageName ?? null },
+        sentence,
+      })
+      .catch(() => {});
+    close(true);
+    if (result !== "caught") showImmersionToast("Saved for review on the desk's Practice page");
+  };
+
+  const reveal = () => {
+    if (revealed) return;
+    revealed = true;
+    prompt.remove();
+    body.append(element("p", "sh-listen-text", text), element("p", "sh-listen-hint", "Listen again while you read."));
+    secondButton.replaceChildren(element("span", "", "Still lost"), kbdHint("N"));
+    primaryButton.replaceChildren(element("span", "", "Got it now"), kbdHint("↵"));
+    replayCheckpoint(checkpoint);
+  };
+
+  replayButton.addEventListener("click", () => replayCheckpoint(checkpoint));
+  secondButton.addEventListener("click", () => (revealed ? record("missed") : reveal()));
+  primaryButton.addEventListener("click", () => record(revealed ? "read" : "caught"));
+  offButton.addEventListener("click", () => void setListenFirst(false));
+
+  closeListenCard = close;
+  handleListenCardKey = (keyboardEvent) => {
+    if (keyboardEvent.ctrlKey || keyboardEvent.metaKey || keyboardEvent.altKey) return false;
+    const key = keyboardEvent.key.toLowerCase();
+    if (key === "enter") {
+      // A focused button presses itself; let the browser do it.
+      if (keyboardEvent.target instanceof HTMLButtonElement && card.contains(keyboardEvent.target)) return false;
+      primaryButton.click();
+      return true;
+    }
+    if (key === "a") {
+      replayCheckpoint(checkpoint);
+      return true;
+    }
+    if ((key === "s" && !revealed) || (key === "n" && revealed)) {
+      secondButton.click();
+      return true;
+    }
+    if (key === "e") {
+      void setListenFirst(false);
+      return true;
+    }
+    if (key === "escape" || key === " ") {
+      close(true);
+      return true;
+    }
+    return false;
+  };
+
+  getTargetPlayerContainer().appendChild(card);
+  requestAnimationFrame(() => card.classList.add("is-shown"));
 }
 
 interface ClozeCaptureContext {
@@ -850,7 +1072,28 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
         | { success?: boolean }
         | undefined;
       if (!response?.success) throw new Error("not saved");
-      showImmersionToast(`Saved «${card.targetWord}» for Clozemaster`);
+      if (videoId && sentence.endSeconds > sentence.startSeconds) {
+        void browser.runtime
+          .sendMessage({
+            action: "bank-add",
+            sentence: {
+              text: sentence.text,
+              clozeWord: card.targetWord,
+              translation: card.translation,
+              language: "",
+              videoId,
+              videoTitle: lastMetadata.title,
+              channelName: lastMetadata.channelName,
+              startSeconds: sentence.startSeconds,
+              endSeconds: sentence.endSeconds,
+              source: "cloze",
+            },
+            languageCode: card.language,
+            languageName: lastMetadata.languageName ?? null,
+          })
+          .catch(() => {});
+      }
+      showImmersionToast(`Saved «${card.targetWord}» for Clozemaster and Practice`);
       close(capture.resumeOnClose);
     } catch {
       showImmersionToast("Couldn't save the card. Try again.");
@@ -1578,6 +1821,153 @@ function injectImmersionStyles(): void {
       color: #1a1410;
       font-weight: 600;
     }
+    .study-harvester-hud-btn.is-on {
+      border-color: rgba(240, 182, 90, 0.55);
+      color: var(--sh-accent);
+    }
+    .sh-listen-first .ytp-caption-window-container {
+      opacity: 0 !important;
+    }
+    #study-harvester-listen-card {
+      position: absolute;
+      left: 50%;
+      bottom: 64px;
+      width: min(640px, calc(100% - 24px));
+      box-sizing: border-box;
+      padding: 14px 16px;
+      border-radius: 18px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background-color: rgba(16, 14, 13, 0.86);
+      backdrop-filter: blur(18px) saturate(140%);
+      -webkit-backdrop-filter: blur(18px) saturate(140%);
+      box-shadow: 0 24px 60px -24px rgba(0, 0, 0, 1), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      color: #f4efe6;
+      font: 400 13px/18px "YouTube Sans", Roboto, Arial, sans-serif;
+      z-index: 62;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      opacity: 0;
+      transform: translate(-50%, 6px);
+      transition: opacity 0.18s ease, transform 0.18s ease;
+    }
+    #study-harvester-listen-card.is-shown {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+    #study-harvester-listen-card .sh-listen-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: rgba(244, 239, 230, 0.6);
+    }
+    #study-harvester-listen-card .sh-listen-kicker {
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #f0b65a;
+    }
+    #study-harvester-listen-card .sh-listen-meta {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      font-variant-numeric: tabular-nums;
+    }
+    #study-harvester-listen-card .sh-listen-off {
+      height: 26px;
+      padding: 0 10px;
+      border: none;
+      border-radius: 999px;
+      background: transparent;
+      color: rgba(244, 239, 230, 0.6);
+      font: 500 12px "YouTube Sans", Roboto, Arial, sans-serif;
+      cursor: pointer;
+    }
+    #study-harvester-listen-card .sh-listen-off:hover {
+      background-color: rgba(255, 255, 255, 0.08);
+      color: #f4efe6;
+    }
+    #study-harvester-listen-card .sh-listen-prompt,
+    #study-harvester-listen-card .sh-listen-text {
+      margin: 0;
+      font: 400 22px/1.45 Georgia, "Times New Roman", serif;
+      color: #f4efe6;
+    }
+    #study-harvester-listen-card .sh-listen-text {
+      max-height: 140px;
+      overflow-y: auto;
+    }
+    #study-harvester-listen-card .sh-listen-hint {
+      margin: 2px 0 0;
+      font-size: 12px;
+      color: rgba(244, 239, 230, 0.6);
+    }
+    #study-harvester-listen-card .sh-listen-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    #study-harvester-listen-card .sh-listen-spacer {
+      flex: 1;
+    }
+    #study-harvester-listen-card .sh-listen-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 36px;
+      padding: 0 8px 0 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: transparent;
+      color: #f4efe6;
+      font: 500 13px/1 "YouTube Sans", Roboto, Arial, sans-serif;
+      cursor: pointer;
+      transition: background-color 0.15s ease, filter 0.15s ease;
+    }
+    #study-harvester-listen-card .sh-listen-btn .study-harvester-icon {
+      width: 16px;
+      height: 16px;
+      margin-left: -4px;
+    }
+    #study-harvester-listen-card .sh-listen-btn:hover {
+      background-color: rgba(255, 255, 255, 0.08);
+    }
+    #study-harvester-listen-card .sh-listen-btn.is-accent {
+      border-color: transparent;
+      background-color: #f0b65a;
+      color: #1a1410;
+      font-weight: 600;
+      box-shadow: 0 10px 28px -12px rgba(240, 182, 90, 0.9);
+    }
+    #study-harvester-listen-card .sh-listen-btn.is-accent:hover {
+      filter: brightness(1.06);
+    }
+    #study-harvester-listen-card .sh-listen-btn:focus-visible,
+    #study-harvester-listen-card .sh-listen-off:focus-visible {
+      outline: 2px solid #f0b65a;
+      outline-offset: 2px;
+    }
+    #study-harvester-listen-card .sh-listen-kbd {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 20px;
+      height: 20px;
+      padding: 0 5px;
+      box-sizing: border-box;
+      border-radius: 6px;
+      background-color: rgba(255, 255, 255, 0.1);
+      color: inherit;
+      font: 600 11px/1 "YouTube Sans", Roboto, Arial, sans-serif;
+      opacity: 0.8;
+    }
+    #study-harvester-listen-card .sh-listen-btn.is-accent .sh-listen-kbd {
+      background-color: rgba(26, 20, 16, 0.14);
+    }
   `;
   document.head.appendChild(styleElement);
 }
@@ -1617,7 +2007,7 @@ function removeImmersionHud(): void {
   stopHudLayoutWatch();
 }
 
-const OWN_OVERLAY_SELECTOR = "#study-harvester-player-hud, #study-harvester-cloze-modal, #study-harvester-hud-toast, #study-harvester-limit-card";
+const OWN_OVERLAY_SELECTOR = "#study-harvester-player-hud, #study-harvester-cloze-modal, #study-harvester-hud-toast, #study-harvester-limit-card, #study-harvester-listen-card";
 // YouTube mounts the Shorts overlay a moment after the player, so the HUD looks again as the page settles.
 const HUD_LAYOUT_RECHECK_DELAYS_MS = [400, 1500];
 
@@ -1678,6 +2068,7 @@ const HUD_ICON_PATHS = {
   next: "M9 6l6 6-6 6",
   replay: "M4 12a8 8 0 1 0 2.3-5.6M4 4v5h5",
   skip: "M5 5l9 7-9 7zM18 5v14",
+  ear: "M6 8.5a6.5 6.5 0 1 1 13 0c0 6-6 6-6 10a3.5 3.5 0 1 1-7 0M15 8.5a2.5 2.5 0 0 0-5 0v1a2 2 0 1 1 0 4",
 };
 
 function hudIcon(name: keyof typeof HUD_ICON_PATHS, filled = false): SVGSVGElement {
@@ -1783,6 +2174,19 @@ function updateImmersionHud(): void {
     });
     hudContainer.appendChild(logTimeButton);
   }
+
+  const listenButton = hudButton(
+    hudIcon("ear"),
+    listenFirst ? "Listen first" : "",
+    listenFirst ? "Listen first is on: captions hidden, a check after each bit of speech. Click to turn off (E)" : "Listen first: hide captions and check what you caught (E)"
+  );
+  listenButton.classList.toggle("is-on", listenFirst);
+  listenButton.setAttribute("aria-pressed", String(listenFirst));
+  listenButton.addEventListener("click", (clickEvent) => {
+    clickEvent.stopPropagation();
+    void setListenFirst(!listenFirst);
+  });
+  hudContainer.appendChild(listenButton);
 
   const replayButton = hudButton(hudIcon("replay"), "", "Replay the sentence just spoken (A)");
   replayButton.addEventListener("click", (clickEvent) => {
@@ -1918,6 +2322,7 @@ const PLAYER_SHORTCUTS: Record<string, () => void> = {
   a: () => void replaySentence(),
   d: () => void skipToNextSentence(),
   x: () => void triggerClozeCardCapture(),
+  e: () => void setListenFirst(!listenFirst),
 };
 
 function handlePlayerShortcut(keyboardEvent: KeyboardEvent): void {
@@ -1932,6 +2337,13 @@ function handlePlayerShortcut(keyboardEvent: KeyboardEvent): void {
 }
 
 function handleGlobalKeydown(keyboardEvent: KeyboardEvent): void {
+  if (handleListenCardKey && !handleClozeModalKey && !isEditableTarget(keyboardEvent.target)) {
+    if (handleListenCardKey(keyboardEvent)) {
+      keyboardEvent.preventDefault();
+      keyboardEvent.stopPropagation();
+      return;
+    }
+  }
   if (!handleClozeModalKey) {
     handlePlayerShortcut(keyboardEvent);
     return;
@@ -1955,9 +2367,15 @@ function initializeWatchPageFeatures(context: {
     lastWatchMediaTime = null;
     sentencePlayback = null;
     closeOpenClozeModal?.(false);
+    closeListenCard?.(false);
+    listenState = null;
+    listenPreviousTime = null;
+    listenVideoTally = { caught: 0, read: 0, missed: 0 };
   }
 
   injectImmersionStyles();
+  applyListenFirstClass();
+  if (listenFirst) void prepareListenFirst();
   void loadImmersionTranscript();
   void checkMandalaStatusForCurrentPage();
   void readMetadataFromDom().then((metadata) => {
@@ -1992,6 +2410,7 @@ function initializeWatchPageFeatures(context: {
         }
 
         checkSentencePlayback(videoElement);
+        checkListenFirst(videoElement);
       } else {
         lastWatchMediaTime = null;
       }
@@ -2002,9 +2421,40 @@ function initializeWatchPageFeatures(context: {
   scheduleRead(context);
 }
 
+interface ClipRequest {
+  videoId: string;
+  startSeconds: number;
+  endSeconds: number;
+}
+
+const CLIP_READY_TIMEOUT_MS = 10_000;
+
+/** Plays one saved sentence for the desk's Practice page, then pauses. */
+async function playClip(clip: ClipRequest): Promise<{ success: boolean; errorMessage?: string }> {
+  if (getVideoIdFromLocation() !== clip.videoId) return { success: false, errorMessage: "This tab shows another video." };
+  const deadline = Date.now() + CLIP_READY_TIMEOUT_MS;
+  let videoElement = document.querySelector("video");
+  while ((!videoElement || videoElement.readyState < HTMLMediaElement.HAVE_METADATA) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    videoElement = document.querySelector("video");
+  }
+  if (!videoElement || videoElement.readyState < HTMLMediaElement.HAVE_METADATA) return { success: false, errorMessage: "The video did not load." };
+  closeListenCard?.(false);
+  closeOpenClozeModal?.(false);
+  playSentence({ text: "", startSeconds: clip.startSeconds, endSeconds: clip.endSeconds }, { pauseAtEnd: true });
+  try {
+    await videoElement.play();
+  } catch {
+    return { success: false, errorMessage: "The browser blocked playback in that tab." };
+  }
+  return { success: true };
+}
+
 function teardownWatchPageFeatures(): void {
   removeImmersionHud();
   closeOpenClozeModal?.(false);
+  closeListenCard?.(false);
+  applyListenFirstClass();
   sentencePlayback = null;
 }
 
@@ -2105,6 +2555,10 @@ export default defineContentScript({
           });
           return true;
         }
+        if (runtimeMessage?.action === "play-clip") {
+          void playClip(runtimeMessage as unknown as ClipRequest).then(sendResponse);
+          return true;
+        }
         if (runtimeMessage?.action === "get-playback-state") {
           sendResponse(getPlaybackState());
           return;
@@ -2151,6 +2605,21 @@ export default defineContentScript({
     }).start(context);
 
     context.addEventListener(window, "keydown", handleGlobalKeydown, { capture: true });
+
+    void browser.storage.local.get(LISTEN_FIRST_KEY).then((stored) => {
+      listenFirst = stored[LISTEN_FIRST_KEY] === true;
+      applyListenFirstClass();
+      updateImmersionHud();
+      if (listenFirst && isWatchOrShorts()) void prepareListenFirst();
+    });
+    browser.storage.onChanged.addListener((changes, area) => {
+      const change = changes[LISTEN_FIRST_KEY];
+      if (area !== "local" || !change || change.newValue === listenFirst) return;
+      listenFirst = change.newValue === true;
+      if (!listenFirst) closeListenCard?.(false);
+      applyListenFirstClass();
+      updateImmersionHud();
+    });
 
     document.addEventListener("click", () => {
       if (isPillarPopoverOpen) {

@@ -434,6 +434,7 @@ function showImmersionToast(messageText: string, durationMs = 3200) {
   const container = getTargetPlayerContainer();
   const toastElement = document.createElement("div");
   toastElement.id = "study-harvester-hud-toast";
+  toastElement.setAttribute("role", "status");
   toastElement.textContent = messageText;
 
   container.appendChild(toastElement);
@@ -648,6 +649,9 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
   modalWrapper.id = "study-harvester-cloze-modal";
   const cardElement = document.createElement("div");
   cardElement.className = "study-harvester-cloze-card";
+  cardElement.setAttribute("role", "dialog");
+  cardElement.setAttribute("aria-modal", "true");
+  cardElement.setAttribute("aria-label", "Make a cloze card");
   cardElement.tabIndex = -1;
   modalWrapper.appendChild(cardElement);
 
@@ -675,6 +679,7 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
   closeButton.appendChild(hudIcon("close"));
   closeButton.type = "button";
   closeButton.title = "Close";
+  closeButton.setAttribute("aria-label", "Close");
   headerRow.appendChild(closeButton);
   cardElement.appendChild(headerRow);
 
@@ -697,15 +702,18 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
   previousButton.appendChild(hudIcon("previous"));
   previousButton.type = "button";
   previousButton.title = "Previous sentence";
+  previousButton.setAttribute("aria-label", "Previous sentence");
   const listenButton = createElement("button", "study-harvester-cloze-nav-btn is-listen");
   const listenTime = createElement("span", "");
   listenButton.append(hudIcon("play", true), listenTime);
   listenButton.type = "button";
   listenButton.title = "Play this sentence";
+  listenButton.setAttribute("aria-label", "Play this sentence");
   const nextButton = createElement("button", "study-harvester-cloze-nav-btn");
   nextButton.appendChild(hudIcon("next"));
   nextButton.type = "button";
   nextButton.title = "Next sentence";
+  nextButton.setAttribute("aria-label", "Next sentence");
   navigationGroup.append(previousButton, listenButton, nextButton);
   const answerLine = createElement("div", "study-harvester-cloze-pick");
   const translationInput = document.createElement("input");
@@ -722,7 +730,7 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
   const renderAnswer = () => {
     answerLine.replaceChildren();
     if (!chosenToken) {
-      answerLine.textContent = "Tap a word to blank it out";
+      answerLine.textContent = "Click a word to blank it out";
       return;
     }
     answerLine.append(
@@ -744,11 +752,13 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
         token.text
       );
       wordButton.type = "button";
+      wordButton.setAttribute("aria-pressed", String(token === chosenToken));
       wordButton.addEventListener("click", (clickEvent) => {
         clickEvent.stopPropagation();
         chosenToken = token;
         renderSentenceText();
         renderAnswer();
+        sentenceBox.querySelector<HTMLButtonElement>(".is-blank")?.focus();
       });
       sentenceBox.appendChild(wordButton);
       cursor = token.index + token.text.length;
@@ -827,7 +837,7 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
       showImmersionToast(`Saved «${card.targetWord}» for Clozemaster`);
       close(capture.resumeOnClose);
     } catch {
-      showImmersionToast("Couldn't save the card");
+      showImmersionToast("Couldn't save the card. Try again.");
     }
   };
 
@@ -846,9 +856,29 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
       close(capture.resumeOnClose);
       return true;
     }
-    if (keyboardEvent.key === "Enter" && !keyboardEvent.isComposing) {
+    // Enter on a focused button should press that button, not save the card.
+    if (keyboardEvent.key === "Enter" && !keyboardEvent.isComposing && !(keyboardEvent.target instanceof HTMLButtonElement)) {
       void save();
       return true;
+    }
+    if (keyboardEvent.key === "Tab") {
+      const focusable = Array.from(cardElement.querySelectorAll<HTMLElement>("button:not(:disabled), input"));
+      if (focusable.length === 0) return false;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (keyboardEvent.shiftKey && (active === first || active === cardElement)) {
+        last.focus();
+        return true;
+      }
+      if (!keyboardEvent.shiftKey && active === last) {
+        first.focus();
+        return true;
+      }
+      if (!cardElement.contains(active)) {
+        first.focus();
+        return true;
+      }
     }
     return false;
   };
@@ -945,7 +975,7 @@ async function quickLogWatchedTimeToMandala(): Promise<void> {
     })) as { success: boolean; queued?: boolean; actionText?: string; errorMessage?: string };
 
     if (!response?.success) {
-      showImmersionToast(response?.errorMessage || "Could not log time to Mandala");
+      showImmersionToast(response?.errorMessage || "Couldn't log time to Mandala. Try again in a moment.");
       return;
     }
     sessionWatchedSeconds = 0;
@@ -956,7 +986,7 @@ async function quickLogWatchedTimeToMandala(): Promise<void> {
         : `Logged ${watchedMinutes} min on “${truncateText(response.actionText || "", 40)}”`
     );
   } catch {
-    showImmersionToast("Could not log time to Mandala");
+    showImmersionToast("Couldn't log time to Mandala. Try again in a moment.");
   }
 }
 
@@ -976,7 +1006,7 @@ async function saveCurrentVideoToMandalaShelf(pillarIndex: number, action?: Cach
     })) as { success: boolean; queued?: boolean; errorMessage?: string };
 
     if (!response?.success) {
-      showImmersionToast(response?.errorMessage || "Failed to save to shelf");
+      showImmersionToast(response?.errorMessage || "Couldn't save to the shelf. Try again in a moment.");
       return;
     }
     latestMandalaStatus.savedPillarIndexes = [...new Set([...latestMandalaStatus.savedPillarIndexes, pillarIndex])].sort(
@@ -992,7 +1022,7 @@ async function saveCurrentVideoToMandalaShelf(pillarIndex: number, action?: Cach
     );
     void checkMandalaStatusForCurrentPage();
   } catch {
-    showImmersionToast("Failed to save to shelf");
+    showImmersionToast("Couldn't save to the shelf. Try again in a moment.");
   }
 }
 

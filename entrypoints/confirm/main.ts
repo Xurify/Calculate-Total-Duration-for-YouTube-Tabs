@@ -74,6 +74,7 @@ function renderExpired() {
   allowButton.hidden = true;
   denyButton.textContent = "Close";
   denyButton.addEventListener("click", () => window.close());
+  denyButton.focus();
 }
 
 async function init() {

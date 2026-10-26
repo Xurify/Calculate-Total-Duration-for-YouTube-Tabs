@@ -46,7 +46,7 @@ import { isGoal, languageKey, MAX_LIMIT_MINUTES, ruleKey, type LanguageLimit, ty
 import { CALENDAR_WEEKS, type GoalStreaks } from "../../utils/goals";
 import { CSV_COLUMNS, DEFAULT_CSV_COLUMNS, type CsvColumn } from "../../utils/watchCsv";
 import { CHANNEL_AVATARS_KEY, loadChannelAvatars, type ChannelAvatars } from "../../utils/channelAvatars";
-import { installTooltips, stepperHtml, wireCombobox, wireSteppers } from "../../utils/controls";
+import { installDialogs, installTooltips, stepperHtml, wireCombobox, wireSteppers } from "../../utils/controls";
 import {
   detectLanguageFromPlayerResponse,
   languageTextFromPlayerResponse,
@@ -1133,10 +1133,10 @@ async function showRestoreSessionModal(session: SavedSession): Promise<RestoreSe
       resolve(null);
       return;
     }
-    if (titleEl) titleEl.textContent = `Open "${session.name}"`;
+    if (titleEl) titleEl.textContent = `Open "${sessionDisplayName(session).title}"`;
     const tabCount = session.tabs?.length ?? 0;
-    const duration = formatTime(sessionTotalSeconds(session.tabs ?? []));
-    if (summaryEl) summaryEl.textContent = `${tabCount} tabs · ${duration} total watch time`;
+    const duration = formatDurationWords(sessionTotalSeconds(session.tabs ?? []));
+    if (summaryEl) summaryEl.textContent = `${plural(tabCount, "video")} · ${duration} to watch`;
     const hasSections = orderedSections(session.sections).length > 0;
     bySections.disabled = !hasSections;
     bySections.checked = false;
@@ -1206,13 +1206,14 @@ async function showSaveSessionModal(options: SaveSessionModalOptions): Promise<S
     targetSelect.setOptions(
       options.sessions.map((s) => ({
         value: s.id,
-        label: `${s.name} (${s.tabs?.length ?? 0} tabs)`,
+        label: `${sessionDisplayName(s).title} (${plural(s.tabs?.length ?? 0, "video")})`,
       }))
     );
 
     const syncTargetVisibility = () => {
       const mode = [...modeInputs].find((r) => r.checked)?.value ?? "new";
       const showTarget = mode === "replace" || mode === "merge";
+      confirmBtn.textContent = mode === "replace" ? "Replace session" : mode === "merge" ? "Merge" : "Save";
       targetSelect.setHidden(!showTarget || options.sessions.length === 0);
       if (showTarget && options.similarSession) {
         targetSelect.setValue(options.similarSession.id);
@@ -1223,15 +1224,16 @@ async function showSaveSessionModal(options: SaveSessionModalOptions): Promise<S
 
     if (options.similarSession && hintEl) {
       const pct = Math.round(options.similarScore * 100);
-      hintEl.textContent = `${pct}% overlap with "${options.similarSession.name}". Consider replacing or merging instead of creating another copy.`;
+      hintEl.textContent = `${pct}% of these videos are already in "${sessionDisplayName(options.similarSession).title}". Merging adds only the new ones.`;
       hintEl.classList.remove("hidden");
     } else if (hintEl) {
       hintEl.classList.add("hidden");
     }
 
     if (options.similarSession) {
-      const replaceRadio = [...modeInputs].find((r) => r.value === "replace");
-      if (replaceRadio) replaceRadio.checked = true;
+      // Merge keeps everything in both lists, so a wrong guess costs nothing.
+      const mergeRadio = [...modeInputs].find((r) => r.value === "merge");
+      if (mergeRadio) mergeRadio.checked = true;
       targetSelect.setValue(options.similarSession.id);
     } else {
       const newRadio = [...modeInputs].find((r) => r.value === "new");
@@ -1290,7 +1292,7 @@ async function executeSaveSession(
   if (payload.mode === "replace" && payload.targetSessionId) {
     const updated = await replaceSession(payload.targetSessionId, payload.name, tabs, secs);
     if (!updated) throw new Error("Session not found");
-    showToast(`Updated "${payload.name}" (${tabs.length} tabs)`);
+    showToast(`Updated "${payload.name}" (${plural(tabs.length, "video")})`);
     return;
   }
   if (payload.mode === "merge" && payload.targetSessionId) {
@@ -1300,7 +1302,7 @@ async function executeSaveSession(
     return;
   }
   await saveSession(payload.name, tabs, secs);
-  showToast(`Saved "${payload.name}" (${tabs.length} tabs)`);
+  showToast(`Saved "${payload.name}" (${plural(tabs.length, "video")})`);
 }
 
 async function saveVideosAsSession(videos: VideoData[], windowLabel?: string): Promise<void> {
@@ -1558,7 +1560,7 @@ async function addNewSection(name: string, emoji: string | undefined, colorIndex
     };
     await persistLiveSections();
   }
-  showToast(`Section "${trimmed}" added`);
+  showToast(`Pile "${trimmed}" added`);
   render();
 }
 
@@ -1648,7 +1650,7 @@ function renderSectionHeaderHtml(options: {
   const dataSectionAttr = options.sectionId ? ` data-section-id="${escapeHtml(options.sectionId)}"` : "";
   return `
     <div class="queue-section-head" style="--section-rail: ${rail}">
-      <button type="button" class="section-collapse-toggle p-1 rounded-md hover:bg-surface-hover/60 text-text-muted transition-transform duration-200 ${isCollapsed ? "-rotate-90" : ""}" data-section-collapse="${escapeHtml(options.collapseKey)}" aria-expanded="${isCollapsed ? "false" : "true"}" aria-label="Collapse section">
+      <button type="button" class="section-collapse-toggle p-1 rounded-md hover:bg-surface-hover/60 text-text-muted transition-transform duration-200 ${isCollapsed ? "-rotate-90" : ""}" data-section-collapse="${escapeHtml(options.collapseKey)}" aria-expanded="${isCollapsed ? "false" : "true"}" aria-label="Show or hide ${escapeHtml(options.title)}">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
       </button>
       <div class="queue-section-line">
@@ -1705,7 +1707,7 @@ function renderSessionTabsInnerHtml(
                 </button>
                 <div class="flex-1 min-w-0 flex items-center gap-2 font-medium text-xs text-text-secondary nested-group-toggle cursor-pointer" data-nested-group="${escapeHtml(ck)}">${groupingMode === "channel" ? deskAvatarHtml(groupName, "w-5 h-5 text-[9px]") : ""}<span class="truncate">${escapeHtml(groupName)}</span></div>
                 <div class="aggregate-group-stats text-[10px] text-text-muted tabular-nums flex items-center gap-2" data-group-name="${escapeHtml(groupName)}">
-                  <span>${tabList.length} videos</span>
+                  <span>${plural(tabList.length, "video")}</span>
                   <span class="w-px h-3 bg-border"></span>
                   <span>${formatTime(groupDuration)}</span>
                 </div>
@@ -1760,7 +1762,7 @@ function renderLiveVideosInnerHtml(
                     </div>
                     <div class="flex-1 min-w-0 flex items-center gap-2 font-medium text-xs text-text-secondary nested-group-toggle cursor-pointer" data-nested-group="${escapeHtml(ck)}">${groupingMode === "channel" ? deskAvatarHtml(groupName, "w-5 h-5 text-[9px]") : ""}<span class="truncate">${escapeHtml(groupName)}</span></div>
                     <div class="aggregate-group-stats text-[10px] text-text-muted tabular-nums flex items-center gap-2" data-group-name="${escapeHtml(groupName)}">
-                        <span>${groupVideos.length} videos</span>
+                        <span>${plural(groupVideos.length, "video")}</span>
                         <span class="w-px h-3 bg-border"></span>
                         <span>${formatTime(groupDuration)}</span>
                     </div>
@@ -1785,7 +1787,7 @@ function buildSessionSectionedHtml(tabsToShow: SavedSessionTab[], sections: Sess
       title: section.name,
       emoji: section.emoji,
       collapseKey: ck,
-      countLabel: `${tabs.length} videos`,
+      countLabel: plural(tabs.length, "video"),
       durationLabel: formatTime(dur),
       colorIndex: color,
       sectionId: section.id,
@@ -1812,7 +1814,7 @@ function buildSessionSectionedHtml(tabsToShow: SavedSessionTab[], sections: Sess
       emoji: "✦",
       subtitle: "Videos not in any pile yet",
       collapseKey: ck,
-      countLabel: `${unsorted.length} videos`,
+      countLabel: plural(unsorted.length, "video"),
       durationLabel: formatTime(dur),
       colorIndex: "unsorted",
     });
@@ -1906,7 +1908,7 @@ function buildLiveSectionedHtml(videosToShow: VideoData[], sections: SessionSect
       title: section.name,
       emoji: section.emoji,
       collapseKey: ck,
-      countLabel: `${videos.length} videos`,
+      countLabel: plural(videos.length, "video"),
       durationLabel: formatTime(dur),
       colorIndex: color,
       sectionId: section.id,
@@ -1933,7 +1935,7 @@ function buildLiveSectionedHtml(videosToShow: VideoData[], sections: SessionSect
       emoji: "✦",
       subtitle: "Videos not in any pile yet",
       collapseKey: ck,
-      countLabel: `${unsorted.length} videos`,
+      countLabel: plural(unsorted.length, "video"),
       durationLabel: formatTime(dur),
       colorIndex: "unsorted",
     });
@@ -1951,18 +1953,95 @@ function buildLiveSectionedHtml(videosToShow: VideoData[], sections: SessionSect
   return parts.join("");
 }
 
+interface ToastAction {
+  label: string;
+  run: () => void | Promise<void>;
+}
+
+const TOAST_MS = 3000;
+// Long enough to read the message and reach the button after a misclick.
+const UNDO_TOAST_MS = 8000;
+
 let toastTimeout: ReturnType<typeof setTimeout> | null = null;
-function showToast(message: string, durationMs = 3000) {
+function showToast(message: string, action?: ToastAction) {
   const el = document.getElementById("toast");
   if (!el) return;
-  el.textContent = message;
-  el.classList.remove("hidden", "opacity-0");
+  const text = document.createElement("span");
+  text.textContent = message;
+  el.replaceChildren(text);
+  if (action) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "toast-action";
+    button.textContent = action.label;
+    button.title = `${action.label} (Z)`;
+    button.setAttribute("aria-keyshortcuts", "z");
+    button.addEventListener("click", () => {
+      hideToast();
+      void action.run();
+    });
+    el.append(button);
+  }
+  el.classList.remove("hidden", "opacity-0", "pointer-events-none");
   el.classList.add("animate-in", "fade-in");
   if (toastTimeout) clearTimeout(toastTimeout);
-  toastTimeout = setTimeout(() => {
-    el.classList.add("opacity-0");
-    toastTimeout = null;
-  }, durationMs);
+  toastTimeout = setTimeout(hideToast, action ? UNDO_TOAST_MS : TOAST_MS);
+}
+
+function hideToast(): void {
+  if (toastTimeout) clearTimeout(toastTimeout);
+  toastTimeout = null;
+  document.getElementById("toast")?.classList.add("opacity-0", "pointer-events-none");
+}
+
+function urlAtPosition(video: VideoData): string {
+  const seconds = Math.floor(video.currentTime);
+  if (video.isLive || seconds < 5) return video.url;
+  try {
+    const url = new URL(video.url);
+    url.searchParams.set("t", `${seconds}s`);
+    return url.toString();
+  } catch {
+    return video.url;
+  }
+}
+
+interface ClosedVideo {
+  video: VideoData;
+  windowId?: number;
+  tabIndex?: number;
+}
+
+async function reopenClosedVideos(closed: ClosedVideo[]): Promise<void> {
+  // Lowest index first, so each reopened tab lands where it was before the next one goes in.
+  for (const { video, windowId, tabIndex } of [...closed].sort((first, second) => (first.tabIndex ?? 0) - (second.tabIndex ?? 0))) {
+    try {
+      await browser.tabs.create({ url: urlAtPosition(video), windowId, index: tabIndex, active: false });
+    } catch {
+      await browser.tabs.create({ url: urlAtPosition(video), active: false });
+    }
+  }
+  scheduleFetchTabsFromEvents();
+}
+
+async function closeVideoTabs(videos: VideoData[]): Promise<void> {
+  if (videos.length === 0) return;
+  const closed: ClosedVideo[] = await Promise.all(
+    videos.map(async (video) => {
+      const tab = await browser.tabs.get(video.id).catch(() => null);
+      return { video, windowId: tab?.windowId ?? video.windowId, tabIndex: tab?.index };
+    })
+  );
+  await browser.tabs.remove(videos.map((video) => video.id));
+  const message = videos.length === 1 ? `Closed "${videos[0].title || "1 tab"}"` : `Closed ${plural(videos.length, "tab")}`;
+  showToast(message, { label: "Undo", run: () => reopenClosedVideos(closed) });
+}
+
+async function restoreSessionTabs(sessionId: string, tabs: SavedSessionTab[]): Promise<void> {
+  await updateSessionTabs(sessionId, tabs);
+  if (selectedSession?.id === sessionId) selectedSession.tabs = tabs;
+  refreshSavedSessionsSidebar();
+  render();
 }
 
 interface ConfirmOptions {
@@ -2165,7 +2244,7 @@ function renderSidebar() {
   lastSidebarFingerprint = fingerprint;
 
   if (!isSessionsView) {
-    document.getElementById("global-stats-count")!.textContent = `${totalTabs} videos · ${formatDurationWords(totalDuration)}`;
+    document.getElementById("global-stats-count")!.textContent = `${plural(totalTabs, "video")} · ${formatDurationWords(totalDuration)}`;
   }
 
   const liveView = !isReadingListView && selectedSession == null;
@@ -2331,8 +2410,10 @@ async function refreshSavedSessionsSidebar() {
   renderSessionsTotals(sessions);
   const query = normalizeText(sessionSidebarSearch.trim());
   const filtered = query
-    ? sessions.filter((session) => normalizeText(session.name).includes(query))
+    ? sessions.filter((session) => normalizeText(`${session.name} ${sessionDisplayName(session).title}`).includes(query))
     : sessions;
+  document.getElementById("session-sidebar-search")?.classList.toggle("hidden", sessions.length === 0);
+  document.getElementById("sessions-hint")?.classList.toggle("hidden", filtered.length === 0);
 
   const fp = [
     query,
@@ -2351,8 +2432,12 @@ async function refreshSavedSessionsSidebar() {
 
   if (filtered.length === 0) {
     container.innerHTML = query
-      ? emptyMessage(`No sessions match "${escapeHtml(query)}"`)
-      : emptyMessage("Nothing saved yet. The save button in the top bar keeps today's tabs as a session.");
+      ? emptyMessage(`No sessions match "${escapeHtml(query)}". Try part of a name or a language.`)
+      : `<div class="col-span-full flex flex-col items-center justify-center py-16 px-6 text-center">
+          <div class="font-display text-xl text-text-primary">No saved sessions yet</div>
+          <div class="text-sm text-text-muted mt-1 max-w-sm">A session keeps a set of tabs so you can close them now and open them again later.</div>
+          <button type="button" class="chip mt-4" data-empty-save-session>Save today's tabs</button>
+        </div>`;
     return;
   }
   const isSelected = (sessionId: string) => selectedSession?.id === sessionId;
@@ -2364,7 +2449,7 @@ function renderSessionsTotals(sessions: SavedSession[]): void {
   if (!stats || !isSessionsView) return;
   const totalVideos = sessions.reduce((sum, session) => sum + (session.tabs?.length ?? 0), 0);
   const totalSeconds = sessions.reduce((sum, session) => sum + sessionTotalSeconds(session.tabs ?? []), 0);
-  stats.textContent = `${sessions.length} ${sessions.length === 1 ? "session" : "sessions"} · ${totalVideos} videos · ${formatDurationWords(totalSeconds)} kept`;
+  stats.textContent = sessions.length === 0 ? "" : `${plural(sessions.length, "session")} · ${plural(totalVideos, "video")} · ${formatDurationWords(totalSeconds)} kept`;
 }
 
 const AUTO_SESSION_NAME = /^Session \d{1,2}\/\d{1,2}\/\d{2,4}, \d{1,2}:\d{2} (?:AM|PM)\s*(?:\((.+)\))?$/;
@@ -2372,8 +2457,8 @@ const AUTO_SESSION_NAME = /^Session \d{1,2}\/\d{1,2}\/\d{2,4}, \d{1,2}:\d{2} (?:
 /** Auto-named sessions ("Session 10/15/26, 7:27 AM") read as what they hold instead of when they were saved. */
 function sessionDisplayName(session: SavedSession): { title: string; custom: boolean } {
   const match = session.name.match(AUTO_SESSION_NAME);
-  if (!match) return { title: session.name, custom: true };
-  if (match[1]) return { title: match[1].trim(), custom: true };
+  if (!match && session.name.trim()) return { title: session.name, custom: true };
+  if (match?.[1]) return { title: match[1].trim(), custom: true };
   const languages = Array.from(tally(session.tabs ?? [], sessionTabLanguageLabel, (tab) => tab.seconds ?? 0).entries())
     .filter(([label]) => label !== UNKNOWN_LANGUAGE && label !== DETECTING_LANGUAGE)
     .sort((a, b) => b[1].seconds - a[1].seconds)
@@ -2399,7 +2484,7 @@ function sessionLanguageBarHtml(tabs: SavedSessionTab[]): string {
   const total = entries.reduce((sum, [, entry]) => sum + entry.seconds, 0);
   if (total <= 0) return `<div class="session-langs text-text-muted">No durations yet</div>`;
   const bar = entries
-    .map(([label, entry]) => `<span class="session-lang-seg" style="flex: ${Math.max(1, Math.round(entry.seconds))} 1 0px; background: ${languageColor(label)}" title="${escapeHtml(label)}: ${entry.count} videos, ${formatDurationWords(entry.seconds)}"></span>`)
+    .map(([label, entry]) => `<span class="session-lang-seg" style="flex: ${Math.max(1, Math.round(entry.seconds))} 1 0px; background: ${languageColor(label)}" title="${escapeHtml(label)}: ${plural(entry.count, "video")}, ${formatDurationWords(entry.seconds)}"></span>`)
     .join("");
   const shown = entries.slice(0, 3);
   const more = entries.length - shown.length;
@@ -2444,15 +2529,15 @@ function sessionCardHtml(session: SavedSession, active: boolean): string {
   const pileCount = orderedSections(session.sections).length;
   const pinIcon = `<svg class="shrink-0 w-3.5 h-3.5 text-accent" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>`;
   return `
-    <article class="session-card sidebar-item${active ? " session-card--active" : ""}" data-sidebar-type="session" data-session-id="${escapeHtml(session.id)}" data-pinned="${session.pinned ? "1" : "0"}" tabindex="0" role="button" aria-label="Open ${escapeHtml(title)} on the desk">
+    <article class="session-card sidebar-item${active ? " session-card--active" : ""}" data-sidebar-type="session" data-session-id="${escapeHtml(session.id)}" data-pinned="${session.pinned ? "1" : "0"}" aria-label="${escapeHtml(title)}">
       ${sessionThumbStripHtml(tabs)}
       <div class="session-card-head">
-        <h3 class="session-card-title${custom ? "" : " session-card-title--auto"}" title="${escapeHtml(session.name)}">${escapeHtml(title)}</h3>
+        <h3 class="session-card-title${custom ? "" : " session-card-title--auto"}"><button type="button" class="session-card-open" title="Put ${escapeHtml(title)} on the desk">${escapeHtml(title)}</button></h3>
         ${session.pinned ? pinIcon : ""}
         ${sessionAvatarStackHtml(tabs)}
       </div>
       <div class="session-card-sub">
-        <span class="tabular-nums">${tabs.length} videos · ${formatDurationWords(sessionTotalSeconds(tabs))}</span>
+        <span class="tabular-nums">${plural(tabs.length, "video")} · ${formatDurationWords(sessionTotalSeconds(tabs))}</span>
         ${pileCount > 0 ? `<span>· ${pileCount} ${pileCount === 1 ? "pile" : "piles"}</span>` : ""}
         <span class="text-text-muted/80">· saved ${escapeHtml(sessionSavedLabel(session.savedAt))}</span>
       </div>
@@ -2617,7 +2702,7 @@ function updateTabListAggregateHeadersFromState(): void {
     }
     const pills = wrapper.querySelectorAll(".session-stat-pill");
     if (pills.length >= 2) {
-      pills[0]!.textContent = `${sectionVideos.length} videos`;
+      pills[0]!.textContent = plural(sectionVideos.length, "video");
       pills[1]!.textContent = formatTime(sectionVideos.reduce((sum, video) => sum + video.seconds, 0));
     }
   });
@@ -2628,7 +2713,7 @@ function updateTabListAggregateHeadersFromState(): void {
     const groupVideos = videosToShow.filter((video) => videoGroupKey(video) === groupName);
     const spans = statsEl.querySelectorAll("span");
     if (spans.length >= 3) {
-      spans[0]!.textContent = `${groupVideos.length} videos`;
+      spans[0]!.textContent = plural(groupVideos.length, "video");
       spans[2]!.textContent = formatTime(groupVideos.reduce((accumulator, video) => accumulator + video.seconds, 0));
     }
   });
@@ -3051,8 +3136,8 @@ function renderMain() {
           <div class="w-12 h-12 rounded-xl bg-surface-elevated border border-border flex items-center justify-center mb-3 text-text-muted">
             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M6 6h10"/><path d="M6 10h10"/></svg>
           </div>
-          <p class="text-sm font-semibold text-text-primary">No unread reading list articles</p>
-          <p class="text-xs text-text-muted max-w-sm mt-1 leading-relaxed">Articles and links saved to Chrome's Reading List appear here for study triage and queueing.</p>
+          <p class="text-sm font-semibold text-text-primary">Your reading list is empty</p>
+          <p class="text-xs text-text-muted max-w-sm mt-1 leading-relaxed">In Chrome, click the bookmark star and choose Add to reading list. Unread pages show up here, ready to sort into your study plan.</p>
         </div>`
       );
       lastTabListFingerprint = fingerprintReadingList;
@@ -3808,9 +3893,74 @@ function anyDialogOpen(): boolean {
   );
 }
 
+const BROWSER_COMMAND_LABELS: Record<string, string> = {
+  _execute_action: "Open the popup",
+  "open-desk": "Open the desk",
+};
+
+async function renderBrowserShortcuts(): Promise<void> {
+  const list = document.getElementById("shortcuts-browser");
+  if (!list) return;
+  const commands = await browser.commands.getAll().catch(() => []);
+  list.replaceChildren(
+    ...commands
+      .filter((command) => command.name && BROWSER_COMMAND_LABELS[command.name])
+      .map((command) => {
+        const row = document.createElement("div");
+        row.className = "shortcut-row";
+        const label = document.createElement("dt");
+        label.textContent = BROWSER_COMMAND_LABELS[command.name!];
+        const keys = document.createElement("dd");
+        if (command.shortcut) {
+          const key = document.createElement("kbd");
+          key.textContent = command.shortcut;
+          keys.append(key);
+        } else {
+          keys.textContent = "Not set";
+          keys.className = "text-text-muted";
+        }
+        row.append(label, keys);
+        return row;
+      })
+  );
+}
+
+function openShortcutsDialog(): void {
+  const dialog = document.getElementById("shortcuts-modal");
+  if (!dialog) return;
+  void renderBrowserShortcuts();
+  dialog.classList.remove("hidden");
+  dialog.classList.add("flex");
+}
+
+function closeShortcutsDialog(): void {
+  const dialog = document.getElementById("shortcuts-modal");
+  dialog?.classList.add("hidden");
+  dialog?.classList.remove("flex");
+}
+
+function clickIfShown(id: string): void {
+  const element = document.getElementById(id) as HTMLButtonElement | HTMLInputElement | null;
+  if (!element || element.disabled || element.offsetParent === null) return;
+  element.click();
+}
+
+function undoFromToast(): boolean {
+  const undo = document.querySelector<HTMLButtonElement>("#toast:not(.hidden):not(.opacity-0) .toast-action");
+  if (!undo) return false;
+  undo.click();
+  return true;
+}
+
+const VIEW_SHORTCUTS: Record<string, string> = { "1": "nav-desk", "2": "nav-sessions", "3": "nav-reading-list", "4": "nav-time" };
+
 function handleDeskKeydown(event: KeyboardEvent): void {
-  if (event.ctrlKey || event.metaKey || event.altKey) return;
   if (anyDialogOpen()) return;
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "z") {
+    if (!keyboardTargetIsTyping(event) && undoFromToast()) event.preventDefault();
+    return;
+  }
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
   const onCheckbox = event.target instanceof HTMLInputElement && event.target.type === "checkbox";
   if (keyboardTargetIsTyping(event) && !(onCheckbox && event.key === "Escape")) {
     if (event.key !== "Escape") return;
@@ -3819,7 +3969,36 @@ function handleDeskKeydown(event: KeyboardEvent): void {
     else target.blur();
     return;
   }
+  if (VIEW_SHORTCUTS[event.key]) {
+    event.preventDefault();
+    clickIfShown(VIEW_SHORTCUTS[event.key]);
+    return;
+  }
   switch (event.key) {
+    case "?":
+      event.preventDefault();
+      openShortcutsDialog();
+      return;
+    case "z":
+      if (undoFromToast()) event.preventDefault();
+      return;
+    case "s":
+      event.preventDefault();
+      clickIfShown("btn-save-session");
+      return;
+    case "p":
+      event.preventDefault();
+      clickIfShown("btn-start-plan");
+      return;
+    case "v": {
+      event.preventDefault();
+      clickIfShown(layoutMode === "grid" ? "layout-list" : "layout-grid");
+      return;
+    }
+    case "a":
+      event.preventDefault();
+      clickIfShown("select-all-checkbox");
+      return;
     case "/": {
       event.preventDefault();
       const search = document.getElementById("search-input") as HTMLInputElement | null;
@@ -3881,11 +4060,11 @@ function queueThumbHtml(videoId: string | null, draggableOff: boolean): string {
   return `<img src="${src}"${keyAttr} class="manager-card-thumb w-full h-full object-cover" loading="lazy" decoding="async" alt=""${draggableOff ? ` draggable="false"` : ""} />`;
 }
 
-function queueCheckboxHtml(toggleClass: string, checked: boolean): string {
+function queueCheckboxHtml(toggleClass: string, checked: boolean, title: string): string {
   return `
     <div class="relative flex items-center justify-center w-5 h-5 shrink-0 cursor-pointer ${toggleClass}">
-      <input type="checkbox" draggable="false" class="peer appearance-none w-4 h-4 rounded border border-text-muted/50 checked:bg-accent checked:border-accent transition-colors cursor-pointer" ${checked ? "checked" : ""}>
-      <svg class="absolute w-2.5 h-2.5 text-on-accent opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      <input type="checkbox" draggable="false" class="peer appearance-none w-4 h-4 rounded border border-text-muted checked:bg-accent checked:border-accent transition-colors cursor-pointer" aria-label="Select ${escapeHtml(title)}" ${checked ? "checked" : ""}>
+      <svg class="absolute w-2.5 h-2.5 text-on-accent opacity-0 peer-checked:opacity-100 pointer-events-none" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
     </div>`;
 }
 
@@ -3914,18 +4093,18 @@ function renderVideoList(videos: VideoData[], sectionColorIndex?: number | "unso
       video.chapters && video.chapters.length > 0
         ? `
           <div class="video-chapters-container mt-2 pt-2 border-t border-border/40">
-            <button type="button" class="video-chapters-toggle text-[11px] font-semibold text-accent hover:text-accent-hover flex items-center gap-1.5 transition-colors cursor-pointer py-0.5">
-              <span class="chapter-toggle-arrow text-[9px] transition-transform">▶</span>
-              <span>📑 ${video.chapters.length} Chapters</span>
+            <button type="button" class="video-chapters-toggle text-[11px] font-semibold text-accent hover:text-accent-hover flex items-center gap-1.5 transition-colors cursor-pointer py-0.5" aria-expanded="false">
+              <svg class="chapter-toggle-arrow shrink-0 transition-transform" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+              <span>${plural(video.chapters.length, "chapter")}</span>
             </button>
             <div class="video-chapters-list hidden mt-1.5 space-y-1 pl-2.5 border-l-2 border-accent/30 text-xs">
               ${video.chapters
                 .map(
                   (chapter) => `
-                <div class="video-chapter-item flex items-center justify-between py-1 px-1.5 rounded hover:bg-surface-hover/70 cursor-pointer group/chapter transition-colors" data-video-id="${video.id}" data-time="${chapter.startSeconds}">
+                <button type="button" class="video-chapter-item w-full text-left border-0 bg-transparent flex items-center justify-between py-1 px-1.5 rounded hover:bg-surface-hover/70 cursor-pointer group/chapter transition-colors" data-video-id="${video.id}" data-time="${chapter.startSeconds}" title="Play from ${formatCompact(chapter.startSeconds)}">
                   <span class="truncate mr-3 font-medium text-text-secondary group-hover/chapter:text-accent transition-colors">${escapeHtml(chapter.title)}</span>
                   <span class="tabular-nums text-[11px] text-text-muted shrink-0">${formatCompact(chapter.startSeconds)}${chapter.durationSeconds ? ` · ${formatDurationWords(chapter.durationSeconds)}` : ""}</span>
-                </div>
+                </button>
               `
                 )
                 .join("")}
@@ -3936,9 +4115,9 @@ function renderVideoList(videos: VideoData[], sectionColorIndex?: number | "unso
 
     return `
       <div class="${rowClass}" data-id="${video.id}"${dnd.draggableAttr}>
-        <div class="queue-offset">${offsetLabel}</div>
+        <div class="queue-offset" title="When this video starts if you watch the list in order">${offsetLabel}</div>
         <div class="queue-body">
-          ${queueCheckboxHtml("selection-toggle", isSelected)}
+          ${queueCheckboxHtml("selection-toggle", isSelected, video.title)}
           <div class="queue-thumb video-click-target cursor-pointer">
             ${queueThumbHtml(getVideoIdFromUrl(video.url), imgDragOff)}
             <div class="manager-card-duration absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-medium text-white tabular-nums">${video.isLive ? "LIVE" : formatCompact(video.seconds)}</div>
@@ -4021,11 +4200,11 @@ function renderSessionGrid(tabs: SavedSessionTab[], sectionColorIndex?: number |
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="white" class="shrink-0 -translate-x-px" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
             </div>
           </div>
-          <div class="absolute top-2 left-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity ${isSelected ? "opacity-100" : ""} session-selection-toggle flex items-center justify-center w-5 h-5">
-            <input type="checkbox" draggable="false" class="peer appearance-none w-4 h-4 rounded border border-white/60 checked:bg-accent checked:border-accent bg-black/40 backdrop-blur-sm transition-colors cursor-pointer" ${isSelected ? "checked" : ""}>
+          <div class="absolute top-2 left-2 z-10 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity ${isSelected ? "opacity-100" : ""} session-selection-toggle flex items-center justify-center w-5 h-5">
+            <input type="checkbox" draggable="false" class="peer appearance-none w-4 h-4 rounded border border-white/60 checked:bg-accent checked:border-accent bg-black/40 backdrop-blur-sm transition-colors cursor-pointer" aria-label="Select ${escapeHtml(title)}" ${isSelected ? "checked" : ""}>
             <svg class="absolute w-2.5 h-2.5 text-on-accent opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
           </div>
-          <div class="absolute top-1 right-1 z-10 flex gap-1 opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 transition-opacity duration-200">
+          <div class="absolute top-1 right-1 z-10 flex gap-1 opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 transition-opacity duration-200">
             <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center hover:bg-black/60 bg-black/40 text-white rounded-md backdrop-blur-sm transition-[background-color] active:scale-[0.96] session-open-new-tab" title="Open in new tab">
               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
             </button>
@@ -4065,9 +4244,9 @@ function renderSessionList(tabs: SavedSessionTab[], sectionColorIndex?: number |
     const languageLabel = tab.languageName ? tab.languageName.split("(")[0].trim() : "";
     return `
       <div class="queue-row group${isSelected ? " queue-row--selected" : ""}${dnd.extraClass}" data-session-tab-url="${urlAttr}"${dnd.draggableAttr}>
-        <div class="queue-offset">${offsetLabel}</div>
+        <div class="queue-offset" title="When this video starts if you watch the list in order">${offsetLabel}</div>
         <div class="queue-body">
-          ${queueCheckboxHtml("session-selection-toggle", isSelected)}
+          ${queueCheckboxHtml("session-selection-toggle", isSelected, title)}
           <div class="queue-thumb session-video-click-target cursor-pointer">
             ${queueThumbHtml(getVideoIdFromUrl(tab.url), imgDragOff)}
             <div class="absolute bottom-1 right-1 px-1 py-0.5 bg-black/80 rounded text-[10px] font-medium text-white tabular-nums">${formatCompact(sec)}</div>
@@ -4127,17 +4306,17 @@ function renderVideoGrid(videos: VideoData[], sectionColorIndex?: number | "unso
                         </div>
                     </div>
 
-                    <div class="absolute top-2 left-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity ${isSelected ? 'opacity-100' : ''} selection-toggle flex items-center justify-center w-5 h-5">
-                        <input type="checkbox" draggable="false" class="peer appearance-none w-4 h-4 rounded border border-white/60 checked:bg-accent checked:border-accent bg-black/40 backdrop-blur-sm transition-colors cursor-pointer" ${isSelected ? 'checked' : ''}>
+                    <div class="absolute top-2 left-2 z-10 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity ${isSelected ? 'opacity-100' : ''} selection-toggle flex items-center justify-center w-5 h-5">
+                        <input type="checkbox" draggable="false" class="peer appearance-none w-4 h-4 rounded border border-white/60 checked:bg-accent checked:border-accent bg-black/40 backdrop-blur-sm transition-colors cursor-pointer" aria-label="Select ${escapeHtml(video.title)}" ${isSelected ? 'checked' : ''}>
                         <svg class="absolute w-2.5 h-2.5 text-on-accent opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                     </div>
 
-                    <div class="absolute top-1 right-1 z-10 flex gap-1 opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 transition-opacity duration-200">
+                    <div class="absolute top-1 right-1 z-10 flex gap-1 opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 transition-opacity duration-200">
                          <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center bg-black/40 hover:bg-accent text-white rounded-md backdrop-blur-sm border border-white/10 hover:border-accent transition-[background-color,border-color] duration-200 active:scale-[0.96] jump-btn" title="Go to tab">
-                             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+                             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
                          </button>
-                         <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center bg-black/40 hover:bg-accent text-white rounded-md backdrop-blur-sm border border-white/10 hover:border-accent transition-[background-color,border-color] duration-200 active:scale-[0.96] close-btn" title="Close tab">
-                             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>
+                         <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center bg-black/40 hover:bg-danger text-white rounded-md backdrop-blur-sm border border-white/10 hover:border-danger transition-[background-color,border-color] duration-200 active:scale-[0.96] close-btn" title="Close tab">
+                             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>
                          </button>
                     </div>
                 </div>
@@ -4149,25 +4328,25 @@ function renderVideoGrid(videos: VideoData[], sectionColorIndex?: number | "unso
                         <div class="flex items-center gap-1 shrink-0">
                           ${windowBadgeHtml(video)}
                           ${duplicateBadgeHtml(video.url)}
-                          ${video.languageName ? `<span class="manager-card-language bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0">${video.languageName.split('(')[0].trim()}</span>` : `<span class="manager-card-language hidden"></span>`}
+                          ${video.languageName ? `<span class="manager-card-language bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0">${escapeHtml(video.languageName.split('(')[0].trim())}</span>` : `<span class="manager-card-language hidden"></span>`}
                         </div>
                     </div>
                     ${
                       video.chapters && video.chapters.length > 0
                         ? `
                           <div class="video-chapters-container mt-1.5 pt-1.5 border-t border-border/40">
-                            <button type="button" class="video-chapters-toggle text-[10px] font-semibold text-accent hover:text-accent-hover flex items-center gap-1 transition-colors cursor-pointer py-0.5">
-                              <span class="chapter-toggle-arrow text-[8px] transition-transform">▶</span>
-                              <span>📑 ${video.chapters.length} Chapters</span>
+                            <button type="button" class="video-chapters-toggle text-[10px] font-semibold text-accent hover:text-accent-hover flex items-center gap-1 transition-colors cursor-pointer py-0.5" aria-expanded="false">
+                              <svg class="chapter-toggle-arrow shrink-0 transition-transform" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+                              <span>${plural(video.chapters.length, "chapter")}</span>
                             </button>
                             <div class="video-chapters-list hidden mt-1 space-y-0.5 pl-2 border-l-2 border-accent/30 text-[11px] max-h-36 overflow-y-auto custom-scrollbar">
                               ${video.chapters
                                 .map(
                                   (chapter) => `
-                                <div class="video-chapter-item flex items-center justify-between py-0.5 px-1 rounded hover:bg-surface-hover/70 cursor-pointer group/chapter transition-colors" data-video-id="${video.id}" data-time="${chapter.startSeconds}">
+                                <button type="button" class="video-chapter-item w-full text-left border-0 bg-transparent flex items-center justify-between py-0.5 px-1 rounded hover:bg-surface-hover/70 cursor-pointer group/chapter transition-colors" data-video-id="${video.id}" data-time="${chapter.startSeconds}" title="Play from ${formatCompact(chapter.startSeconds)}">
                                   <span class="truncate mr-1 font-medium text-text-secondary group-hover/chapter:text-accent transition-colors text-[10px]">${escapeHtml(chapter.title)}</span>
                                   <span class="tabular-nums text-[10px] text-text-muted shrink-0">${formatCompact(chapter.startSeconds)}</span>
-                                </div>
+                                </button>
                               `
                                 )
                                 .join("")}
@@ -4453,13 +4632,13 @@ function openStudySessionModal(targetTabIds?: number[]): void {
   }
 
   if (queueTabIds.length === 0) {
-    showToast("No active YouTube tabs available to stage.");
+    showToast("There are no YouTube tabs to study. Open a few videos first.");
     return;
   }
 
   const previewContainer = document.getElementById("study-queue-preview");
   const countBadge = document.getElementById("study-queue-count");
-  if (countBadge) countBadge.textContent = String(queueTabIds.length);
+  if (countBadge) countBadge.textContent = `${queueTabIds.length} ${queueTabIds.length === 1 ? "video" : "videos"}`;
 
   if (previewContainer) {
     const queueVideos = queueTabIds
@@ -4467,16 +4646,16 @@ function openStudySessionModal(targetTabIds?: number[]): void {
       .filter((video): video is VideoData => Boolean(video));
 
     if (queueVideos.length === 0) {
-      previewContainer.innerHTML = `<div class="p-2 text-text-muted text-center">No tabs found.</div>`;
+      previewContainer.innerHTML = `<li class="p-2 text-text-muted text-center">These tabs were closed. Pick other videos and try again.</li>`;
     } else {
       previewContainer.innerHTML = queueVideos
         .map(
           (video, index) => `
-          <div class="flex items-center gap-2 p-1.5 rounded bg-surface-elevated/50 border border-border/40 text-xs text-text-primary" data-queue-tab-id="${video.id}">
-            <span class="w-4 text-center tabular-nums text-[10px] text-text-muted shrink-0">${index + 1}</span>
-            <span class="truncate flex-1 font-medium">${escapeHtml(video.title)}</span>
+          <li class="flex items-center gap-2 p-1.5 rounded bg-surface-elevated/50 border border-border/40 text-xs text-text-primary" data-queue-tab-id="${video.id}">
+            <span class="w-4 text-center tabular-nums text-[10px] text-text-muted shrink-0" aria-hidden="true">${index + 1}</span>
+            <span class="truncate flex-1 font-medium" title="${escapeHtml(video.title)}">${escapeHtml(video.title)}</span>
             <span class="text-[10px] tabular-nums text-text-muted shrink-0 px-1.5 py-0.5 rounded bg-surface border border-border">${formatTime(video.seconds)}</span>
-          </div>
+          </li>
         `
         )
         .join("");
@@ -4501,7 +4680,9 @@ function updateSpeedSelectorUI(speed: number): void {
   const speedButtons = document.querySelectorAll(".study-speed-btn");
   speedButtons.forEach((button) => {
     const buttonSpeed = parseFloat(button.getAttribute("data-speed") || "1");
-    if (Math.abs(buttonSpeed - speed) < 0.01) {
+    const active = Math.abs(buttonSpeed - speed) < 0.01;
+    button.setAttribute("aria-pressed", String(active));
+    if (active) {
       button.classList.add("text-accent", "bg-surface-hover");
       button.classList.remove("text-text-muted");
     } else {
@@ -4518,14 +4699,14 @@ async function handleLaunchStudyQueue(): Promise<void> {
     .filter((tabId) => Number.isInteger(tabId) && tabId > 0);
 
   if (orderedTabIds.length === 0) {
-    showToast("No tabs queued to stage.");
+    showToast("The queue is empty. Pick at least one video.");
     return;
   }
 
   const stashCheckbox = document.getElementById("study-stash-distractions") as HTMLInputElement | null;
   const stashDistractionTabs = stashCheckbox?.checked ?? false;
   const sessionNameInput = document.getElementById("study-session-name-input") as HTMLInputElement | null;
-  const sessionName = sessionNameInput?.value.trim() || "Stashed Backlog";
+  const sessionName = sessionNameInput?.value.trim() || "Put away for later";
 
   try {
     const response = await browser.runtime.sendMessage({
@@ -4544,16 +4725,16 @@ async function handleLaunchStudyQueue(): Promise<void> {
       updateSelectionUI();
       showToast(
         stashDistractionTabs && response.stashedCount > 0
-          ? `Focused queue started. Stashed ${response.stashedCount} distraction tabs.`
-          : `Focused queue started at ${selectedPlaybackSpeed}x speed.`
+          ? `Session started. ${response.stashedCount} other ${response.stashedCount === 1 ? "tab was" : "tabs were"} saved to "${sessionName}" and closed.`
+          : `Session started at ${formatPlaybackRate(selectedPlaybackSpeed)}.`
       );
       await fetchTabs();
       await refreshSavedSessionsSidebar();
     } else {
-      showToast(response?.errorMessage || "Failed to stage study queue.");
+      showToast(response?.errorMessage || "The session could not start. Check that the tabs are still open and try again.");
     }
   } catch (error) {
-    showToast(error instanceof Error ? error.message : "Error staging study queue.");
+    showToast(error instanceof Error ? error.message : "The session could not start. Try again.");
   }
 }
 
@@ -4612,13 +4793,8 @@ function setupListeners() {
     if (selectedSession) {
       const urls = Array.from(selectedSessionTabUrls);
       if (urls.length === 0) return;
-      const confirmed = await showConfirm({
-        title: "Remove from session",
-        message: `Remove ${urls.length} video(s) from "${selectedSession.name}"?`,
-        confirmLabel: "Remove",
-        confirmDanger: true,
-      });
-      if (!confirmed) return;
+      const session = selectedSession;
+      const previousTabs = [...(session.tabs ?? [])];
       const newTabs = (selectedSession.tabs ?? []).filter(
         (sessionTab) => !urls.some((u) => sessionTabMatchesUrl(sessionTab, u))
       );
@@ -4628,21 +4804,17 @@ function setupListeners() {
       refreshSavedSessionsSidebar();
       updateSelectionUI();
       render();
+      showToast(`Removed ${plural(urls.length, "video")} from "${sessionDisplayName(session).title}"`, {
+        label: "Undo",
+        run: () => restoreSessionTabs(session.id, previousTabs),
+      });
       return;
     }
-    const ids = Array.from(selectedTabIds);
-    const confirmed = await showConfirm({
-      title: "Close tabs",
-      message: `Close ${ids.length} tabs?`,
-      confirmLabel: "Close",
-      confirmDanger: true,
-    });
-    if (confirmed) {
-      await browser.tabs.remove(ids);
-      selectedTabIds.clear();
-      updateSelectionUI();
-      fetchTabs();
-    }
+    const videos = allVideos.filter((video) => selectedTabIds.has(video.id));
+    await closeVideoTabs(videos);
+    selectedTabIds.clear();
+    updateSelectionUI();
+    fetchTabs();
   });
 
   document.getElementById("btn-stage-study-selected")?.addEventListener("click", () => {
@@ -4792,6 +4964,10 @@ function setupListeners() {
   });
 
   document.getElementById("saved-sessions-sidebar")?.addEventListener("click", (event) => {
+    if ((event.target as HTMLElement).closest("[data-empty-save-session]")) {
+      document.getElementById("btn-save-session")?.click();
+      return;
+    }
     const button = (event.target as HTMLElement).closest<HTMLElement>("[data-session-action]");
     if (!button) return;
     const card = button.closest<HTMLElement>("[data-session-id]");
@@ -4808,13 +4984,6 @@ function setupListeners() {
       const rect = button.getBoundingClientRect();
       card.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: rect.left, clientY: rect.bottom + 4 }));
     }
-  });
-  document.getElementById("saved-sessions-sidebar")?.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    const card = (event.target as HTMLElement).closest<HTMLElement>(".session-card");
-    if (!card || event.target !== card) return;
-    event.preventDefault();
-    card.click();
   });
 
   document.body.addEventListener("click", async (event) => {
@@ -4979,14 +5148,8 @@ function setupListeners() {
         if (target.closest(".session-remove-btn")) {
           event.stopPropagation();
           const tab = (selectedSession.tabs ?? []).find((sessionTab) => sessionTabMatchesUrl(sessionTab, url));
-          const title = tab?.title ?? "this video";
-          const confirmed = await showConfirm({
-            title: "Remove from session",
-            message: `Remove "${title}" from "${selectedSession.name}"?`,
-            confirmLabel: "Remove",
-            confirmDanger: true,
-          });
-          if (!confirmed) return;
+          const session = selectedSession;
+          const previousTabs = [...(session.tabs ?? [])];
           const newTabs = (selectedSession.tabs ?? []).filter((sessionTab) => !sessionTabMatchesUrl(sessionTab, url));
           await updateSessionTabs(selectedSession.id, newTabs);
           selectedSession.tabs = newTabs;
@@ -4994,6 +5157,10 @@ function setupListeners() {
           refreshSavedSessionsSidebar();
           updateSelectionUI();
           render();
+          showToast(`Removed "${tab?.title || "the video"}" from "${sessionDisplayName(session).title}"`, {
+            label: "Undo",
+            run: () => restoreSessionTabs(session.id, previousTabs),
+          });
           return;
         }
         if (target.closest(".session-selection-toggle")) {
@@ -5052,10 +5219,8 @@ function setupListeners() {
       if (list) {
         list.classList.toggle("hidden");
         const isExpanded = !list.classList.contains("hidden");
-        const arrow = chapterToggle.querySelector(".chapter-toggle-arrow");
-        if (arrow) {
-          arrow.textContent = isExpanded ? "▼" : "▶";
-        }
+        chapterToggle.setAttribute("aria-expanded", String(isExpanded));
+        chapterToggle.querySelector(".chapter-toggle-arrow")?.classList.toggle("rotate-90", isExpanded);
       }
       return;
     }
@@ -5077,7 +5242,9 @@ function setupListeners() {
     }
     if (target.closest(".close-btn")) {
       event.stopPropagation();
-      await browser.tabs.remove(id);
+      const closing = allVideos.find((video) => video.id === id);
+      if (closing) await closeVideoTabs([closing]);
+      else await browser.tabs.remove(id);
       row?.remove();
       allVideos = allVideos.filter((video) => video.id !== id);
       for (const group of windowGroups) {
@@ -5745,6 +5912,15 @@ function setupListeners() {
     document.getElementById("move-to-section-popover")?.classList.add("hidden");
   });
 
+  document.getElementById("shortcuts-close")?.addEventListener("click", closeShortcutsDialog);
+  document.getElementById("shortcuts-modal")?.addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) closeShortcutsDialog();
+  });
+  document.getElementById("settings-open-shortcuts")?.addEventListener("click", openShortcutsDialog);
+  document.getElementById("shortcuts-change-browser")?.addEventListener("click", () => {
+    void browser.tabs.create({ url: "chrome://extensions/shortcuts" });
+  });
+
   document.getElementById("btn-settings")?.addEventListener("click", () => {
     isSettingsOpen = true;
     render();
@@ -5760,7 +5936,7 @@ function setupListeners() {
     if (event.target === event.currentTarget) closeSettings();
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && isSettingsOpen && !document.querySelector("#confirm-modal:not(.hidden)")) closeSettings();
+    if (event.key === "Escape" && isSettingsOpen && !document.querySelector("#confirm-modal:not(.hidden), #shortcuts-modal:not(.hidden)")) closeSettings();
   });
 
   document.getElementById("quality-standard")?.addEventListener("click", () => {
@@ -5871,7 +6047,7 @@ function setupListeners() {
     if (rows.length === 0) {
       container.innerHTML = "<span class='text-text-muted/70'>No YouTube tabs open</span>";
     } else {
-      container.innerHTML = rows.map((row) => `<div class="truncate" title="${row}">${row}</div>`).join("");
+      container.innerHTML = rows.map((row) => `<div class="truncate" title="${escapeHtml(row)}">${escapeHtml(row)}</div>`).join("");
     }
   });
 }
@@ -5890,7 +6066,6 @@ let ruleSaveTimer: ReturnType<typeof setTimeout> | null = null;
 const RULE_SAVE_DELAY_MS = 600;
 let dayChartMode: "screen" | "language" = "language";
 
-const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
 const TIME_RANGES = [7, 30, 90] as const;
 const CHANNEL_ROWS = 8;
 const VIDEO_ROWS_PAGE = 20;
@@ -5900,9 +6075,9 @@ const HEAT_LEVELS = 5;
 const TRASH_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`;
 const CHEVRON_RIGHT_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-text-muted transition-transform" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>`;
 
-function dayLetter(key: string): string {
+function weekdayShort(key: string): string {
   const [year, month, day] = key.split("-").map(Number);
-  return DAY_LETTERS[new Date(year, month - 1, day).getDay()];
+  return new Date(year, month - 1, day).toLocaleDateString(undefined, { weekday: "short" });
 }
 
 function longDate(key: string): string {
@@ -6004,7 +6179,7 @@ function watchVideoRowHtml(video: WatchVideoRow, colors: Map<string, string>): s
       <span class="truncate text-xs text-text-muted flex items-center gap-1.5">${languageMarkHtml(video.language, colorOfLanguage(colors, video.language))}<span class="truncate">${escapeHtml([video.channelName, video.language, timeAgoWords(video.lastAt)].filter(Boolean).join(" · "))}</span></span>
     </span>
     <span class="justify-self-start">${faster ? `<span class="speed-chip" title="${escapeHtml(`${formatMinutesWords(video.videoSeconds)} of video in ${formatMinutesWords(video.playedSeconds)}`)}">${speedWords(speed)}</span>` : ""}</span>
-    <span class="text-right text-xs text-text-muted tabular-nums" title="${video.durationSeconds > 0 ? `Of ${formatMinutesWords(video.durationSeconds)}` : ""}">${progress}</span>
+    <span class="text-right text-xs text-text-muted tabular-nums" title="${video.durationSeconds > 0 ? `Seen ${progress} of ${formatMinutesWords(video.durationSeconds)}` : ""}">${progress}</span>
     <span class="text-right text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(video.playedSeconds)}</span>
   </li>`;
 }
@@ -6037,7 +6212,7 @@ function dayBarsHtml(watch: WatchSummary, colors: Map<string, string>): string {
         ? order.filter((label) => (day.languages[label] ?? 0) >= 60).map((label) => `${label}: ${formatMinutesWords(day.languages[label])}`)
         : [`On screen: ${formatMinutesWords(day.visible)}`, ...(behind >= 60 ? [`Background: ${formatMinutesWords(behind)}`] : [])];
       const tip = [`${longDate(day.key)}: ${formatMinutesWords(day.seconds)}`, ...breakdown].join("\n");
-      const label = timeRange === 7 ? dayLetter(day.key) : !dense || index % 15 === 0 ? day.key.slice(dense ? 5 : 8) : "";
+      const label = timeRange === 7 ? weekdayShort(day.key) : !dense || index % 15 === 0 ? day.key.slice(dense ? 5 : 8) : "";
       return `<div class="flex flex-col items-center gap-1.5 min-w-0" title="${escapeHtml(tip)}">
         <div class="w-full h-40 flex flex-col-reverse ${dense ? "" : "gap-[2px]"} rounded-md bg-surface-elevated overflow-hidden">${segments}</div>
         <span class="text-[11px] text-text-muted tabular-nums whitespace-nowrap">${label || "&nbsp;"}</span>
@@ -6233,6 +6408,7 @@ function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): strin
     ${channelsSectionHtml(watch, colors)}
     <section class="flex flex-col gap-3">
       ${timeSectionHeading("Videos", `<span class="text-xs text-text-muted tabular-nums">${shownVideos < watch.videos.length ? `${shownVideos} of ${watch.videos.length}` : watch.videos.length}</span>`, "list")}
+      <div class="grid grid-cols-[4rem_minmax(0,1fr)_3.5rem_3rem_5.5rem] gap-3 text-[11px] uppercase tracking-[0.1em] text-text-muted" aria-hidden="true"><span></span><span>Video</span><span>Speed</span><span class="text-right">Seen</span><span class="text-right">Time</span></div>
       <ul class="m-0 p-0 list-none flex flex-col gap-2.5">${videosHtml}</ul>
       ${videosMoreHtml}
     </section>
@@ -6346,7 +6522,7 @@ function streakSectionHtml(streaks: GoalStreaks, watch: WatchSummary): string {
       </div>
       ${
         rulesHtml
-          ? `<div class="min-w-0 border-t md:border-t-0 md:border-l border-border pt-4 md:pt-0 md:pl-6"><div class="text-xs text-text-muted mb-1">Each on its own</div><ul class="m-0 p-0 list-none">${rulesHtml}</ul></div>`
+          ? `<div class="min-w-0 border-t md:border-t-0 md:border-l border-border pt-4 md:pt-0 md:pl-6"><div class="text-xs text-text-muted mb-1">Each goal and limit</div><ul class="m-0 p-0 list-none">${rulesHtml}</ul></div>`
           : `<div class="min-w-0 border-t md:border-t-0 md:border-l border-border pt-4 md:pt-0 md:pl-6 text-sm text-text-muted self-center">Add a daily goal above and the streak counts the days you reach it.</div>`
       }
     </div>
@@ -6532,7 +6708,11 @@ async function renderTimePanel(): Promise<void> {
     data = (await browser.runtime.sendMessage({ action: "get-time-summary", days: timeRange })) as TimeSummaryResponse;
     if (!data || data.errorMessage) throw new Error(data?.errorMessage || "No answer");
   } catch (error) {
-    panel.innerHTML = `<p class="text-sm text-text-muted m-0">Could not read the time log: ${escapeHtml(error instanceof Error ? error.message : String(error))}</p>`;
+    panel.innerHTML = `<div class="flex flex-col items-start gap-3">
+      <p class="text-sm text-text-secondary m-0">Your watch time could not be loaded. Nothing was lost. Try again in a moment.</p>
+      <p class="text-xs text-text-muted m-0">${escapeHtml(error instanceof Error ? error.message : String(error))}</p>
+      <button type="button" id="time-retry" class="chip">Try again</button>
+    </div>`;
     panel.setAttribute("aria-busy", "false");
     return;
   }
@@ -6547,7 +6727,7 @@ async function renderTimePanel(): Promise<void> {
     kicker: "Time",
     title: "",
     value: formatMinutesWords(watch.total.playedSeconds),
-    suffix: timeRange === 7 ? " watched this week" : ` watched in ${timeRange} days`,
+    suffix: timeRange === 7 ? "watched this week" : `watched in ${timeRange} days`,
   });
 
   const rangeHtml = `<span class="ui-segmented" role="group" aria-label="Range">
@@ -6558,9 +6738,9 @@ async function renderTimePanel(): Promise<void> {
   const typedLanguage = panel.querySelector<HTMLInputElement>("#time-rule-language")?.value ?? "";
 
   panel.innerHTML = `
-    <div class="flex justify-end">${rangeHtml}</div>
     ${dailyRulesHtml(data.limits ?? [], watch, prefs)}
     ${data.streaks ? streakSectionHtml(data.streaks, watch) : ""}
+    <div class="flex items-center justify-between gap-3 pt-2 border-t border-border"><span class="text-sm text-text-secondary">Everything below covers the last</span>${rangeHtml}</div>
     <div id="time-watch" class="contents">${watchSectionsHtml(watch, prefs)}</div>
     ${mandalaSectionHtml(data)}
     <section class="flex flex-col gap-3 pb-6">
@@ -6779,6 +6959,10 @@ function wireTimePanel(panel: HTMLElement): void {
       await browser.tabs.create({ url: "https://mandalamethod.vercel.app/" });
       return;
     }
+    if (target.closest("#time-retry")) {
+      await renderTimePanel();
+      return;
+    }
     if (target.closest("#time-export-csv")) {
       openExportModal();
       return;
@@ -6859,6 +7043,7 @@ document.addEventListener("DOMContentLoaded", () => {
     mountThemeControl(appearanceControl);
   }
   installTooltips();
+  installDialogs();
   // Avatar URLs go stale when a channel changes its picture; error doesn't bubble, so listen in capture.
   document.addEventListener(
     "error",

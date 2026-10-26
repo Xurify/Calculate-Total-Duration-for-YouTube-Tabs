@@ -13,7 +13,7 @@
   }
 
   .chip--danger {
-    @apply hover:border-danger/40 hover:bg-danger/10 hover:text-danger;
+    @apply text-danger hover:border-danger/40 hover:bg-danger/10 hover:text-danger;
   }
 
   .budget-chip {

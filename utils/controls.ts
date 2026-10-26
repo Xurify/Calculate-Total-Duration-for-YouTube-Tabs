@@ -214,3 +214,93 @@ export function syncRangeFill(input: HTMLInputElement): void {
   const max = Number(input.max) || 100;
   input.style.setProperty("--range-fill", `${((Number(input.value) - min) / (max - min)) * 100}%`);
 }
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function isShown(element: HTMLElement): boolean {
+  return !element.classList.contains("hidden") && element.getClientRects().length > 0;
+}
+
+function focusableIn(dialog: HTMLElement): HTMLElement[] {
+  return Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((element) => element.getClientRects().length > 0);
+}
+
+/**
+ * Gives every [role="dialog"] the same keyboard contract, however it is opened or closed: focus moves in when it
+ * appears, Tab stays inside, Escape presses its [data-dialog-cancel] control, and focus returns to the opener.
+ */
+export function installDialogs(root: Document = document): void {
+  const openers = new WeakMap<HTMLElement, HTMLElement>();
+  const open = new Set<HTMLElement>();
+
+  const topmost = (): HTMLElement | null => {
+    const shown = Array.from(open).filter(isShown);
+    return shown.sort((first, second) => Number(getComputedStyle(second).zIndex) - Number(getComputedStyle(first).zIndex))[0] ?? null;
+  };
+
+  const sync = (dialog: HTMLElement) => {
+    const shown = isShown(dialog);
+    if (shown && !open.has(dialog)) {
+      open.add(dialog);
+      const active = root.activeElement;
+      if (active instanceof HTMLElement && !dialog.contains(active)) openers.set(dialog, active);
+      requestAnimationFrame(() => {
+        if (!isShown(dialog) || dialog.contains(root.activeElement)) return;
+        const preferred = dialog.querySelector<HTMLElement>("[data-dialog-focus]");
+        (preferred && preferred.getClientRects().length > 0 ? preferred : focusableIn(dialog)[0])?.focus();
+      });
+    } else if (!shown && open.has(dialog)) {
+      open.delete(dialog);
+      const opener = openers.get(dialog);
+      openers.delete(dialog);
+      const focusLost = root.activeElement === root.body || dialog.contains(root.activeElement);
+      if (opener?.isConnected && focusLost) opener.focus();
+    }
+  };
+
+  const watch = (dialog: HTMLElement) => {
+    new MutationObserver(() => sync(dialog)).observe(dialog, { attributes: true, attributeFilter: ["class", "hidden", "style"] });
+    sync(dialog);
+  };
+  root.querySelectorAll<HTMLElement>('[role="dialog"]').forEach(watch);
+  new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      mutation.addedNodes.forEach((node) => {
+        if (!(node instanceof HTMLElement)) return;
+        if (node.matches('[role="dialog"]')) watch(node);
+        node.querySelectorAll<HTMLElement>('[role="dialog"]').forEach(watch);
+      });
+    }
+  }).observe(root.body, { childList: true, subtree: true });
+
+  root.addEventListener("keydown", (event) => {
+    const dialog = topmost();
+    if (!dialog) return;
+    if (event.key === "Escape" && !event.defaultPrevented) {
+      // An open listbox inside the dialog takes the first Escape.
+      if (dialog.querySelector('[aria-expanded="true"]')) return;
+      const cancel = dialog.querySelector<HTMLElement>("[data-dialog-cancel]");
+      if (!cancel) return;
+      event.preventDefault();
+      cancel.click();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const items = focusableIn(dialog);
+    if (items.length === 0) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = root.activeElement;
+    if (!dialog.contains(active)) {
+      event.preventDefault();
+      first.focus();
+    } else if (event.shiftKey && active === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
+}

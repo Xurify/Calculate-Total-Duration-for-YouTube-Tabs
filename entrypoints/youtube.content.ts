@@ -434,6 +434,7 @@ function showImmersionToast(messageText: string, durationMs = 3200) {
   const container = getTargetPlayerContainer();
   const toastElement = document.createElement("div");
   toastElement.id = "study-harvester-hud-toast";
+  toastElement.setAttribute("role", "status");
   toastElement.textContent = messageText;
 
   container.appendChild(toastElement);
@@ -648,6 +649,9 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
   modalWrapper.id = "study-harvester-cloze-modal";
   const cardElement = document.createElement("div");
   cardElement.className = "study-harvester-cloze-card";
+  cardElement.setAttribute("role", "dialog");
+  cardElement.setAttribute("aria-modal", "true");
+  cardElement.setAttribute("aria-label", "Make a cloze card");
   cardElement.tabIndex = -1;
   modalWrapper.appendChild(cardElement);
 
@@ -675,6 +679,7 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
   closeButton.appendChild(hudIcon("close"));
   closeButton.type = "button";
   closeButton.title = "Close";
+  closeButton.setAttribute("aria-label", "Close");
   headerRow.appendChild(closeButton);
   cardElement.appendChild(headerRow);
 
@@ -697,15 +702,18 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
   previousButton.appendChild(hudIcon("previous"));
   previousButton.type = "button";
   previousButton.title = "Previous sentence";
+  previousButton.setAttribute("aria-label", "Previous sentence");
   const listenButton = createElement("button", "study-harvester-cloze-nav-btn is-listen");
   const listenTime = createElement("span", "");
   listenButton.append(hudIcon("play", true), listenTime);
   listenButton.type = "button";
   listenButton.title = "Play this sentence";
+  listenButton.setAttribute("aria-label", "Play this sentence");
   const nextButton = createElement("button", "study-harvester-cloze-nav-btn");
   nextButton.appendChild(hudIcon("next"));
   nextButton.type = "button";
   nextButton.title = "Next sentence";
+  nextButton.setAttribute("aria-label", "Next sentence");
   navigationGroup.append(previousButton, listenButton, nextButton);
   const answerLine = createElement("div", "study-harvester-cloze-pick");
   const translationInput = document.createElement("input");
@@ -718,11 +726,14 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
   saveButton.type = "button";
   toolbarRow.append(navigationGroup, answerLine, translationInput, saveButton);
   cardElement.appendChild(toolbarRow);
+  cardElement.appendChild(
+    createElement("div", "study-harvester-cloze-note", "← → word · ↑ ↓ sentence · Enter save · Esc close")
+  );
 
   const renderAnswer = () => {
     answerLine.replaceChildren();
     if (!chosenToken) {
-      answerLine.textContent = "Tap a word to blank it out";
+      answerLine.textContent = "Click a word, or use ← →, to blank it out";
       return;
     }
     answerLine.append(
@@ -744,11 +755,13 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
         token.text
       );
       wordButton.type = "button";
+      wordButton.setAttribute("aria-pressed", String(token === chosenToken));
       wordButton.addEventListener("click", (clickEvent) => {
         clickEvent.stopPropagation();
         chosenToken = token;
         renderSentenceText();
         renderAnswer();
+        sentenceBox.querySelector<HTMLButtonElement>(".is-blank")?.focus();
       });
       sentenceBox.appendChild(wordButton);
       cursor = token.index + token.text.length;
@@ -770,6 +783,19 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
     listenButton.disabled = capture.sentences.length === 1 && sentence.endSeconds <= sentence.startSeconds;
     renderSentenceText();
     renderAnswer();
+  };
+
+  const moveChosenWord = (step: number) => {
+    const words = tokens.filter((token) => token.isWord);
+    if (words.length === 0) return;
+    const current = chosenToken ? words.indexOf(chosenToken) : -1;
+    chosenToken = words[Math.min(words.length - 1, Math.max(0, current + step))];
+    preferredWord = null;
+    renderSentenceText();
+    renderAnswer();
+    if (cardElement.contains(document.activeElement) && document.activeElement !== cardElement) {
+      sentenceBox.querySelector<HTMLButtonElement>(".is-blank")?.focus();
+    }
   };
 
   const moveSentence = (step: number) => {
@@ -827,7 +853,7 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
       showImmersionToast(`Saved «${card.targetWord}» for Clozemaster`);
       close(capture.resumeOnClose);
     } catch {
-      showImmersionToast("Couldn't save the card");
+      showImmersionToast("Couldn't save the card. Try again.");
     }
   };
 
@@ -846,9 +872,39 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
       close(capture.resumeOnClose);
       return true;
     }
-    if (keyboardEvent.key === "Enter" && !keyboardEvent.isComposing) {
+    if (!(keyboardEvent.target instanceof HTMLInputElement)) {
+      if (keyboardEvent.key === "ArrowUp" || keyboardEvent.key === "ArrowDown") {
+        moveSentence(keyboardEvent.key === "ArrowUp" ? -1 : 1);
+        return true;
+      }
+      if (keyboardEvent.key === "ArrowLeft" || keyboardEvent.key === "ArrowRight") {
+        moveChosenWord(keyboardEvent.key === "ArrowLeft" ? -1 : 1);
+        return true;
+      }
+    }
+    // Enter on a focused button should press that button, not save the card.
+    if (keyboardEvent.key === "Enter" && !keyboardEvent.isComposing && !(keyboardEvent.target instanceof HTMLButtonElement)) {
       void save();
       return true;
+    }
+    if (keyboardEvent.key === "Tab") {
+      const focusable = Array.from(cardElement.querySelectorAll<HTMLElement>("button:not(:disabled), input"));
+      if (focusable.length === 0) return false;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (keyboardEvent.shiftKey && (active === first || active === cardElement)) {
+        last.focus();
+        return true;
+      }
+      if (!keyboardEvent.shiftKey && active === last) {
+        first.focus();
+        return true;
+      }
+      if (!cardElement.contains(active)) {
+        first.focus();
+        return true;
+      }
     }
     return false;
   };
@@ -945,7 +1001,7 @@ async function quickLogWatchedTimeToMandala(): Promise<void> {
     })) as { success: boolean; queued?: boolean; actionText?: string; errorMessage?: string };
 
     if (!response?.success) {
-      showImmersionToast(response?.errorMessage || "Could not log time to Mandala");
+      showImmersionToast(response?.errorMessage || "Couldn't log time to Mandala. Try again in a moment.");
       return;
     }
     sessionWatchedSeconds = 0;
@@ -956,7 +1012,7 @@ async function quickLogWatchedTimeToMandala(): Promise<void> {
         : `Logged ${watchedMinutes} min on “${truncateText(response.actionText || "", 40)}”`
     );
   } catch {
-    showImmersionToast("Could not log time to Mandala");
+    showImmersionToast("Couldn't log time to Mandala. Try again in a moment.");
   }
 }
 
@@ -976,7 +1032,7 @@ async function saveCurrentVideoToMandalaShelf(pillarIndex: number, action?: Cach
     })) as { success: boolean; queued?: boolean; errorMessage?: string };
 
     if (!response?.success) {
-      showImmersionToast(response?.errorMessage || "Failed to save to shelf");
+      showImmersionToast(response?.errorMessage || "Couldn't save to the shelf. Try again in a moment.");
       return;
     }
     latestMandalaStatus.savedPillarIndexes = [...new Set([...latestMandalaStatus.savedPillarIndexes, pillarIndex])].sort(
@@ -992,7 +1048,7 @@ async function saveCurrentVideoToMandalaShelf(pillarIndex: number, action?: Cach
     );
     void checkMandalaStatusForCurrentPage();
   } catch {
-    showImmersionToast("Failed to save to shelf");
+    showImmersionToast("Couldn't save to the shelf. Try again in a moment.");
   }
 }
 
@@ -1728,12 +1784,12 @@ function updateImmersionHud(): void {
     hudContainer.appendChild(logTimeButton);
   }
 
-  const replayButton = hudButton(hudIcon("replay"), "", "Replay the sentence just spoken");
+  const replayButton = hudButton(hudIcon("replay"), "", "Replay the sentence just spoken (A)");
   replayButton.addEventListener("click", (clickEvent) => {
     clickEvent.stopPropagation();
     void replaySentence();
   });
-  const skipButton = hudButton(hudIcon("skip"), "", "Skip to the next sentence");
+  const skipButton = hudButton(hudIcon("skip"), "", "Skip to the next sentence (D)");
   skipButton.addEventListener("click", (clickEvent) => {
     clickEvent.stopPropagation();
     void skipToNextSentence();
@@ -1743,7 +1799,7 @@ function updateImmersionHud(): void {
   const clozeButton = hudButton(
     hudIcon("card"),
     "Cloze",
-    "Make a Clozemaster card from the sentence just spoken"
+    "Make a Clozemaster card from the sentence just spoken (X)"
   );
   clozeButton.classList.add("is-accent");
   clozeButton.addEventListener("click", (clickEvent) => {
@@ -1857,8 +1913,29 @@ function isEditableTarget(targetElement: EventTarget | null): boolean {
   );
 }
 
+// YouTube leaves these letters unbound; Language Reactor users already know A and D for sentences.
+const PLAYER_SHORTCUTS: Record<string, () => void> = {
+  a: () => void replaySentence(),
+  d: () => void skipToNextSentence(),
+  x: () => void triggerClozeCardCapture(),
+};
+
+function handlePlayerShortcut(keyboardEvent: KeyboardEvent): void {
+  if (keyboardEvent.ctrlKey || keyboardEvent.metaKey || keyboardEvent.altKey || keyboardEvent.shiftKey) return;
+  if (keyboardEvent.repeat || keyboardEvent.isComposing || isEditableTarget(keyboardEvent.target)) return;
+  if (!isWatchOrShorts() || !document.getElementById("study-harvester-player-hud")) return;
+  const run = PLAYER_SHORTCUTS[keyboardEvent.key.toLowerCase()];
+  if (!run) return;
+  keyboardEvent.preventDefault();
+  keyboardEvent.stopPropagation();
+  run();
+}
+
 function handleGlobalKeydown(keyboardEvent: KeyboardEvent): void {
-  if (!handleClozeModalKey) return;
+  if (!handleClozeModalKey) {
+    handlePlayerShortcut(keyboardEvent);
+    return;
+  }
   if (handleClozeModalKey(keyboardEvent)) {
     keyboardEvent.preventDefault();
     keyboardEvent.stopPropagation();

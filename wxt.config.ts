@@ -14,6 +14,16 @@ export default defineConfig({
     host_permissions: [
       "*://*.youtube.com/*",
     ],
+    commands: {
+      _execute_action: {
+        suggested_key: { default: "Alt+Shift+Y" },
+        description: "Open the popup",
+      },
+      "open-desk": {
+        suggested_key: { default: "Alt+Shift+D" },
+        description: "Open the desk",
+      },
+    },
   },
   vite: () => ({
     resolve: {

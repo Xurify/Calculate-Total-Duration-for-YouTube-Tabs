@@ -25,7 +25,7 @@ import { hostOf, isTrackableUrl, pagePrefixOf, pillarColor, type SiteRule } from
 import { languageFlagHtml } from "../../utils/languageFlags";
 import { actionSelectOptions, escapeHtml as escapeText, matchWords, pillarChoices, pillarSelectOptions, type CurrentSiteResponse } from "../../utils/timeUi";
 import { closeAllCustomSelects, mountCustomSelect } from "../manager/custom-select";
-import { installTooltips, syncRangeFill } from "../../utils/controls";
+import { installDialogs, installTooltips, syncRangeFill } from "../../utils/controls";
 import { loadChannelAvatars, type ChannelAvatars } from "../../utils/channelAvatars";
 
 let popupChannelAvatars: ChannelAvatars = {};
@@ -641,8 +641,8 @@ async function setPlaybackVolume(tabId: number, volume: number): Promise<Playbac
   }
 }
 
-const PLAY_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
-const PAUSE_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>`;
+const PLAY_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>`;
+const PAUSE_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>`;
 
 function getConfirmedNowPlayingVideos(): VideoData[] {
   return resolvedNowPlayingTabIds
@@ -817,8 +817,8 @@ function renderNow(): void {
     app.innerHTML = `
           <div data-v-header class="pt-3.5 px-4 pb-3 relative">
             <div class="flex items-center gap-2 mb-4">
-              <button id="back-to-dashboard" class="popup-icon -ml-1" aria-label="Back">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+              <button id="back-to-dashboard" type="button" class="popup-icon -ml-1" aria-label="Back">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
               </button>
               <h2 class="font-display text-[18px] font-medium text-text-primary m-0">Settings</h2>
             </div>
@@ -842,12 +842,12 @@ function renderNow(): void {
               <div class="text-[11px] text-text-muted"><span class="font-display">Study Harvester</span> · v${VERSION_NUMBER}</div>
             </div>
           </div>
-          <div id="popup-confirm-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-scrim backdrop-blur-sm" aria-modal="true" role="dialog">
+          <div id="popup-confirm-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-scrim backdrop-blur-sm" aria-modal="true" role="dialog" aria-labelledby="popup-confirm-title">
             <div class="bg-surface-elevated border border-border rounded-lg shadow-xl w-full max-w-[calc(100%-2rem)] mx-4 p-4">
               <h3 id="popup-confirm-title" class="text-sm font-bold text-text-primary mb-2"></h3>
               <p id="popup-confirm-message" class="text-xs text-text-secondary mb-4"></p>
               <div class="flex justify-end gap-2">
-                <button type="button" id="popup-confirm-cancel" class="px-3 py-1.5 text-xs font-medium rounded-md border border-border bg-surface-hover text-text-primary hover:bg-surface cursor-pointer">Cancel</button>
+                <button type="button" id="popup-confirm-cancel" data-dialog-cancel data-dialog-focus class="px-3 py-1.5 text-xs font-medium rounded-md border border-border bg-surface-hover text-text-primary hover:bg-surface cursor-pointer">Cancel</button>
                 <button type="button" id="popup-confirm-ok" class="px-3 py-1.5 text-xs font-medium rounded-md border-0 bg-danger text-on-accent hover:bg-danger-hover cursor-pointer transition-colors">Clear</button>
               </div>
             </div>
@@ -883,10 +883,6 @@ function renderNow(): void {
     stopLiveTick();
     resetVideoListFingerprint();
     setupApp();
-  if (!siteBlockLoaded) {
-    siteBlockLoaded = true;
-    void loadSiteBlock();
-  }
     if (!siteBlockLoaded) {
       siteBlockLoaded = true;
       void loadSiteBlock();
@@ -902,7 +898,7 @@ function renderNow(): void {
       listEl.innerHTML = `
         <div class="flex flex-col items-center justify-center h-full min-h-[260px] px-8 text-center">
           <p class="font-display text-xl text-text-primary mb-1">The desk is clear</p>
-          <p class="text-xs text-text-muted leading-relaxed max-w-[240px]">Open YouTube videos in this window and they will line up here with the time they take.</p>
+          <p class="text-xs text-text-muted leading-relaxed max-w-[240px]">Open YouTube videos in this window and they will line up here with the time they take. Saved sessions wait on the desk.</p>
         </div>
       `;
     }
@@ -1186,7 +1182,7 @@ function setupApp() {
             </div>
           </div>
           <div class="mt-2.5 flex items-center gap-2.5">
-            <button type="button" class="np-play-pause w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-accent text-on-accent border-0 cursor-pointer hover:bg-accent-hover active:scale-95 transition-colors" title="Play / Pause"></button>
+            <button type="button" class="np-play-pause w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-accent text-on-accent border-0 cursor-pointer hover:bg-accent-hover active:scale-95 transition-colors" title="Play or pause" aria-label="Play or pause"></button>
             <span class="np-time text-[12px] text-text-secondary tabular-nums shrink-0 min-w-[5rem]"></span>
             <svg class="np-volume-icon shrink-0 text-text-muted" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
             <div class="flex-1 min-w-0 flex items-center h-3">
@@ -1214,7 +1210,7 @@ function setupApp() {
           Start study session
         </button>
         <button id="open-manager" type="button" class="h-[38px] px-3.5 rounded-[10px] border border-border bg-surface-elevated text-text-primary text-[13px] font-medium cursor-pointer hover:bg-surface-hover transition-colors" title="Open the full desk">Open desk</button>
-        <button id="popup-reading-list" type="button" class="h-[38px] px-3 rounded-[10px] border border-border bg-surface-elevated text-text-secondary text-[12px] font-medium cursor-pointer hover:bg-surface-hover transition-colors flex items-center gap-1.5" title="Open reading list on the desk">
+        <button id="popup-reading-list" type="button" class="h-[38px] px-3 rounded-[10px] border border-border bg-surface-elevated text-text-secondary text-[12px] font-medium cursor-pointer hover:bg-surface-hover transition-colors flex items-center gap-1.5" title="Open reading list on the desk" aria-label="Reading list">
           <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M6 6h10"/></svg>
           <span id="popup-reading-count" class="tabular-nums">0</span>
         </button>
@@ -1284,7 +1280,7 @@ function setupApp() {
       return;
     }
     if (button.classList.contains("wake-up-btn")) {
-      button.innerText = "Waking...";
+      button.innerText = "Waking…";
       (button as HTMLButtonElement).disabled = true;
       await browser.tabs.update(tabId, { active: true });
       setTimeout(getYouTubeTabs, 1500);
@@ -1435,6 +1431,7 @@ function updateNowPlayingCard(
   if (playBtn) {
     playBtn.innerHTML = state.paused ? PLAY_ICON : PAUSE_ICON;
     playBtn.title = state.paused ? "Play" : "Pause";
+    playBtn.setAttribute("aria-label", playBtn.title);
   }
   if (volumeInput) {
     const isInteracting = document.activeElement === volumeInput && (Date.now() - lastVolumeInputTime < 1500);
@@ -1565,6 +1562,9 @@ function updateHeaderStats(
   void queryReadingList(false).then((items) => {
     const badgeElement = document.getElementById("popup-reading-count");
     if (badgeElement) badgeElement.textContent = String(items.length);
+    document
+      .getElementById("popup-reading-list")
+      ?.setAttribute("aria-label", `Reading list, ${items.length} ${items.length === 1 ? "item" : "items"}`);
   });
 }
 
@@ -1608,8 +1608,9 @@ function renderPopupLanguageBar(): void {
     .map(([label, seconds], index) => {
       const share = (seconds / total) * 100;
       const color = label === "Unknown" ? "var(--color-border-hover)" : POPUP_LANGUAGE_PALETTE[index % POPUP_LANGUAGE_PALETTE.length];
-      const text = share >= 18 ? `<span class="popup-lang-label">${label}</span>` : "";
-      return `<span class="popup-lang-seg" style="width: ${share.toFixed(1)}%; background: ${color}" title="${label}: ${formatDurationWords(seconds)}">${text}</span>`;
+      const safeLabel = escapeText(label);
+      const text = share >= 18 ? `<span class="popup-lang-label">${safeLabel}</span>` : "";
+      return `<span class="popup-lang-seg" style="width: ${share.toFixed(1)}%; background: ${color}" title="${safeLabel}: ${formatDurationWords(seconds)}">${text}</span>`;
     })
     .join("");
 }
@@ -1672,7 +1673,7 @@ function updateVideoListItem(item: HTMLElement, video: VideoData): void {
   const badgeEl = item.querySelector(".meta-duration-badge") as HTMLElement;
   const timeEl = item.querySelector(".meta-time") as HTMLElement;
   if (video.isLive) {
-    badgeEl.innerHTML = `<span class="px-1 py-px rounded text-[10px] font-bold bg-youtube text-white">LIVE</span>`;
+    badgeEl.innerHTML = `<span class="px-1 py-px rounded text-[10px] font-bold bg-youtube text-on-accent">LIVE</span>`;
     badgeEl.classList.remove("hidden");
     timeEl.classList.add("hidden");
   } else if (video.seconds > 0) {
@@ -1705,15 +1706,15 @@ function updateVideoListItem(item: HTMLElement, video: VideoData): void {
   if (item.dataset.controlsKey !== controlsKey) {
     item.dataset.controlsKey = controlsKey;
     controls.innerHTML = `
-          <button class="shrink-0 w-7 h-7 flex items-center justify-center rounded-md text-text-muted border-0 bg-transparent cursor-pointer transition-colors hover:bg-surface-hover hover:text-text-primary active:scale-[0.96] jump-btn" title="Go to tab" aria-label="Go to tab">
-            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+          <button type="button" class="shrink-0 w-7 h-7 flex items-center justify-center rounded-md text-text-muted border-0 bg-transparent cursor-pointer transition-colors hover:bg-surface-hover hover:text-text-primary active:scale-[0.96] jump-btn" title="Go to tab" aria-label="Go to tab">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
           </button>
           ${
             video.suspended
-              ? `<button class="shrink-0 text-[11px] px-2 h-7 rounded-md bg-warning/15 text-warning border-0 cursor-pointer transition-colors hover:bg-warning/25 font-semibold active:scale-[0.96] wake-up-btn">Wake</button>`
+              ? `<button type="button" title="Load this tab so its length can be read" class="shrink-0 text-[11px] px-2 h-7 rounded-md bg-warning/15 text-warning border-0 cursor-pointer transition-colors hover:bg-warning/25 font-semibold active:scale-[0.96] wake-up-btn">Wake</button>`
               : ""
           }
-          <button class="shrink-0 text-[11px] px-2 h-7 rounded-md text-text-muted border-0 bg-transparent cursor-pointer transition-colors hover:bg-surface-hover hover:text-text-primary font-medium active:scale-[0.96] toggle-btn">${
+          <button type="button" title="${video.excluded ? "Add this video back to the total" : "Leave this video out of the total"}" class="shrink-0 text-[11px] px-2 h-7 rounded-md text-text-muted border-0 bg-transparent cursor-pointer transition-colors hover:bg-surface-hover hover:text-text-primary font-medium active:scale-[0.96] toggle-btn">${
             video.excluded ? "Count it" : "Skip"
           }</button>
       `;
@@ -2146,6 +2147,7 @@ async function getYouTubeTabs(): Promise<void> {
 
 document.addEventListener("DOMContentLoaded", () => {
   installTooltips();
+  installDialogs();
   // A stale avatar URL just hides; the channel name is still there.
   document.addEventListener(
     "error",

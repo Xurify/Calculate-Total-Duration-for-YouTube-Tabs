@@ -429,7 +429,7 @@ export default defineBackground(() => {
 
     if (message.action === "get-language-today") {
       void Promise.all([withWatchLog((log) => [...log]), loadLanguageLimits(), loadLanguageOverrides()])
-        .then(([log, limits, overrides]) => sendResponse({ rows: languageTodayRows(limits, log, Date.now(), overrides) }))
+        .then(([log, limits, overrides]) => sendResponse({ rows: languageTodayRows(limits, log, Date.now(), overrides, 6) }))
         .catch(() => sendResponse({ rows: [] }));
       return true;
     }

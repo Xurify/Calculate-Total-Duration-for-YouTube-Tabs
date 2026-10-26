@@ -1554,27 +1554,27 @@ function injectImmersionStyles(): void {
     }
     .study-harvester-cloze-word {
       display: inline;
-      margin: 0 -3px;
-      padding: 0 3px;
+      margin: 0;
+      padding: 0;
       border: none;
-      border-radius: 5px 5px 0 0;
       background: transparent;
-      box-shadow: inset 0 -2px 0 transparent;
       color: inherit;
       font: inherit;
       line-height: inherit;
       vertical-align: baseline;
       cursor: pointer;
-      transition: background-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+      transition: color 0.12s ease;
     }
     .study-harvester-cloze-word:hover {
-      background-color: rgba(240, 182, 90, 0.12);
       color: var(--sh-accent);
+      text-decoration: underline 1px dotted;
+      text-underline-offset: 4px;
     }
     .study-harvester-cloze-word.is-blank {
-      background-color: rgba(240, 182, 90, 0.14);
-      box-shadow: inset 0 -2px 0 var(--sh-accent);
       color: var(--sh-accent);
+      font-weight: 600;
+      text-decoration: underline 2px solid;
+      text-underline-offset: 4px;
     }
     .study-harvester-cloze-note {
       font-size: 12px;

@@ -159,6 +159,13 @@ export interface WatchVideoRow {
   isShort: boolean;
 }
 
+export interface WatchSpeedRow {
+  /** Rounded to the nearest quarter, the steps YouTube's own speed menu offers. */
+  rate: number;
+  playedSeconds: number;
+  videoSeconds: number;
+}
+
 export interface WatchSummary {
   days: { key: string; seconds: number; visible: number; languages: Record<string, number> }[];
   total: {
@@ -175,10 +182,11 @@ export interface WatchSummary {
     activeDays: number;
   };
   byLanguage: { label: string; seconds: number; videos: number }[];
-  byChannel: { channelName: string; avatarUrl: string | null; seconds: number; videos: number; language: string }[];
+  byChannel: { channelName: string; avatarUrl: string | null; seconds: number; videos: number; language: string; lastVideoId: string }[];
   byHour: number[];
   /** Seven rows, Monday first, of 24 hours each. */
   byWeekdayHour: number[][];
+  bySpeed: WatchSpeedRow[];
   videos: WatchVideoRow[];
   streak: { current: number; longest: number };
 }
@@ -248,9 +256,10 @@ export function summarizeWatch(
   };
   const byHour = Array.from({ length: 24 }, () => 0);
   const byWeekdayHour = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
+  const speeds = new Map<number, WatchSpeedRow>();
   const videos = new Map<string, WatchVideoRow>();
   const languages = new Map<string, { label: string; seconds: number; videoIds: Set<string> }>();
-  const channels = new Map<string, { channelName: string; seconds: number; videoIds: Set<string>; languages: Map<string, number> }>();
+  const channels = new Map<string, { channelName: string; seconds: number; videoIds: Set<string>; languages: Map<string, number>; lastVideoId: string; lastAt: number }>();
 
   for (const entry of entries) {
     const day = perDay.get(dateKeyOf(entry.startedAt));
@@ -275,7 +284,16 @@ export function summarizeWatch(
     }
 
     const language = entryLanguage(entry, overrides);
-    if (entry.playedSeconds > 0) day.languages[language] = (day.languages[language] ?? 0) + entry.playedSeconds;
+    if (entry.playedSeconds > 0) {
+      day.languages[language] = (day.languages[language] ?? 0) + entry.playedSeconds;
+      if (!entry.isLive) {
+        const rate = Math.max(0.25, Math.round((entry.videoSeconds / entry.playedSeconds) * 4) / 4);
+        const speed = speeds.get(rate) ?? { rate, playedSeconds: 0, videoSeconds: 0 };
+        speed.playedSeconds += entry.playedSeconds;
+        speed.videoSeconds += entry.videoSeconds;
+        speeds.set(rate, speed);
+      }
+    }
     const video = videos.get(entry.videoId) ?? {
       videoId: entry.videoId,
       title: entry.title,
@@ -310,8 +328,12 @@ export function summarizeWatch(
     languages.set(language, languageRow);
 
     const channelName = entry.channelName || "Unknown channel";
-    const channel = channels.get(channelName) ?? { channelName, seconds: 0, videoIds: new Set<string>(), languages: new Map<string, number>() };
+    const channel = channels.get(channelName) ?? { channelName, seconds: 0, videoIds: new Set<string>(), languages: new Map<string, number>(), lastVideoId: entry.videoId, lastAt: 0 };
     channel.seconds += entry.playedSeconds;
+    if (entry.endedAt >= channel.lastAt) {
+      channel.lastAt = entry.endedAt;
+      channel.lastVideoId = entry.videoId;
+    }
     channel.videoIds.add(entry.videoId);
     channel.languages.set(language, (channel.languages.get(language) ?? 0) + entry.playedSeconds);
     channels.set(channelName, channel);
@@ -338,10 +360,12 @@ export function summarizeWatch(
         seconds: row.seconds,
         videos: row.videoIds.size,
         language: [...row.languages].sort((first, second) => second[1] - first[1])[0]?.[0] ?? UNKNOWN_LANGUAGE,
+        lastVideoId: row.lastVideoId,
       }))
       .sort((first, second) => second.seconds - first.seconds),
     byHour,
     byWeekdayHour,
+    bySpeed: [...speeds.values()].sort((first, second) => first.rate - second.rate),
     videos: videoRows.sort((first, second) => second.lastAt - first.lastAt),
     streak: streaksOf(entries, now),
   };

@@ -3,16 +3,18 @@ import { dateKeyOf } from "./timeLog";
 import { entryLanguage, UNKNOWN_LANGUAGE, type WatchEntry } from "./watchLog";
 
 /**
- * Daily caps on how long YouTube plays in a language, counted in real time (2× speed counts half),
- * matched against the same language labels the Time page shows.
+ * Daily caps (limits) and minimums (goals) on how long YouTube plays in a language, counted in real time
+ * (2× speed counts half), matched against the same language labels the Time page shows.
  */
 
 export interface LanguageLimit {
   language: string;
   minutes: number;
+  /** Absent means a limit, so lists saved before goals existed read the same. */
+  kind?: "goal";
 }
 
-export type LimitLevel = "near" | "over";
+export type LimitLevel = "near" | "over" | "met";
 
 export interface LanguageLimitUsage extends LanguageLimit {
   usedSeconds: number;
@@ -24,6 +26,7 @@ export interface LimitWarning {
   minutes: number;
   usedSeconds: number;
   level: LimitLevel;
+  kind?: "goal";
 }
 
 /** Which levels have been shown today, so each one is shown once. */
@@ -37,10 +40,19 @@ export const LIMIT_WARNINGS_KEY = "languageLimitWarnings";
 export const NEAR_LIMIT_SHARE = 0.8;
 export const MAX_LIMIT_MINUTES = 24 * 60;
 
-const LEVEL_RANK: Record<LimitLevel, number> = { near: 1, over: 2 };
+const LEVEL_RANK: Record<LimitLevel, number> = { near: 1, over: 2, met: 1 };
 
 export function languageKey(language: string): string {
   return language.trim().toLowerCase();
+}
+
+export function isGoal(rule: Pick<LanguageLimit, "kind">): boolean {
+  return rule.kind === "goal";
+}
+
+/** A language can have both a goal and a limit, so rules are told apart by kind as well. */
+export function ruleKey(rule: Pick<LanguageLimit, "language" | "kind">): string {
+  return isGoal(rule) ? `goal:${languageKey(rule.language)}` : languageKey(rule.language);
 }
 
 export function cleanLanguageLimits(raw: unknown): LanguageLimit[] {
@@ -49,13 +61,14 @@ export function cleanLanguageLimits(raw: unknown): LanguageLimit[] {
   const limits: LanguageLimit[] = [];
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
-    const { language, minutes } = item as Partial<LanguageLimit>;
+    const { language, minutes, kind } = item as Partial<LanguageLimit>;
     if (typeof language !== "string" || typeof minutes !== "number" || !Number.isFinite(minutes)) continue;
     const name = language.trim().slice(0, 80);
-    const key = languageKey(name);
-    if (!name || key === languageKey(UNKNOWN_LANGUAGE) || seen.has(key)) continue;
+    const key = ruleKey({ language: name, kind });
+    if (!name || languageKey(name) === languageKey(UNKNOWN_LANGUAGE) || seen.has(key)) continue;
     seen.add(key);
-    limits.push({ language: name, minutes: Math.min(MAX_LIMIT_MINUTES, Math.max(1, Math.round(minutes))) });
+    const rounded = Math.min(MAX_LIMIT_MINUTES, Math.max(1, Math.round(minutes)));
+    limits.push(kind === "goal" ? { language: name, minutes: rounded, kind } : { language: name, minutes: rounded });
   }
   return limits;
 }
@@ -72,8 +85,9 @@ export async function saveLanguageLimits(limits: LanguageLimit[]): Promise<Langu
   return cleaned;
 }
 
-export function levelOf(usedSeconds: number, minutes: number): LimitLevel | null {
+export function levelOf(usedSeconds: number, minutes: number, kind?: "goal"): LimitLevel | null {
   const limitSeconds = minutes * 60;
+  if (kind === "goal") return usedSeconds >= limitSeconds ? "met" : null;
   if (usedSeconds >= limitSeconds) return "over";
   if (usedSeconds >= limitSeconds * NEAR_LIMIT_SHARE) return "near";
   return null;
@@ -100,7 +114,7 @@ export function limitUsage(
   const totals = secondsTodayByLanguage(entries, now, overrides);
   return limits.map((limit) => {
     const usedSeconds = totals.get(languageKey(limit.language)) ?? 0;
-    return { ...limit, usedSeconds, level: levelOf(usedSeconds, limit.minutes) };
+    return { ...limit, usedSeconds, level: levelOf(usedSeconds, limit.minutes, limit.kind) };
   });
 }
 
@@ -119,11 +133,13 @@ export function newLimitWarnings(
   const warnings: LimitWarning[] = [];
   for (const row of usage) {
     if (!row.level) continue;
-    const key = languageKey(row.language);
+    const key = ruleKey(row);
     levels[key] = row.level;
     const before = previous[key];
     if (!before || LEVEL_RANK[row.level] > LEVEL_RANK[before]) {
-      warnings.push({ language: row.language, minutes: row.minutes, usedSeconds: row.usedSeconds, level: row.level });
+      const warning: LimitWarning = { language: row.language, minutes: row.minutes, usedSeconds: row.usedSeconds, level: row.level };
+      if (row.kind) warning.kind = row.kind;
+      warnings.push(warning);
     }
   }
   return { warnings, shown: { day, levels } };

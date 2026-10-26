@@ -29,6 +29,8 @@ import { requestPageTranscript } from "../utils/youtubeTranscript";
 import { placeHudBelowNativeControls } from "../utils/hudLayout";
 import { WatchSampler } from "../utils/watchSampler";
 import type { LimitWarning } from "../utils/languageLimits";
+import type { Recommendation } from "../utils/recommendations";
+import { cleanChannelAvatarUrl } from "../utils/channelAvatars";
 import { formatMinutesWords } from "../utils/timeUi";
 
 const DEBOUNCE_MS = 150;
@@ -265,10 +267,8 @@ async function readMetadataFromDom(refreshLanguage = false): Promise<CachedMetad
     (document.querySelector(".ytd-video-owner-renderer #channel-name a") as HTMLElement)?.innerText ||
     playerResponse?.videoDetails?.author ||
     "";
-  const channelAvatar =
-    document.querySelector<HTMLImageElement>("ytd-watch-metadata #owner #avatar img")?.src ||
-    document.querySelector<HTMLImageElement>("ytd-video-owner-renderer #avatar img")?.src ||
-    null;
+  const channelAvatar = readChannelAvatar();
+  reportChannelAvatar(channelName, channelAvatar);
 
   let isLive = false;
   const liveBadge = document.querySelector(".ytp-live-badge") as HTMLElement;
@@ -378,6 +378,37 @@ function extractLiveCaptionText(): string {
   return textParts.join(" ").replace(/\s+/g, " ").trim();
 }
 
+// Watch pages, Shorts and YouTube's newer view-model markup each put the uploader's avatar somewhere else.
+const CHANNEL_AVATAR_SELECTORS = [
+  "ytd-watch-metadata #owner #avatar img",
+  "ytd-video-owner-renderer #avatar img",
+  "ytd-watch-metadata #owner yt-img-shadow img",
+  "ytd-reel-video-renderer[is-active] #channel-thumbnail img",
+  "ytd-reel-video-renderer[is-active] yt-decorated-avatar-view-model img",
+  "ytd-reel-video-renderer[is-active] .ytReelChannelBarViewModelChannelAvatar img",
+];
+
+const reportedAvatars = new Set<string>();
+
+/** Desk tabs are read but often never played, so their avatar is passed on as soon as it is seen. */
+function reportChannelAvatar(channelName: string, avatar: string | null): void {
+  const name = channelName.trim();
+  if (!name || !avatar || reportedAvatars.has(name)) return;
+  reportedAvatars.add(name);
+  void browser.runtime.sendMessage({ action: "record-channel-avatars", avatars: { [name]: avatar } }).catch(() => reportedAvatars.delete(name));
+}
+
+/** Lazy images hold a blank data: URL until they load, so only a real avatar host counts. */
+function readChannelAvatar(): string | null {
+  for (const selector of CHANNEL_AVATAR_SELECTORS) {
+    for (const img of document.querySelectorAll<HTMLImageElement>(selector)) {
+      const url = cleanChannelAvatarUrl(img.currentSrc || img.src);
+      if (url) return url;
+    }
+  }
+  return null;
+}
+
 function getTargetPlayerContainer(): HTMLElement {
   const candidates = [
     document.getElementById("movie_player"),
@@ -419,13 +450,75 @@ function showImmersionToast(messageText: string, durationMs = 3200) {
 }
 
 const LIMIT_TOAST_MS = 9000;
+const LIMIT_CARD_ID = "study-harvester-limit-card";
 
 function limitWarningText(warning: LimitWarning): string {
   const used = formatMinutesWords(warning.usedSeconds);
   const limit = formatMinutesWords(warning.minutes * 60);
+  if (warning.level === "met") return `${warning.language}: daily goal of ${limit} reached. Nice work.`;
   return warning.level === "over"
     ? `${warning.language}: daily limit of ${limit} reached (${used} today).`
     : `${warning.language}: ${used} of your ${limit} daily limit. Time to switch language soon?`;
+}
+
+function element<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
+  const node = document.createElement(tag);
+  node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function closeLimitCard(): void {
+  const card = document.getElementById(LIMIT_CARD_ID);
+  if (!card) return;
+  card.classList.remove("is-shown");
+  window.setTimeout(() => card.remove(), 200);
+}
+
+/** Built from DOM nodes, since titles come from YouTube and are shown as text. */
+function showLimitCard(warning: LimitWarning, recommendations: Recommendation[]): void {
+  document.getElementById(LIMIT_CARD_ID)?.remove();
+  const card = element("div", "");
+  card.id = LIMIT_CARD_ID;
+  card.setAttribute("role", "dialog");
+  card.setAttribute("aria-label", `${warning.language} limit reached`);
+
+  const head = element("div", "sh-limit-head");
+  head.append(element("strong", "sh-limit-title", `${warning.language} limit reached`), element("span", "sh-limit-used", `${formatMinutesWords(warning.usedSeconds)} of ${formatMinutesWords(warning.minutes * 60)}`));
+  card.append(head, element("p", "sh-limit-note", "Switch to something from your history instead?"));
+
+  const list = element("div", "sh-limit-list");
+  for (const pick of recommendations) {
+    const link = element("a", "sh-limit-pick");
+    link.href = `/watch?v=${encodeURIComponent(pick.videoId)}${pick.resumeSeconds > 0 ? `&t=${pick.resumeSeconds}s` : ""}`;
+    const thumb = element("img", "sh-limit-thumb");
+    thumb.src = `https://i.ytimg.com/vi/${encodeURIComponent(pick.videoId)}/mqdefault.jpg`;
+    thumb.alt = "";
+    const body = element("span", "sh-limit-body");
+    const where = pick.resumeSeconds > 0 ? `${formatMinutesWords(pick.durationSeconds - pick.resumeSeconds)} left` : formatMinutesWords(pick.durationSeconds);
+    body.append(element("span", "sh-limit-pick-title", pick.title || pick.videoId), element("span", "sh-limit-meta", [pick.language, pick.channelName, where].filter(Boolean).join(" · ")));
+    if (pick.forGoal) body.append(element("span", "sh-limit-goal", "Counts toward today's goal"));
+    link.append(thumb, body);
+    link.addEventListener("click", () => closeLimitCard());
+    list.append(link);
+  }
+  card.append(list);
+
+  const actions = element("div", "sh-limit-actions");
+  const keep = element("button", "sh-limit-btn", "Keep watching");
+  keep.type = "button";
+  keep.addEventListener("click", closeLimitCard);
+  const pause = element("button", "sh-limit-btn is-accent", "Pause here");
+  pause.type = "button";
+  pause.addEventListener("click", () => {
+    document.querySelector("video")?.pause();
+    closeLimitCard();
+  });
+  actions.append(keep, pause);
+  card.append(actions);
+
+  getTargetPlayerContainer().appendChild(card);
+  requestAnimationFrame(() => card.classList.add("is-shown"));
 }
 
 function truncateText(text: string, maxLength: number): string {
@@ -1315,6 +1408,120 @@ function injectImmersionStyles(): void {
       transform: translateY(4px);
       pointer-events: none;
     }
+    #study-harvester-limit-card {
+      position: absolute;
+      right: 12px;
+      bottom: 64px;
+      width: min(380px, calc(100% - 24px));
+      max-height: calc(100% - 88px);
+      overflow-y: auto;
+      box-sizing: border-box;
+      padding: 14px;
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background-color: rgba(14, 12, 11, 0.88);
+      backdrop-filter: blur(18px) saturate(140%);
+      -webkit-backdrop-filter: blur(18px) saturate(140%);
+      box-shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.9);
+      color: #f4efe6;
+      font: 400 13px/18px Roboto, Arial, sans-serif;
+      z-index: 62;
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+    #study-harvester-limit-card.is-shown {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    #study-harvester-limit-card .sh-limit-head {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+    #study-harvester-limit-card .sh-limit-title {
+      flex: 1;
+      font: 600 15px/20px "YouTube Sans", Roboto, Arial, sans-serif;
+    }
+    #study-harvester-limit-card .sh-limit-used,
+    #study-harvester-limit-card .sh-limit-meta {
+      color: rgba(244, 239, 230, 0.62);
+      font-size: 12px;
+    }
+    #study-harvester-limit-card .sh-limit-note {
+      margin: 2px 0 10px;
+      color: rgba(244, 239, 230, 0.78);
+    }
+    #study-harvester-limit-card .sh-limit-list {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    #study-harvester-limit-card .sh-limit-pick {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px;
+      margin: 0 -6px;
+      border-radius: 10px;
+      color: inherit;
+      text-decoration: none;
+      transition: background-color 0.15s ease;
+    }
+    #study-harvester-limit-card .sh-limit-pick:hover,
+    #study-harvester-limit-card .sh-limit-pick:focus-visible {
+      background-color: rgba(255, 255, 255, 0.08);
+      outline: none;
+    }
+    #study-harvester-limit-card .sh-limit-thumb {
+      width: 72px;
+      height: 40px;
+      flex: none;
+      border-radius: 6px;
+      object-fit: cover;
+      background-color: rgba(255, 255, 255, 0.08);
+    }
+    #study-harvester-limit-card .sh-limit-body {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    #study-harvester-limit-card .sh-limit-pick-title,
+    #study-harvester-limit-card .sh-limit-meta {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    #study-harvester-limit-card .sh-limit-goal {
+      color: #f0b65a;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    #study-harvester-limit-card .sh-limit-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    #study-harvester-limit-card .sh-limit-btn {
+      height: 32px;
+      padding: 0 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: transparent;
+      color: #f4efe6;
+      font: 500 13px/1 "YouTube Sans", Roboto, Arial, sans-serif;
+      cursor: pointer;
+    }
+    #study-harvester-limit-card .sh-limit-btn:hover {
+      background-color: rgba(255, 255, 255, 0.08);
+    }
+    #study-harvester-limit-card .sh-limit-btn.is-accent {
+      border-color: transparent;
+      background-color: #f0b65a;
+      color: #1a1410;
+      font-weight: 600;
+    }
   `;
   document.head.appendChild(styleElement);
 }
@@ -1354,7 +1561,7 @@ function removeImmersionHud(): void {
   stopHudLayoutWatch();
 }
 
-const OWN_OVERLAY_SELECTOR = "#study-harvester-player-hud, #study-harvester-cloze-modal, #study-harvester-hud-toast";
+const OWN_OVERLAY_SELECTOR = "#study-harvester-player-hud, #study-harvester-cloze-modal, #study-harvester-hud-toast, #study-harvester-limit-card";
 // YouTube mounts the Shorts overlay a moment after the player, so the HUD looks again as the page settles.
 const HUD_LAYOUT_RECHECK_DELAYS_MS = [400, 1500];
 
@@ -1855,9 +2062,13 @@ export default defineContentScript({
       videoId: () => (isWatchOrShorts() ? getVideoIdFromLocation() : null),
       metadata: () => lastMetadata,
       send: async (sample) => {
-        const response = (await browser.runtime.sendMessage({ action: "watch-sample", sample })) as { limitWarnings?: LimitWarning[] } | undefined;
-        const warning = response?.limitWarnings?.[0];
-        if (warning) showImmersionToast(limitWarningText(warning), LIMIT_TOAST_MS);
+        const response = (await browser.runtime.sendMessage({ action: "watch-sample", sample })) as
+          | { limitWarnings?: LimitWarning[]; recommendations?: Recommendation[] }
+          | undefined;
+        const warnings = response?.limitWarnings ?? [];
+        const over = warnings.find((warning) => warning.level === "over");
+        if (over && response?.recommendations?.length) showLimitCard(over, response.recommendations);
+        else if (warnings[0]) showImmersionToast(limitWarningText(over ?? warnings[0]), LIMIT_TOAST_MS);
         return response;
       },
     }).start(context);

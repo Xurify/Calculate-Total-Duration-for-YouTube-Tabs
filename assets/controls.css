@@ -1,0 +1,391 @@
+@layer components {
+  .chip {
+    @apply h-8 px-3 rounded-full border border-border bg-surface-elevated text-[13px] font-medium text-text-secondary inline-flex items-center gap-1.5 cursor-pointer transition-colors hover:text-text-primary hover:border-border-hover;
+  }
+
+  .chip.text-accent,
+  .chip.bg-surface-hover {
+    @apply border-accent/40;
+  }
+
+  .chip--accent {
+    @apply border-accent/40 bg-accent/10 text-accent hover:bg-accent/15 hover:text-accent;
+  }
+
+  .chip--danger {
+    @apply hover:border-danger/40 hover:bg-danger/10 hover:text-danger;
+  }
+
+  .budget-chip {
+    @apply px-3 py-1 rounded-full text-[13px] font-medium text-text-secondary border-0 bg-transparent cursor-pointer transition-colors hover:text-text-primary;
+  }
+
+  .budget-chip[aria-pressed="true"] {
+    @apply bg-accent text-on-accent font-semibold;
+  }
+
+  .menu-panel {
+    @apply rounded-xl border border-border bg-surface-elevated/98 py-1.5 px-1 text-sm shadow-2xl backdrop-blur-xl;
+  }
+
+  .custom-select {
+    @apply relative inline-flex;
+  }
+
+  .custom-select--block {
+    @apply block w-full;
+  }
+
+  .custom-select-trigger {
+    @apply inline-flex w-full cursor-pointer items-center justify-between gap-2 rounded-full border border-border bg-surface-elevated px-3 py-1.5 text-[13px] font-medium leading-tight text-text-secondary transition-[border-color,background-color,color,box-shadow];
+
+    &:hover {
+      @apply border-border-hover text-text-primary;
+    }
+
+    &:focus-visible {
+      @apply border-accent/45 text-text-primary ring-2 ring-accent/20 outline-none;
+    }
+  }
+
+  .custom-select--compact .custom-select-trigger {
+    @apply h-8 px-3 py-0;
+  }
+
+  .custom-select--block .custom-select-trigger {
+    @apply rounded-md bg-surface px-2.5 py-2 text-sm text-text-primary;
+  }
+
+  .custom-select--open .custom-select-trigger {
+    @apply border-accent/45 text-text-primary ring-2 ring-accent/20 outline-none;
+  }
+
+  .custom-select-chevron {
+    @apply shrink-0 opacity-65 transition-[transform,opacity];
+  }
+
+  .custom-select--open .custom-select-chevron,
+  .custom-select-trigger:hover .custom-select-chevron {
+    @apply opacity-100;
+  }
+
+  .custom-select--open .custom-select-chevron {
+    @apply rotate-180;
+  }
+
+  .custom-select-option {
+    @apply mx-1 flex w-[calc(100%-0.5rem)] cursor-pointer items-center justify-between gap-3 rounded-lg border-0 bg-transparent px-2.5 py-2 text-left text-[13px] font-medium text-text-primary transition-colors;
+
+    &:hover,
+    &:focus-visible {
+      @apply bg-surface-hover outline-none;
+    }
+  }
+
+  .custom-select-option--selected {
+    @apply text-accent;
+  }
+
+  .custom-select-check {
+    @apply flex h-3.5 w-3.5 shrink-0 items-center justify-center text-accent;
+  }
+
+  .custom-select-option:not(.custom-select-option--selected) .custom-select-check {
+    @apply invisible;
+  }
+}
+
+.custom-select-menu {
+  left: 0;
+  top: calc(100% + 0.3rem);
+  min-width: max(100%, 12rem);
+  max-height: 16rem;
+  overflow-y: auto;
+  transform-origin: top left;
+}
+
+@keyframes menu-panel-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.menu-panel-animate:not(.hidden) {
+  transform-origin: top left;
+  animation: menu-panel-in 0.14s ease-out;
+}
+
+.menu-panel-animate--from-right:not(.hidden) {
+  transform-origin: top right;
+}
+
+
+.custom-select-menu--up {
+  top: auto;
+  bottom: calc(100% + 0.3rem);
+  transform-origin: bottom left;
+}
+
+.custom-select--small .custom-select-trigger {
+  @apply h-7 px-2.5 py-0 text-xs;
+}
+
+.custom-select--field .custom-select-trigger {
+  @apply h-8 rounded-md px-2.5 py-0 text-xs text-text-primary;
+}
+
+.ui-switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 2.125rem;
+  height: 1.25rem;
+  margin: 0;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-hover);
+  background-color: var(--color-surface-hover);
+  cursor: pointer;
+  transition: background-color 0.18s ease, border-color 0.18s ease;
+}
+
+.ui-switch::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  background-color: var(--color-surface-elevated);
+  box-shadow: 0 1px 3px var(--shadow-ink);
+  transition: transform 0.18s ease;
+}
+
+.ui-switch:checked {
+  border-color: var(--color-accent);
+  background-color: var(--color-accent);
+}
+
+.ui-switch:checked::after {
+  transform: translateX(0.875rem);
+  background-color: var(--color-on-accent);
+}
+
+/* The tick is a mask, so it takes the theme colour. */
+.ui-check {
+  appearance: none;
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  border-radius: 0.3rem;
+  border: 1px solid color-mix(in srgb, var(--color-text-muted) 55%, transparent);
+  background-color: var(--color-surface-elevated);
+  cursor: pointer;
+  display: inline-grid;
+  place-content: center;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.ui-check::before {
+  content: "";
+  width: 0.7rem;
+  height: 0.7rem;
+  background-color: var(--color-on-accent);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") center / contain no-repeat;
+  transform: scale(0);
+  transition: transform 0.12s ease;
+}
+
+.ui-check:hover {
+  border-color: var(--color-accent);
+}
+
+.ui-check:checked {
+  border-color: var(--color-accent);
+  background-color: var(--color-accent);
+}
+
+.ui-check:checked::before {
+  transform: scale(1);
+}
+
+.ui-radio {
+  appearance: none;
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-text-muted) 55%, transparent);
+  background-color: var(--color-surface-elevated);
+  cursor: pointer;
+  display: inline-grid;
+  place-content: center;
+  transition: border-color 0.15s ease;
+}
+
+.ui-radio::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background-color: var(--color-accent);
+  transform: scale(0);
+  transition: transform 0.12s ease;
+}
+
+.ui-radio:hover,
+.ui-radio:checked {
+  border-color: var(--color-accent);
+}
+
+.ui-radio:checked::before {
+  transform: scale(1);
+}
+
+.ui-choice {
+  @apply flex items-center gap-2.5 rounded-[10px] border border-border bg-surface px-3 py-2 text-sm text-text-secondary cursor-pointer transition-colors hover:border-border-hover hover:text-text-primary;
+}
+
+.ui-choice:has(input:checked) {
+  @apply border-accent/50 bg-accent/5 text-text-primary;
+}
+
+.ui-stepper {
+  @apply inline-flex items-center h-8 rounded-md border border-border bg-surface-elevated overflow-hidden transition-colors;
+}
+
+.ui-stepper:focus-within {
+  @apply border-accent/60;
+}
+
+.ui-stepper input {
+  @apply h-full w-12 min-w-0 border-0 bg-transparent px-1 text-center text-xs text-text-primary tabular-nums outline-none;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.ui-stepper input::-webkit-outer-spin-button,
+.ui-stepper input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.ui-stepper-btn {
+  @apply h-full w-7 shrink-0 inline-flex items-center justify-center border-0 bg-transparent text-text-muted cursor-pointer transition-colors hover:bg-surface-hover hover:text-text-primary;
+}
+
+.ui-stepper-suffix {
+  @apply pr-2 text-[11px] text-text-muted;
+}
+
+.ui-field {
+  @apply h-8 px-2.5 rounded-md border border-border bg-surface-elevated text-xs text-text-primary placeholder:text-text-muted outline-none transition-colors focus:border-accent/60;
+}
+
+.ui-segmented {
+  @apply inline-flex gap-0.5 p-0.5 rounded-full border border-border bg-surface;
+}
+
+.ui-range {
+  appearance: none;
+  height: 1rem;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ui-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(to right, var(--color-accent) var(--range-fill, 0%), var(--color-border) var(--range-fill, 0%));
+}
+
+.ui-range::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--color-border);
+}
+
+.ui-range::-moz-range-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--color-accent);
+}
+
+.ui-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 20%, transparent);
+  transition: transform 0.12s ease;
+}
+
+.ui-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--color-accent);
+}
+
+.ui-range:hover::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+
+.ui-tooltip {
+  position: fixed;
+  z-index: 2147483000;
+  max-width: 22rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.5rem;
+  background-color: var(--color-text-primary);
+  color: var(--color-surface);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  box-shadow: 0 8px 24px -10px var(--shadow-ink);
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.ui-tooltip--shown {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ui-combobox {
+  @apply relative inline-flex;
+}
+
+.ui-combobox-menu {
+  @apply absolute left-0 z-[120] min-w-full max-h-56 overflow-y-auto;
+  top: calc(100% + 0.3rem);
+}
+
+.ui-avatar {
+  @apply inline-flex items-center justify-center shrink-0 rounded-full object-cover bg-surface-hover text-text-secondary font-semibold;
+  outline: 1px solid color-mix(in srgb, var(--color-text-primary) 8%, transparent);
+  outline-offset: -1px;
+}
+
+/* Chrome adds its own blue clear button to search fields; ours sits in the same spot. */
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}

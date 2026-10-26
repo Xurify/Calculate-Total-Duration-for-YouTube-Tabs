@@ -23,7 +23,12 @@ import { queryReadingList } from "../../utils/readingList";
 import { loadCachedMandalaSummary, type CachedMandalaSummary } from "../../utils/storage";
 import { hostOf, isTrackableUrl, pagePrefixOf, pillarColor, type SiteRule } from "../../utils/timeLog";
 import { languageFlagHtml } from "../../utils/languageFlags";
-import { actionOptionsHtml, escapeHtml as escapeText, matchWords, pillarChoices, pillarOptionsHtml, type CurrentSiteResponse } from "../../utils/timeUi";
+import { actionSelectOptions, escapeHtml as escapeText, matchWords, pillarChoices, pillarSelectOptions, type CurrentSiteResponse } from "../../utils/timeUi";
+import { closeAllCustomSelects, mountCustomSelect } from "../manager/custom-select";
+import { installTooltips, syncRangeFill } from "../../utils/controls";
+import { loadChannelAvatars, type ChannelAvatars } from "../../utils/channelAvatars";
+
+let popupChannelAvatars: ChannelAvatars = {};
 
 const VERSION_NUMBER = packageJson.version;
 
@@ -817,24 +822,20 @@ function renderNow(): void {
               </button>
               <h2 class="font-display text-[18px] font-medium text-text-primary m-0">Settings</h2>
             </div>
-            <div class="space-y-3">
-              <div class="flex items-center justify-between gap-3">
+            <div class="rounded-xl border border-border bg-surface-elevated px-3">
+              <div class="flex items-center justify-between gap-3 py-2.5">
                 <div>
                   <div class="text-[12px] font-semibold text-text-primary">Appearance</div>
-                  <div class="text-[10px] text-text-muted">System follows your OS setting</div>
+                  <div class="text-[10px] text-text-muted">System follows your computer</div>
                 </div>
-                <div id="appearance-control"></div>
+                <div id="appearance-control" class="shrink-0"></div>
               </div>
-              <div class="pt-3 border-t border-border">
-                <button id="btn-clear-cache" class="w-full text-left p-3 rounded-lg border border-border bg-surface-hover/20 hover:bg-danger/10 hover:border-danger group/clear transition-[background-color,border-color,color] cursor-pointer active:scale-[0.96]">
-                  <div class="flex items-center justify-between">
-                    <div>
-                      <div class="text-[12px] font-semibold group-hover/clear:text-danger transition-colors">Clear Metadata Cache</div>
-                      <div class="text-[10px] text-text-muted">Reset all stored titles and durations</div>
-                    </div>
-                    <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 text-text-muted group-hover/clear:text-danger transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                  </div>
-                </button>
+              <div class="flex items-center justify-between gap-3 py-2.5 border-t border-border">
+                <div>
+                  <div class="text-[12px] font-semibold text-text-primary">Clear video details</div>
+                  <div class="text-[10px] text-text-muted">Titles and lengths load again from open tabs</div>
+                </div>
+                <button type="button" id="btn-clear-cache" class="chip chip--danger h-7 px-2.5 text-[12px] shrink-0">Clear</button>
               </div>
             </div>
             <div class="mt-3 pt-3 pb-0 border-t border-border/50 text-center">
@@ -847,7 +848,7 @@ function renderNow(): void {
               <p id="popup-confirm-message" class="text-xs text-text-secondary mb-4"></p>
               <div class="flex justify-end gap-2">
                 <button type="button" id="popup-confirm-cancel" class="px-3 py-1.5 text-xs font-medium rounded-md border border-border bg-surface-hover text-text-primary hover:bg-surface cursor-pointer">Cancel</button>
-                <button type="button" id="popup-confirm-ok" class="px-3 py-1.5 text-xs font-medium rounded-md border-0 bg-danger text-on-accent hover:bg-danger-hover cursor-pointer transition-colors">Clear cache</button>
+                <button type="button" id="popup-confirm-ok" class="px-3 py-1.5 text-xs font-medium rounded-md border-0 bg-danger text-on-accent hover:bg-danger-hover cursor-pointer transition-colors">Clear</button>
               </div>
             </div>
           </div>
@@ -864,8 +865,8 @@ function renderNow(): void {
 
     document.getElementById("btn-clear-cache")?.addEventListener("click", async () => {
       const confirmed = await showConfirm({
-        title: "Clear metadata cache",
-        message: "Clear all cached titles and durations? Tabs will be re-probed when needed.",
+        title: "Clear video details?",
+        message: "Saved titles and lengths are forgotten and load again from open tabs. Sessions, history and settings stay.",
       });
       if (confirmed) {
         await clearCache();
@@ -985,6 +986,8 @@ function showConfirm(options: { title: string; message: string }): Promise<boole
 let siteBlockLoaded = false;
 let sitePickerOpen = false;
 let pickedPillarIndex: number | null = null;
+let pickedActionId: string | null = null;
+let pickedScope: "host" | "prefix" | null = null;
 let siteBlockTab: Browser.tabs.Tab | null = null;
 let siteBlockSummary: CachedMandalaSummary | null = null;
 let siteBlockStatus: CurrentSiteResponse | null = null;
@@ -1042,18 +1045,11 @@ function renderSiteBlock(): void {
                   ? ""
                   : `<p class="m-0 text-[10px] text-text-muted">Open Mandala once so your pillars show here. Until then the rule counts for a pillar by its number.</p>`
               }
-              <label class="flex items-center gap-2 text-[11px] text-text-secondary">Pillar
-                <select id="site-pillar" class="flex-1 min-w-0 h-7 px-1.5 rounded-md border border-border bg-surface text-[11px] text-text-primary">${pillarOptionsHtml(siteBlockSummary, shownPillarIndex)}</select>
-              </label>
-              <label class="flex items-center gap-2 text-[11px] text-text-secondary">Action
-                <select id="site-action" class="flex-1 min-w-0 h-7 px-1.5 rounded-md border border-border bg-surface text-[11px] text-text-primary">${actionOptionsHtml(siteBlockSummary, shownPillarIndex, match?.actionId)}</select>
-              </label>
-              <label class="flex items-center gap-2 text-[11px] text-text-secondary">Scope
-                <select id="site-scope" class="flex-1 min-w-0 h-7 px-1.5 rounded-md border border-border bg-surface text-[11px] text-text-primary">
-                  <option value="host"${match?.source === "prefix" ? "" : " selected"}>Whole site (${escapeText(host)})</option>
-                  <option value="prefix"${match?.source === "prefix" ? " selected" : ""}>This page and what is under it</option>
-                </select>
-              </label>
+              <div class="grid grid-cols-[3.25rem_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 text-[11px] text-text-secondary">
+                <span>Pillar</span><div id="site-pillar"></div>
+                <span>Action</span><div id="site-action"></div>
+                <span>Scope</span><div id="site-scope"></div>
+              </div>
               <div class="flex items-center gap-2 pt-0.5">
                 <button type="button" id="site-save" class="h-7 px-3 rounded-md border-0 bg-accent text-on-accent text-[11px] font-semibold cursor-pointer hover:bg-accent-hover transition-colors">Count it</button>
                 ${canRemove ? `<button type="button" id="site-remove" class="h-7 px-2.5 rounded-md border border-border bg-surface text-[11px] font-medium text-text-secondary hover:text-danger hover:border-danger/40 cursor-pointer transition-colors">Stop counting</button>` : ""}
@@ -1066,23 +1062,64 @@ function renderSiteBlock(): void {
     </div>
   `;
 
+  const shownActionId = pickedActionId ?? (pickedPillarIndex === null ? (match?.actionId ?? "") : "");
+  const shownScope = pickedScope ?? (match?.source === "prefix" ? "prefix" : "host");
+  const pillarRoot = document.getElementById("site-pillar");
+  const actionRoot = document.getElementById("site-action");
+  const scopeRoot = document.getElementById("site-scope");
+  if (pillarRoot && actionRoot && scopeRoot) {
+    mountCustomSelect(pillarRoot, {
+      options: pillarSelectOptions(siteBlockSummary),
+      value: String(shownPillarIndex),
+      block: true,
+      size: "small",
+      ariaLabel: "Pillar",
+      onChange: (value) => {
+        pickedPillarIndex = Number(value);
+        pickedActionId = "";
+        renderSiteBlock();
+      },
+    });
+    mountCustomSelect(actionRoot, {
+      options: actionSelectOptions(siteBlockSummary, shownPillarIndex),
+      value: shownActionId,
+      block: true,
+      size: "small",
+      ariaLabel: "Action",
+      onChange: (value) => (pickedActionId = value),
+    });
+    mountCustomSelect(scopeRoot, {
+      options: [
+        { value: "host", label: `Whole site (${host})` },
+        { value: "prefix", label: "This page and what is under it" },
+      ],
+      value: shownScope,
+      block: true,
+      size: "small",
+      ariaLabel: "Scope",
+      onChange: (value) => (pickedScope = value === "prefix" ? "prefix" : "host"),
+    });
+  }
+
+  const resetPicks = () => {
+    pickedPillarIndex = null;
+    pickedActionId = null;
+    pickedScope = null;
+  };
   document.getElementById("site-pick")?.addEventListener("click", () => {
     sitePickerOpen = !sitePickerOpen;
-    pickedPillarIndex = null;
+    resetPicks();
     renderSiteBlock();
   });
   document.getElementById("site-cancel")?.addEventListener("click", () => {
     sitePickerOpen = false;
-    renderSiteBlock();
-  });
-  document.getElementById("site-pillar")?.addEventListener("change", (event) => {
-    pickedPillarIndex = Number((event.target as HTMLSelectElement).value);
+    resetPicks();
     renderSiteBlock();
   });
   document.getElementById("site-save")?.addEventListener("click", async () => {
-    const pillarIndex = Number((document.getElementById("site-pillar") as HTMLSelectElement | null)?.value ?? shownPillarIndex);
-    const actionId = (document.getElementById("site-action") as HTMLSelectElement | null)?.value || undefined;
-    const scope = (document.getElementById("site-scope") as HTMLSelectElement | null)?.value === "prefix" ? "prefix" : "host";
+    const pillarIndex = shownPillarIndex;
+    const actionId = (pickedActionId ?? shownActionId) || undefined;
+    const scope = pickedScope ?? shownScope;
     const pattern = scope === "host" ? host : pagePrefixOf(tab.url!);
     const rule: Omit<SiteRule, "id" | "createdAt"> & { id?: string } = {
       id: match?.ruleId && match.source === scope ? match.ruleId : undefined,
@@ -1094,13 +1131,13 @@ function renderSiteBlock(): void {
     };
     await browser.runtime.sendMessage({ action: "set-site-rule", rule });
     sitePickerOpen = false;
-    pickedPillarIndex = null;
+    resetPicks();
     await loadSiteBlock();
   });
   document.getElementById("site-remove")?.addEventListener("click", async () => {
     if (match?.ruleId) await browser.runtime.sendMessage({ action: "remove-site-rule", id: match.ruleId });
     sitePickerOpen = false;
-    pickedPillarIndex = null;
+    resetPicks();
     await loadSiteBlock();
   });
 }
@@ -1153,7 +1190,7 @@ function setupApp() {
             <span class="np-time text-[12px] text-text-secondary tabular-nums shrink-0 min-w-[5rem]"></span>
             <svg class="np-volume-icon shrink-0 text-text-muted" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
             <div class="flex-1 min-w-0 flex items-center h-3">
-              <input type="range" class="np-volume w-full h-1 m-0 p-0 cursor-pointer appearance-none rounded-full bg-border accent-accent" min="0" max="100" value="0" aria-label="Volume" />
+              <input type="range" class="np-volume ui-range w-full" min="0" max="100" value="0" aria-label="Volume" />
             </div>
             <button type="button" class="np-go-to-tab shrink-0 text-[12px] font-semibold text-accent hover:text-accent-hover border-0 bg-transparent p-0 cursor-pointer" title="Go to tab">Go to tab</button>
           </div>
@@ -1161,10 +1198,12 @@ function setupApp() {
         <p id="np-also-playing" class="hidden px-1 pt-1.5 text-[11px] text-text-muted truncate m-0"></p>
       </section>
 
-      <div id="up-next-divider" class="flex items-baseline gap-3 px-4 pt-4 pb-1 shrink-0">
+      <div id="up-next-divider" class="flex items-center gap-3 px-4 pt-4 pb-1 shrink-0">
         <span class="font-display text-[17px] font-medium text-text-primary flex-1">Up next</span>
-        <button id="sort-order" type="button">Tab order</button>
-        <button id="sort-duration" type="button">Longest first</button>
+        <span class="inline-flex gap-0.5 rounded-lg border border-border bg-surface p-0.5" role="group" aria-label="Order">
+          <button id="sort-order" type="button" class="theme-option theme-option--small" aria-pressed="true">Tab order</button>
+          <button id="sort-duration" type="button" class="theme-option theme-option--small" aria-pressed="false">Longest first</button>
+        </span>
       </div>
 
       <div id="video-list" class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-2 pb-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent"></div>
@@ -1293,6 +1332,7 @@ function bindNowPlayingCardEvents(): void {
   card.addEventListener("input", async (event) => {
     const target = event.target as HTMLElement;
     if (!target.classList.contains("np-volume")) return;
+    syncRangeFill(target as HTMLInputElement);
     const tabId = parseInt(card.dataset.npTabId || "0", 10);
     const video = tabId ? findVideoByTabId(tabId) : undefined;
     if (!tabId || !video) return;
@@ -1401,6 +1441,7 @@ function updateNowPlayingCard(
     if (!isInteracting) {
       const displayVolume = state.muted ? 0 : Math.round(state.volume * 100);
       volumeInput.value = String(displayVolume);
+      syncRangeFill(volumeInput);
     }
   }
   if (volumeIcon) {
@@ -1518,12 +1559,8 @@ function updateHeaderStats(
 
   const btnTab = document.getElementById("sort-order");
   const btnLen = document.getElementById("sort-duration");
-  const sortActive = "text-[12px] font-semibold text-text-primary border-0 bg-transparent p-0 cursor-pointer";
-  const sortIdle = "text-[12px] font-medium text-text-muted hover:text-text-secondary border-0 bg-transparent p-0 cursor-pointer transition-colors";
-  if (btnTab && btnLen) {
-    btnTab.className = !sortByDuration ? sortActive : sortIdle;
-    btnLen.className = sortByDuration ? sortActive : sortIdle;
-  }
+  btnTab?.setAttribute("aria-pressed", String(!sortByDuration));
+  btnLen?.setAttribute("aria-pressed", String(sortByDuration));
 
   void queryReadingList(false).then((items) => {
     const badgeElement = document.getElementById("popup-reading-count");
@@ -1608,6 +1645,12 @@ function updateVideoListItem(item: HTMLElement, video: VideoData): void {
         ? "Suspended tab"
         : "YouTube";
   channelEl.innerText = channelLabel;
+  const avatarEl = item.querySelector(".meta-avatar") as HTMLImageElement | null;
+  if (avatarEl) {
+    const avatar = popupChannelAvatars[video.channelName?.trim() ?? ""];
+    if (avatar && avatarEl.getAttribute("src") !== avatar) avatarEl.src = avatar;
+    avatarEl.classList.toggle("hidden", !avatar);
+  }
 
   const titleEl = item.querySelector(".meta-title") as HTMLElement;
   titleEl.innerText = video.title;
@@ -1719,7 +1762,7 @@ function updateVideoList(videos: VideoData[]) {
             <div class="flex-1 min-w-0 flex flex-col justify-center gap-[2px]">
               <span class="meta-now-badge hidden self-start text-[9px] font-semibold uppercase tracking-[0.1em] text-accent leading-none">Playing</span>
               <div class="meta-title text-[13px] font-medium text-text-primary truncate leading-snug"></div>
-              <div class="meta-channel text-[11px] text-text-muted truncate"></div>
+              <div class="flex items-center gap-1.5 min-w-0"><img class="meta-avatar ui-avatar w-3.5 h-3.5 hidden" alt="" referrerpolicy="no-referrer" /><div class="meta-channel text-[11px] text-text-muted truncate"></div></div>
               <div class="flex items-center gap-1.5 min-w-0">
                 <span class="meta-lang hidden text-[9px] font-bold uppercase tracking-wide px-1.5 py-px rounded-full bg-accent/10 text-accent shrink-0"></span>
                 <div class="meta-time text-[10px] text-text-muted tabular-nums truncate"></div>
@@ -2101,7 +2144,22 @@ async function getYouTubeTabs(): Promise<void> {
   }
 }
 
-document.addEventListener("DOMContentLoaded", getYouTubeTabs);
+document.addEventListener("DOMContentLoaded", () => {
+  installTooltips();
+  // A stale avatar URL just hides; the channel name is still there.
+  document.addEventListener(
+    "error",
+    (event) => {
+      if (event.target instanceof HTMLImageElement && event.target.classList.contains("meta-avatar")) event.target.classList.add("hidden");
+    },
+    true
+  );
+  document.addEventListener("click", closeAllCustomSelects);
+  void loadChannelAvatars()
+    .then((avatars) => (popupChannelAvatars = avatars))
+    .catch(() => {})
+    .finally(() => void getYouTubeTabs());
+});
 window.addEventListener("pagehide", stopLiveTick);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {

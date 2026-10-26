@@ -17,6 +17,7 @@ interface MountCustomSelectOptions {
   value?: string;
   compact?: boolean;
   block?: boolean;
+  size?: "small" | "field";
   ariaLabel?: string;
   onChange?: (value: string) => void;
 }
@@ -41,6 +42,7 @@ export function mountCustomSelect(
   container.classList.add("custom-select");
   if (config.compact) container.classList.add("custom-select--compact");
   if (config.block) container.classList.add("custom-select--block");
+  if (config.size) container.classList.add(`custom-select--${config.size}`);
 
   let options = [...config.options];
   let value = config.value ?? options[0]?.value ?? "";
@@ -102,7 +104,13 @@ export function mountCustomSelect(
 
   function open(): void {
     closeAllCustomSelects();
+    menu.classList.remove("custom-select-menu--up");
     menu.classList.remove("hidden");
+    // Near the bottom of the popup or a long page the menu would be cut off, so it opens upward there.
+    const triggerRect = trigger.getBoundingClientRect();
+    if (triggerRect.bottom + menu.offsetHeight + 8 > window.innerHeight && triggerRect.top > menu.offsetHeight + 8) {
+      menu.classList.add("custom-select-menu--up");
+    }
     syncTrigger();
     openSelect = handle;
     const selected = menu.querySelector(".custom-select-option--selected") as HTMLElement | null;
@@ -135,7 +143,7 @@ export function mountCustomSelect(
     destroy() {
       close();
       container.replaceChildren();
-      container.classList.remove("custom-select", "custom-select--compact", "custom-select--block", "custom-select--open");
+      container.classList.remove("custom-select", "custom-select--compact", "custom-select--block", "custom-select--small", "custom-select--field", "custom-select--open");
       trigger.removeEventListener("click", onTriggerClick);
       menu.removeEventListener("click", onMenuClick);
       container.removeEventListener("click", stopPropagation);

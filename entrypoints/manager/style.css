@@ -919,3 +919,44 @@ body:has(.selection-bar:not(.hidden)) #toast {
 .toast-action:hover {
   background-color: var(--color-surface-hover);
 }
+
+.shortcut-list {
+  margin: 0;
+  padding: 0 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background-color: var(--color-surface);
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+
+.shortcut-row + .shortcut-row {
+  border-top: 1px solid var(--color-border);
+}
+
+.shortcut-row dd {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.25rem;
+  margin: 0;
+}
+
+kbd {
+  min-width: 1.5rem;
+  padding: 0.0625rem 0.375rem;
+  border: 1px solid var(--color-border);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  background-color: var(--color-surface-elevated);
+  font: 500 12px/1.4 var(--font-sans);
+  text-align: center;
+  color: var(--color-text-secondary);
+}

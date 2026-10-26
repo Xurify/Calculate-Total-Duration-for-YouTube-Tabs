@@ -726,11 +726,14 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
   saveButton.type = "button";
   toolbarRow.append(navigationGroup, answerLine, translationInput, saveButton);
   cardElement.appendChild(toolbarRow);
+  cardElement.appendChild(
+    createElement("div", "study-harvester-cloze-note", "← → word · ↑ ↓ sentence · Enter save · Esc close")
+  );
 
   const renderAnswer = () => {
     answerLine.replaceChildren();
     if (!chosenToken) {
-      answerLine.textContent = "Click a word to blank it out";
+      answerLine.textContent = "Click a word, or use ← →, to blank it out";
       return;
     }
     answerLine.append(
@@ -780,6 +783,19 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
     listenButton.disabled = capture.sentences.length === 1 && sentence.endSeconds <= sentence.startSeconds;
     renderSentenceText();
     renderAnswer();
+  };
+
+  const moveChosenWord = (step: number) => {
+    const words = tokens.filter((token) => token.isWord);
+    if (words.length === 0) return;
+    const current = chosenToken ? words.indexOf(chosenToken) : -1;
+    chosenToken = words[Math.min(words.length - 1, Math.max(0, current + step))];
+    preferredWord = null;
+    renderSentenceText();
+    renderAnswer();
+    if (cardElement.contains(document.activeElement) && document.activeElement !== cardElement) {
+      sentenceBox.querySelector<HTMLButtonElement>(".is-blank")?.focus();
+    }
   };
 
   const moveSentence = (step: number) => {
@@ -855,6 +871,16 @@ function showClozeCaptureModal(capture: ClozeCaptureContext): void {
     if (keyboardEvent.key === "Escape") {
       close(capture.resumeOnClose);
       return true;
+    }
+    if (!(keyboardEvent.target instanceof HTMLInputElement)) {
+      if (keyboardEvent.key === "ArrowUp" || keyboardEvent.key === "ArrowDown") {
+        moveSentence(keyboardEvent.key === "ArrowUp" ? -1 : 1);
+        return true;
+      }
+      if (keyboardEvent.key === "ArrowLeft" || keyboardEvent.key === "ArrowRight") {
+        moveChosenWord(keyboardEvent.key === "ArrowLeft" ? -1 : 1);
+        return true;
+      }
     }
     // Enter on a focused button should press that button, not save the card.
     if (keyboardEvent.key === "Enter" && !keyboardEvent.isComposing && !(keyboardEvent.target instanceof HTMLButtonElement)) {
@@ -1758,12 +1784,12 @@ function updateImmersionHud(): void {
     hudContainer.appendChild(logTimeButton);
   }
 
-  const replayButton = hudButton(hudIcon("replay"), "", "Replay the sentence just spoken");
+  const replayButton = hudButton(hudIcon("replay"), "", "Replay the sentence just spoken (A)");
   replayButton.addEventListener("click", (clickEvent) => {
     clickEvent.stopPropagation();
     void replaySentence();
   });
-  const skipButton = hudButton(hudIcon("skip"), "", "Skip to the next sentence");
+  const skipButton = hudButton(hudIcon("skip"), "", "Skip to the next sentence (D)");
   skipButton.addEventListener("click", (clickEvent) => {
     clickEvent.stopPropagation();
     void skipToNextSentence();
@@ -1773,7 +1799,7 @@ function updateImmersionHud(): void {
   const clozeButton = hudButton(
     hudIcon("card"),
     "Cloze",
-    "Make a Clozemaster card from the sentence just spoken"
+    "Make a Clozemaster card from the sentence just spoken (X)"
   );
   clozeButton.classList.add("is-accent");
   clozeButton.addEventListener("click", (clickEvent) => {
@@ -1887,8 +1913,29 @@ function isEditableTarget(targetElement: EventTarget | null): boolean {
   );
 }
 
+// YouTube leaves these letters unbound; Language Reactor users already know A and D for sentences.
+const PLAYER_SHORTCUTS: Record<string, () => void> = {
+  a: () => void replaySentence(),
+  d: () => void skipToNextSentence(),
+  x: () => void triggerClozeCardCapture(),
+};
+
+function handlePlayerShortcut(keyboardEvent: KeyboardEvent): void {
+  if (keyboardEvent.ctrlKey || keyboardEvent.metaKey || keyboardEvent.altKey || keyboardEvent.shiftKey) return;
+  if (keyboardEvent.repeat || keyboardEvent.isComposing || isEditableTarget(keyboardEvent.target)) return;
+  if (!isWatchOrShorts() || !document.getElementById("study-harvester-player-hud")) return;
+  const run = PLAYER_SHORTCUTS[keyboardEvent.key.toLowerCase()];
+  if (!run) return;
+  keyboardEvent.preventDefault();
+  keyboardEvent.stopPropagation();
+  run();
+}
+
 function handleGlobalKeydown(keyboardEvent: KeyboardEvent): void {
-  if (!handleClozeModalKey) return;
+  if (!handleClozeModalKey) {
+    handlePlayerShortcut(keyboardEvent);
+    return;
+  }
   if (handleClozeModalKey(keyboardEvent)) {
     keyboardEvent.preventDefault();
     keyboardEvent.stopPropagation();

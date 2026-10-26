@@ -1974,6 +1974,8 @@ function showToast(message: string, action?: ToastAction) {
     button.type = "button";
     button.className = "toast-action";
     button.textContent = action.label;
+    button.title = `${action.label} (Z)`;
+    button.setAttribute("aria-keyshortcuts", "z");
     button.addEventListener("click", () => {
       hideToast();
       void action.run();
@@ -3891,9 +3893,74 @@ function anyDialogOpen(): boolean {
   );
 }
 
+const BROWSER_COMMAND_LABELS: Record<string, string> = {
+  _execute_action: "Open the popup",
+  "open-desk": "Open the desk",
+};
+
+async function renderBrowserShortcuts(): Promise<void> {
+  const list = document.getElementById("shortcuts-browser");
+  if (!list) return;
+  const commands = await browser.commands.getAll().catch(() => []);
+  list.replaceChildren(
+    ...commands
+      .filter((command) => command.name && BROWSER_COMMAND_LABELS[command.name])
+      .map((command) => {
+        const row = document.createElement("div");
+        row.className = "shortcut-row";
+        const label = document.createElement("dt");
+        label.textContent = BROWSER_COMMAND_LABELS[command.name!];
+        const keys = document.createElement("dd");
+        if (command.shortcut) {
+          const key = document.createElement("kbd");
+          key.textContent = command.shortcut;
+          keys.append(key);
+        } else {
+          keys.textContent = "Not set";
+          keys.className = "text-text-muted";
+        }
+        row.append(label, keys);
+        return row;
+      })
+  );
+}
+
+function openShortcutsDialog(): void {
+  const dialog = document.getElementById("shortcuts-modal");
+  if (!dialog) return;
+  void renderBrowserShortcuts();
+  dialog.classList.remove("hidden");
+  dialog.classList.add("flex");
+}
+
+function closeShortcutsDialog(): void {
+  const dialog = document.getElementById("shortcuts-modal");
+  dialog?.classList.add("hidden");
+  dialog?.classList.remove("flex");
+}
+
+function clickIfShown(id: string): void {
+  const element = document.getElementById(id) as HTMLButtonElement | HTMLInputElement | null;
+  if (!element || element.disabled || element.offsetParent === null) return;
+  element.click();
+}
+
+function undoFromToast(): boolean {
+  const undo = document.querySelector<HTMLButtonElement>("#toast:not(.hidden):not(.opacity-0) .toast-action");
+  if (!undo) return false;
+  undo.click();
+  return true;
+}
+
+const VIEW_SHORTCUTS: Record<string, string> = { "1": "nav-desk", "2": "nav-sessions", "3": "nav-reading-list", "4": "nav-time" };
+
 function handleDeskKeydown(event: KeyboardEvent): void {
-  if (event.ctrlKey || event.metaKey || event.altKey) return;
   if (anyDialogOpen()) return;
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "z") {
+    if (!keyboardTargetIsTyping(event) && undoFromToast()) event.preventDefault();
+    return;
+  }
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
   const onCheckbox = event.target instanceof HTMLInputElement && event.target.type === "checkbox";
   if (keyboardTargetIsTyping(event) && !(onCheckbox && event.key === "Escape")) {
     if (event.key !== "Escape") return;
@@ -3902,7 +3969,36 @@ function handleDeskKeydown(event: KeyboardEvent): void {
     else target.blur();
     return;
   }
+  if (VIEW_SHORTCUTS[event.key]) {
+    event.preventDefault();
+    clickIfShown(VIEW_SHORTCUTS[event.key]);
+    return;
+  }
   switch (event.key) {
+    case "?":
+      event.preventDefault();
+      openShortcutsDialog();
+      return;
+    case "z":
+      if (undoFromToast()) event.preventDefault();
+      return;
+    case "s":
+      event.preventDefault();
+      clickIfShown("btn-save-session");
+      return;
+    case "p":
+      event.preventDefault();
+      clickIfShown("btn-start-plan");
+      return;
+    case "v": {
+      event.preventDefault();
+      clickIfShown(layoutMode === "grid" ? "layout-list" : "layout-grid");
+      return;
+    }
+    case "a":
+      event.preventDefault();
+      clickIfShown("select-all-checkbox");
+      return;
     case "/": {
       event.preventDefault();
       const search = document.getElementById("search-input") as HTMLInputElement | null;
@@ -5816,6 +5912,15 @@ function setupListeners() {
     document.getElementById("move-to-section-popover")?.classList.add("hidden");
   });
 
+  document.getElementById("shortcuts-close")?.addEventListener("click", closeShortcutsDialog);
+  document.getElementById("shortcuts-modal")?.addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) closeShortcutsDialog();
+  });
+  document.getElementById("settings-open-shortcuts")?.addEventListener("click", openShortcutsDialog);
+  document.getElementById("shortcuts-change-browser")?.addEventListener("click", () => {
+    void browser.tabs.create({ url: "chrome://extensions/shortcuts" });
+  });
+
   document.getElementById("btn-settings")?.addEventListener("click", () => {
     isSettingsOpen = true;
     render();
@@ -5831,7 +5936,7 @@ function setupListeners() {
     if (event.target === event.currentTarget) closeSettings();
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && isSettingsOpen && !document.querySelector("#confirm-modal:not(.hidden)")) closeSettings();
+    if (event.key === "Escape" && isSettingsOpen && !document.querySelector("#confirm-modal:not(.hidden), #shortcuts-modal:not(.hidden)")) closeSettings();
   });
 
   document.getElementById("quality-standard")?.addEventListener("click", () => {

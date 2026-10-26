@@ -15,12 +15,12 @@
       </button>
       <span class="w-px h-6 bg-border shrink-0" aria-hidden="true"></span>
       <nav id="window-list" class="nav-tabs" aria-label="Views">
-        <button type="button" id="nav-desk" class="sidebar-item nav-pill" data-sidebar-type="all">Desk</button>
-        <button type="button" id="nav-sessions" class="sidebar-item nav-pill" data-sidebar-type="sessions">Saved sessions</button>
-        <button type="button" id="nav-reading-list" class="sidebar-item nav-pill" data-sidebar-type="reading-list">
+        <button type="button" id="nav-desk" aria-keyshortcuts="1" class="sidebar-item nav-pill" data-sidebar-type="all">Desk</button>
+        <button type="button" id="nav-sessions" aria-keyshortcuts="2" class="sidebar-item nav-pill" data-sidebar-type="sessions">Saved sessions</button>
+        <button type="button" id="nav-reading-list" aria-keyshortcuts="3" class="sidebar-item nav-pill" data-sidebar-type="reading-list">
           Reading list <span id="reading-list-badge" class="nav-badge">0</span>
         </button>
-        <button type="button" id="nav-time" class="sidebar-item nav-pill" data-sidebar-type="time">Time</button>
+        <button type="button" id="nav-time" aria-keyshortcuts="4" class="sidebar-item nav-pill" data-sidebar-type="time">Time</button>
       </nav>
       <div class="flex-1"></div>
       <div class="relative group w-72">
@@ -37,7 +37,7 @@
           <span class="w-1.5 h-1.5 rounded-full bg-success"></span>
           WebMCP
         </span>
-        <button type="button" id="btn-save-session" class="icon-btn" title="Save today's tabs as a session" aria-label="Save session">
+        <button type="button" id="btn-save-session" class="icon-btn" title="Save today's tabs as a session (S)" aria-label="Save session" aria-keyshortcuts="s">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
         </button>
         <button type="button" id="btn-refresh" class="icon-btn" title="Refresh" aria-label="Refresh">
@@ -96,7 +96,7 @@
                   <button type="button" class="budget-chip" data-budget="90">1 h 30</button>
                   <button type="button" class="budget-chip" data-budget="all">All</button>
                 </span>
-                <button type="button" id="btn-start-plan" class="btn-primary" title="Start a study session with the planned videos">
+                <button type="button" id="btn-start-plan" class="btn-primary" title="Start a study session with the planned videos (P)" aria-keyshortcuts="p">
                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                   <span id="btn-start-plan-label">Start</span>
                 </button>
@@ -130,10 +130,10 @@
             <span id="btn-filter-duplicates-label">Duplicates</span>
           </button>
           <div class="flex items-center rounded-full border border-border bg-surface-elevated p-0.5">
-            <button type="button" id="layout-list" class="w-7 h-6 flex items-center justify-center rounded-full text-text-muted transition-colors" title="List" aria-label="List layout">
+            <button type="button" id="layout-list" class="w-7 h-6 flex items-center justify-center rounded-full text-text-muted transition-colors" title="List (V)" aria-label="List layout" aria-keyshortcuts="v">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
             </button>
-            <button type="button" id="layout-grid" class="w-7 h-6 flex items-center justify-center rounded-full text-text-muted transition-colors" title="Grid" aria-label="Grid layout">
+            <button type="button" id="layout-grid" class="w-7 h-6 flex items-center justify-center rounded-full text-text-muted transition-colors" title="Grid (V)" aria-label="Grid layout" aria-keyshortcuts="v">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
             </button>
           </div>
@@ -188,6 +188,17 @@
                         <button type="button" id="quality-standard" class="theme-option" aria-pressed="false">Standard</button>
                         <button type="button" id="quality-high" class="theme-option" aria-pressed="false">High</button>
                     </div>
+                </div>
+            </div>
+
+            <div class="settings-group-label">Keyboard</div>
+            <div class="settings-group">
+                <div class="flex items-center justify-between gap-4 py-3">
+                    <div>
+                        <div class="text-sm font-medium text-text-primary">Keyboard shortcuts</div>
+                        <div class="text-xs text-text-muted">Press ? on the desk to see them any time</div>
+                    </div>
+                    <button type="button" id="settings-open-shortcuts" class="chip shrink-0">Show</button>
                 </div>
             </div>
 
@@ -310,6 +321,49 @@
                 <button type="button" id="confirm-cancel" data-dialog-cancel data-dialog-focus class="px-4 py-2 text-sm font-medium rounded-md border border-border bg-surface-hover text-text-primary hover:bg-surface transition-colors cursor-pointer active:scale-[0.96]">Cancel</button>
                 <button type="button" id="confirm-ok" class="px-4 py-2 text-sm font-medium rounded-md border-0 cursor-pointer transition-colors active:scale-[0.96]"></button>
             </div>
+        </div>
+    </div>
+
+    <!-- Keyboard shortcuts -->
+    <div id="shortcuts-modal" class="hidden fixed inset-0 z-55 items-center justify-center bg-scrim backdrop-blur-sm p-4" aria-modal="true" role="dialog" aria-labelledby="shortcuts-title">
+        <div class="bg-surface-elevated border border-border rounded-2xl shadow-xl w-full max-w-lg max-h-[calc(100vh-4rem)] overflow-y-auto custom-scrollbar p-6 relative animate-in zoom-in-95 duration-200">
+            <button type="button" id="shortcuts-close" data-dialog-cancel class="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-hover text-text-muted hover:text-text-primary transition-colors active:scale-[0.96] cursor-pointer" title="Close" aria-label="Close">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></svg>
+            </button>
+            <h3 id="shortcuts-title" class="font-display text-2xl font-medium text-text-primary mb-1">Keyboard shortcuts</h3>
+            <p class="text-xs text-text-muted mb-4">They work when you are not typing in a field.</p>
+            <div class="settings-group-label">On the desk</div>
+            <dl class="shortcut-list">
+            <div class="shortcut-row"><dt>Show this list</dt><dd><kbd>?</kbd></dd></div>
+            <div class="shortcut-row"><dt>Desk, Saved sessions, Reading list, Time</dt><dd><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></dd></div>
+            <div class="shortcut-row"><dt>Search</dt><dd><kbd>/</kbd></dd></div>
+            <div class="shortcut-row"><dt>Next or previous video</dt><dd><kbd>J</kbd><kbd>K</kbd></dd></div>
+            <div class="shortcut-row"><dt>Go to the video&#39;s tab</dt><dd><kbd>Enter</kbd></dd></div>
+            <div class="shortcut-row"><dt>Select the video</dt><dd><kbd>Space</kbd></dd></div>
+            <div class="shortcut-row"><dt>Select all</dt><dd><kbd>A</kbd></dd></div>
+            <div class="shortcut-row"><dt>Close the tab, or remove it from the session</dt><dd><kbd>X</kbd></dd></div>
+            <div class="shortcut-row"><dt>Undo, while the Undo button shows</dt><dd><kbd>Z</kbd></dd></div>
+            <div class="shortcut-row"><dt>Save session</dt><dd><kbd>S</kbd></dd></div>
+            <div class="shortcut-row"><dt>Start study session</dt><dd><kbd>P</kbd></dd></div>
+            <div class="shortcut-row"><dt>Switch between list and grid</dt><dd><kbd>V</kbd></dd></div>
+            <div class="shortcut-row"><dt>Clear focus, selection or filter</dt><dd><kbd>Esc</kbd></dd></div>
+            </dl>
+            <div class="settings-group-label">On a YouTube video</div>
+            <dl class="shortcut-list">
+            <div class="shortcut-row"><dt>Replay the sentence just spoken</dt><dd><kbd>A</kbd></dd></div>
+            <div class="shortcut-row"><dt>Skip to the next sentence</dt><dd><kbd>D</kbd></dd></div>
+            <div class="shortcut-row"><dt>Make a cloze card</dt><dd><kbd>X</kbd></dd></div>
+            </dl>
+            <div class="settings-group-label">In the cloze card</div>
+            <dl class="shortcut-list">
+            <div class="shortcut-row"><dt>Pick the previous or next word</dt><dd><kbd>←</kbd><kbd>→</kbd></dd></div>
+            <div class="shortcut-row"><dt>Previous or next sentence</dt><dd><kbd>↑</kbd><kbd>↓</kbd></dd></div>
+            <div class="shortcut-row"><dt>Save the card</dt><dd><kbd>Enter</kbd></dd></div>
+            <div class="shortcut-row"><dt>Close without saving</dt><dd><kbd>Esc</kbd></dd></div>
+            </dl>
+            <div class="settings-group-label">Anywhere in Chrome</div>
+            <dl id="shortcuts-browser" class="shortcut-list"></dl>
+            <button type="button" id="shortcuts-change-browser" class="chip mt-3">Change Chrome shortcuts</button>
         </div>
     </div>
 

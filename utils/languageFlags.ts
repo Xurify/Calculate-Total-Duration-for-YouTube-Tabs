@@ -18,7 +18,6 @@ const LANGUAGE_COUNTRIES: Record<string, string> = {
 /** Regions a code can name (pt-BR, zh-TW) whose flag differs from the language's usual one. */
 const REGION_FLAGS = ["ar", "at", "au", "be", "br", "ca", "ch", "hk", "ie", "in", "mx", "nz", "tw", "us"];
 
-/** Every flag file the build copies from flag-icons. */
 export const FLAG_FILES: readonly string[] = [...new Set([...Object.values(LANGUAGE_COUNTRIES), ...REGION_FLAGS])].sort();
 
 const shipped = new Set(FLAG_FILES);
@@ -43,7 +42,6 @@ function codesByName(): Map<string, string> {
   return namedCodes;
 }
 
-/** The flag file (without `.svg`) for a language code like `sk` or `pt-BR`, or a label like "Slovak". */
 export function languageFlagId(language: string | null | undefined): string | null {
   const text = language?.trim();
   if (!text) return null;
@@ -58,7 +56,6 @@ export function languageFlagId(language: string | null | undefined): string | nu
   return code ? LANGUAGE_COUNTRIES[code] : null;
 }
 
-/** A small flag image for a language, or "" when it has none. */
 export function languageFlagHtml(language: string | null | undefined, className = "lang-flag"): string {
   const id = languageFlagId(language);
   if (!id) return "";

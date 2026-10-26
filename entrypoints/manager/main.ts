@@ -5837,7 +5837,6 @@ function timeSectionHeading(title: string, extra = "", icon?: TimeIcon): string 
   return `<div class="flex items-center gap-3"><h2 class="font-display text-[22px] font-medium m-0 flex-1 flex items-center gap-2">${icon ? timeIconHtml(icon, 18, "text-text-muted") : ""}${escapeHtml(title)}</h2>${extra}</div>`;
 }
 
-/** A language's flag, or its colour dot when it has no flag. */
 function languageMarkHtml(label: string, color: string): string {
   return languageFlagHtml(label) || `<span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:${color}"></span>`;
 }

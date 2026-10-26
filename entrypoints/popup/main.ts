@@ -1171,7 +1171,7 @@ function setupApp() {
         <div id="np-card" class="np-card" data-np-tab-id="">
           <div class="flex gap-3">
             <button type="button" class="np-thumb-btn relative shrink-0 w-[6.5rem] aspect-video rounded-lg overflow-hidden bg-surface-hover border-0 p-0 cursor-pointer" title="Open tab" aria-label="Open tab">
-              <img class="np-thumb w-full h-full object-cover hidden" alt="" width="104" height="58" decoding="async" />
+              <img class="np-thumb w-full h-full object-cover hidden" alt="" width="104" height="58" />
               <div class="absolute bottom-0 left-0 right-0 h-[3px] bg-black/40">
                 <div class="np-progress h-full bg-accent transition-[width] duration-500" style="width: 0%"></div>
               </div>
@@ -1891,7 +1891,7 @@ function updateVideoList(videos: VideoData[]) {
       item.className = ROW_CLASSES;
       item.innerHTML = `
             <div class="relative shrink-0 w-14 aspect-video rounded overflow-hidden bg-surface-hover">
-              <img class="meta-thumb w-full h-full object-cover hidden" alt="" width="56" height="32" loading="${index < EAGER_THUMBS ? "eager" : "lazy"}" decoding="async" />
+              <img class="meta-thumb w-full h-full object-cover hidden" alt="" width="56" height="32" loading="${index < EAGER_THUMBS ? "eager" : "lazy"}" />
               <div class="meta-duration-badge absolute bottom-[2px] right-[2px] px-[3px] py-px rounded-[3px] text-[9.5px] font-medium bg-black/80 text-white tabular-nums leading-none"></div>
               <div class="meta-progress-track absolute bottom-0 left-0 right-0 h-[3px] bg-black/40">
                 <div class="meta-progress h-full bg-accent transition-[width] duration-700" style="width: 0%"></div>

@@ -54,7 +54,10 @@ import {
   type TimeTrackingPrefs,
 } from "../utils/timeLog";
 import { getLiveTabSections } from "../utils/storage";
-import { loadChannelAvatars, recordChannelAvatar } from "../utils/channelAvatars";
+import { avatarFromWatchHtml, loadChannelAvatars, recordChannelAvatar, recordChannelAvatars } from "../utils/channelAvatars";
+import { goalStreaks } from "../utils/goals";
+import { recommendInstead, type Recommendation } from "../utils/recommendations";
+import { watchCsv, watchEntriesSince, CSV_COLUMNS, type CsvColumn } from "../utils/watchCsv";
 import {
   cleanLanguageLimits,
   limitUsage,
@@ -92,17 +95,51 @@ function withWatchLog<T>(work: (log: WatchEntry[]) => Promise<T> | T): Promise<T
   return run;
 }
 
-async function recordWatch(sample: WatchSample): Promise<LimitWarning[]> {
+async function recordWatch(sample: WatchSample): Promise<{ limitWarnings: LimitWarning[]; recommendations: Recommendation[] }> {
   const prefs = await loadTimeTrackingPrefs();
-  if (!prefs.watchHistory) return [];
-  const usage = await withWatchLog(async (log) => {
+  if (!prefs.watchHistory) return { limitWarnings: [], recommendations: [] };
+  const { usage, limits, overrides, log } = await withWatchLog(async (log) => {
     recordWatchSample(log, sample);
     await saveWatchLog(log);
     const limits = await loadLanguageLimits();
-    return limits.length > 0 ? limitUsage(limits, log, Date.now(), await loadLanguageOverrides()) : [];
+    const overrides = await loadLanguageOverrides();
+    return { usage: limits.length > 0 ? limitUsage(limits, log, Date.now(), overrides) : [], limits, overrides, log: [...log] };
   });
   if (sample.channelAvatar && sample.channelName) await recordChannelAvatar(sample.channelName, sample.channelAvatar);
-  return takeLimitWarnings(usage);
+  const limitWarnings = await takeLimitWarnings(usage);
+  const over = limitWarnings.find((warning) => warning.level === "over");
+  return { limitWarnings, recommendations: over ? recommendInstead(log, limits, over.language, Date.now(), overrides) : [] };
+}
+
+const avatarTried = new Set<string>();
+let avatarFill: Promise<unknown> = Promise.resolve();
+/** Watch pages are big; a few per summary is enough to fill the gaps over time without hammering YouTube. */
+const AVATAR_FETCHES_PER_RUN = 4;
+
+/**
+ * Channels watched before avatars were recorded, or only ever seen in a background tab, get their avatar from
+ * one of their videos' watch pages. Each channel is tried once per service worker life.
+ */
+function fillChannelAvatars(channels: { channelName: string; videoId: string }[]): void {
+  avatarFill = avatarFill.then(async () => {
+    const known = await loadChannelAvatars();
+    const missing = channels
+      .filter((channel) => channel.channelName && channel.channelName !== "Unknown channel" && !known[channel.channelName] && !avatarTried.has(channel.channelName))
+      .slice(0, AVATAR_FETCHES_PER_RUN);
+    const found: Record<string, string> = {};
+    for (const channel of missing) {
+      avatarTried.add(channel.channelName);
+      try {
+        const response = await fetch(`https://www.youtube.com/watch?v=${encodeURIComponent(channel.videoId)}`);
+        if (response.url.includes("/sorry")) break;
+        const avatar = avatarFromWatchHtml(await response.text());
+        if (avatar) found[channel.channelName] = avatar;
+      } catch (error) {
+        console.warn("[Study Harvester] channel avatar:", error);
+      }
+    }
+    await recordChannelAvatars(found);
+  }).catch(() => {});
 }
 
 let limitWarningsQueue: Promise<unknown> = Promise.resolve();
@@ -234,17 +271,20 @@ export default defineBackground(() => {
         loadChannelAvatars(),
         loadLanguageLimits(),
       ])
-        .then(([entries, watchEntries, overrides, prefs, rules, mandala, piles, avatars, limits]) =>
+        .then(([entries, watchEntries, overrides, prefs, rules, mandala, piles, avatars, limits]) => {
+          const watch = summarizeWatch(watchEntries, days, Date.now(), overrides, avatars);
           sendResponse({
             summary: summarize(entries, days),
-            watch: summarizeWatch(watchEntries, days, Date.now(), overrides, avatars),
+            watch,
             limits: limitUsage(limits, watchEntries, Date.now(), overrides),
+            streaks: goalStreaks(watchEntries, limits, Date.now(), overrides),
             prefs,
             rules,
             mandala,
             piles,
-          })
-        )
+          });
+          fillChannelAvatars(watch.byChannel.filter((channel) => !channel.avatarUrl).map((channel) => ({ channelName: channel.channelName, videoId: channel.lastVideoId })));
+        })
         .catch((error) => sendResponse({ errorMessage: error instanceof Error ? error.message : String(error) }));
       return true;
     }
@@ -269,7 +309,7 @@ export default defineBackground(() => {
         return;
       }
       void recordWatch(sample)
-        .then((limitWarnings) => sendResponse({ success: true, limitWarnings }))
+        .then((result) => sendResponse({ success: true, ...result }))
         .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
       return true;
     }
@@ -321,6 +361,36 @@ export default defineBackground(() => {
       ])
         .then(() => sendResponse({ success: true }))
         .catch((error) => sendResponse({ success: false, errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "export-watch-csv") {
+      const days = typeof message.days === "number" && message.days > 0 ? Math.floor(message.days) : null;
+      const allowed = new Set<string>(CSV_COLUMNS.map((column) => column.id));
+      const columns = (Array.isArray(message.columns) ? message.columns : []).filter((id: unknown): id is CsvColumn => typeof id === "string" && allowed.has(id));
+      void Promise.all([withWatchLog((log) => [...log]), loadLanguageOverrides()])
+        .then(([log, overrides]) => {
+          const rows = watchEntriesSince(log, days);
+          sendResponse({ csv: watchCsv(rows, columns, overrides), rows: rows.length });
+        })
+        .catch((error) => sendResponse({ errorMessage: error instanceof Error ? error.message : String(error) }));
+      return true;
+    }
+
+    if (message.action === "fill-channel-avatars") {
+      const channels = (Array.isArray(message.channels) ? message.channels : []).filter(
+        (channel: unknown): channel is { channelName: string; videoId: string } =>
+          !!channel && typeof (channel as { channelName?: unknown }).channelName === "string" && typeof (channel as { videoId?: unknown }).videoId === "string"
+      );
+      fillChannelAvatars(channels);
+      sendResponse({ success: true });
+      return;
+    }
+
+    if (message.action === "record-channel-avatars") {
+      void recordChannelAvatars(message.avatars && typeof message.avatars === "object" ? (message.avatars as Record<string, string>) : {})
+        .then(() => sendResponse({ success: true }))
+        .catch(() => sendResponse({ success: false }));
       return true;
     }
 
@@ -1522,6 +1592,8 @@ async function fetchOneTab(tab: TabToSync): Promise<boolean> {
       { channelName: channel, videoId: syncedVideoId },
       uiLanguage
     );
+    const avatar = channel ? avatarFromWatchHtml(html) : null;
+    if (avatar) void recordChannelAvatar(channel, avatar);
     if (duration > 0 || title || isLive) {
       const metadata: Omit<CachedMetadata, "timestamp"> = {
         seconds: duration,

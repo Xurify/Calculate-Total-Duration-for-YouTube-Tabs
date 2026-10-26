@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "../../assets/theme.css";
+@import "../../assets/controls.css";
 
 @theme {
   /* Chrome action popups are capped at 600px tall — do not exceed this. */

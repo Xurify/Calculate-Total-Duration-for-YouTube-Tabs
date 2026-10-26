@@ -2,6 +2,7 @@ import type { CachedMandalaSummary } from "./storage";
 import type { RuleMatch, SiteRule, TimeSummary, TimeTrackingPrefs } from "./timeLog";
 import type { LiveTabSectionsState } from "./storage";
 import type { LanguageLimitUsage } from "./languageLimits";
+import type { GoalStreaks } from "./goals";
 import type { WatchSummary } from "./watchLog";
 
 /** What the popup and the desk ask the background for, and what comes back. */
@@ -9,6 +10,7 @@ export interface TimeSummaryResponse {
   summary: TimeSummary;
   watch: WatchSummary;
   limits: LanguageLimitUsage[];
+  streaks: GoalStreaks;
   prefs: TimeTrackingPrefs;
   rules: SiteRule[];
   mandala: CachedMandalaSummary | null;
@@ -37,21 +39,22 @@ export function pillarChoices(summary: CachedMandalaSummary | null): { index: nu
   return Array.from({ length: 8 }, (_item, index) => ({ index, title: pillarTitleOf(summary, index) }));
 }
 
-export function pillarOptionsHtml(summary: CachedMandalaSummary | null, selected: number | null): string {
-  return pillarChoices(summary)
-    .map((pillar) => `<option value="${pillar.index}"${pillar.index === selected ? " selected" : ""}>${escapeHtml(pillar.title)}</option>`)
-    .join("");
+export interface SelectOption {
+  value: string;
+  label: string;
 }
 
-export function actionOptionsHtml(summary: CachedMandalaSummary | null, pillarIndex: number, selected: string | undefined): string {
+export function pillarSelectOptions(summary: CachedMandalaSummary | null): SelectOption[] {
+  return pillarChoices(summary).map((pillar) => ({ value: String(pillar.index), label: pillar.title }));
+}
+
+export function actionSelectOptions(summary: CachedMandalaSummary | null, pillarIndex: number): SelectOption[] {
   const actions = summary?.pillars.find((pillar) => pillar.index === pillarIndex)?.actions ?? [];
   const routineFirst = [...actions].sort((first, second) => Number(second.kind === "routine") - Number(first.kind === "routine"));
   return [
-    `<option value=""${selected ? "" : " selected"}>Let Mandala pick (its routine)</option>`,
-    ...routineFirst.map(
-      (action) => `<option value="${escapeHtml(action.id)}"${action.id === selected ? " selected" : ""}>${escapeHtml(action.text)}${action.kind === "routine" ? " · routine" : ""}</option>`
-    ),
-  ].join("");
+    { value: "", label: "Let Mandala pick (its routine)" },
+    ...routineFirst.map((action) => ({ value: action.id, label: `${action.text}${action.kind === "routine" ? " · routine" : ""}` })),
+  ];
 }
 
 export function matchWords(match: RuleMatch, summary: CachedMandalaSummary | null): string {

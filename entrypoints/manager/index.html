@@ -235,11 +235,11 @@
             <p id="save-session-summary" class="text-xs text-text-muted mb-3"></p>
             <label for="save-session-input" class="text-[10px] uppercase font-semibold text-text-muted tracking-[0.12em]">Name</label>
             <input type="text" id="save-session-input" class="w-full px-3 py-2 mt-1 mb-4 text-sm border border-border rounded-md bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/60" placeholder="Session name" />
-            <div id="save-session-options" class="space-y-3 mb-4">
+            <div id="save-session-options" class="flex flex-col gap-2 mb-4">
               <div class="text-[10px] uppercase font-semibold text-text-muted tracking-[0.12em]">Action</div>
-              <label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer"><input type="radio" name="save-session-mode" value="new" class="accent-accent" checked /> Save as new session</label>
-              <label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer"><input type="radio" name="save-session-mode" value="replace" class="accent-accent" /> Replace existing session</label>
-              <label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer"><input type="radio" name="save-session-mode" value="merge" class="accent-accent" /> Merge into existing session</label>
+              <label class="ui-choice"><input type="radio" name="save-session-mode" value="new" class="ui-radio" checked /> Save as new session</label>
+              <label class="ui-choice"><input type="radio" name="save-session-mode" value="replace" class="ui-radio" /> Replace existing session</label>
+              <label class="ui-choice"><input type="radio" name="save-session-mode" value="merge" class="ui-radio" /> Merge into existing session</label>
               <div id="save-session-target" class="custom-select custom-select--block hidden mt-1"></div>
               <p id="save-session-duplicate-hint" class="hidden text-xs text-accent leading-relaxed"></p>
             </div>
@@ -260,8 +260,8 @@
                 <label class="text-[10px] uppercase font-semibold text-text-muted tracking-[0.12em]">Open in</label>
                 <div id="restore-target-window" class="custom-select custom-select--block mt-1"></div>
               </div>
-              <label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer"><input type="checkbox" id="restore-missing-only" class="accent-accent rounded" /> Open only tabs not already open</label>
-              <label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer"><input type="checkbox" id="restore-by-sections" class="accent-accent rounded" /> One window per pile (when piles exist)</label>
+              <label class="flex items-center gap-2.5 text-sm text-text-secondary cursor-pointer"><input type="checkbox" id="restore-missing-only" class="ui-check" /> Open only tabs not already open</label>
+              <label class="flex items-center gap-2.5 text-sm text-text-secondary cursor-pointer"><input type="checkbox" id="restore-by-sections" class="ui-check" /> One window per pile (when piles exist)</label>
             </div>
             <div class="flex justify-end gap-2">
                 <button type="button" id="restore-session-cancel" class="px-4 py-2 text-sm font-medium rounded-md border border-border bg-surface-hover text-text-primary hover:bg-surface transition-colors cursor-pointer active:scale-[0.96]">Cancel</button>
@@ -332,7 +332,7 @@
           <input id="language-custom" type="text" class="flex-1 min-w-0 h-9 px-3 text-sm rounded-lg border border-border bg-surface text-text-primary placeholder:text-text-muted/70 focus:outline-none" placeholder="e.g. Ukrainian or uk" maxlength="40" />
         </label>
         <label class="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
-          <input id="language-apply-channel" type="checkbox" class="accent-accent rounded" />
+          <input id="language-apply-channel" type="checkbox" class="ui-check" />
           <span id="language-channel-label">Use this for the whole channel</span>
         </label>
         <div class="flex items-center gap-2 pt-1">
@@ -448,7 +448,7 @@
 
           <div class="pt-3 border-t border-border space-y-3">
             <label class="flex items-start gap-2.5 cursor-pointer select-none">
-              <input type="checkbox" id="study-stash-distractions" checked class="mt-0.5 rounded border border-border checked:bg-accent cursor-pointer" />
+              <input type="checkbox" id="study-stash-distractions" checked class="ui-check mt-0.5" />
               <div>
                 <span class="font-medium text-text-primary block">Stash & close distraction tabs</span>
                 <span class="text-[11px] text-text-muted block">Save all unselected YouTube tabs into a named session in extension storage, then close them to stay focused.</span>
@@ -470,6 +470,31 @@
           </button>
         </div>
       </div>
+    </div>
+
+    <!-- Export watch history as CSV -->
+    <div id="export-modal" class="hidden fixed inset-0 z-[57] bg-scrim backdrop-blur-sm items-center justify-center" aria-modal="true" role="dialog" aria-labelledby="export-modal-heading">
+      <form id="export-form" class="bg-surface-elevated border border-border rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 animate-in zoom-in-95 duration-200 flex flex-col gap-4">
+        <div>
+          <h3 id="export-modal-heading" class="font-display text-xl font-medium text-text-primary m-0">Export watch history</h3>
+          <p class="text-sm text-text-muted mt-1 mb-0">A CSV file, one row per sitting, that opens in Excel, Numbers or Google Sheets.</p>
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <span class="text-[10px] uppercase font-semibold text-text-muted tracking-[0.12em]">Range</span>
+          <span id="export-range" class="ui-segmented self-start" role="group" aria-label="Range"></span>
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <span class="text-[10px] uppercase font-semibold text-text-muted tracking-[0.12em]">Columns</span>
+          <div id="export-columns" class="grid grid-cols-2 gap-x-4 gap-y-2"></div>
+        </div>
+        <pre id="export-preview" class="m-0 max-h-32 overflow-auto custom-scrollbar rounded-lg border border-border bg-surface px-3 py-2.5 text-[11px] leading-relaxed text-text-secondary font-mono whitespace-pre"></pre>
+        <div class="flex items-center gap-2">
+          <span id="export-count" class="text-xs text-text-muted tabular-nums"></span>
+          <span class="flex-1"></span>
+          <button type="button" id="export-cancel" class="px-4 py-2 text-sm font-medium rounded-md border border-border bg-surface-hover text-text-primary hover:bg-surface transition-colors cursor-pointer">Cancel</button>
+          <button type="submit" id="export-download" class="btn-primary h-9">Download CSV</button>
+        </div>
+      </form>
     </div>
 
     <script type="module" src="./main.ts"></script>

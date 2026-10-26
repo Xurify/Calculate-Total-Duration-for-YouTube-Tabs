@@ -39,10 +39,14 @@ import {
   type StoreState,
 } from "../../utils/store";
 import { formatTime, formatCompact, formatDurationWords, formatOffset, formatShortDuration, parseTimeParam, getVideoIdFromUrl, normalizeText, isYoutubeWatchOrShortsUrl } from "../../utils/format";
-import { pillarColor, type SiteRule, type TimeTrackingPrefs } from "../../utils/timeLog";
-import { actionOptionsHtml, formatMinutesWords, pillarChoices, pillarOptionsHtml, pillarTitleOf, type TimeSummaryResponse } from "../../utils/timeUi";
+import { dateKeyOf, pillarColor, type SiteRule, type TimeTrackingPrefs } from "../../utils/timeLog";
+import { actionSelectOptions, formatMinutesWords, pillarChoices, pillarSelectOptions, pillarTitleOf, type TimeSummaryResponse } from "../../utils/timeUi";
 import type { WatchSummary, WatchVideoRow } from "../../utils/watchLog";
-import { languageKey, MAX_LIMIT_MINUTES, type LanguageLimit, type LanguageLimitUsage } from "../../utils/languageLimits";
+import { isGoal, languageKey, MAX_LIMIT_MINUTES, ruleKey, type LanguageLimit, type LanguageLimitUsage } from "../../utils/languageLimits";
+import { CALENDAR_WEEKS, type GoalStreaks } from "../../utils/goals";
+import { CSV_COLUMNS, DEFAULT_CSV_COLUMNS, type CsvColumn } from "../../utils/watchCsv";
+import { CHANNEL_AVATARS_KEY, loadChannelAvatars, type ChannelAvatars } from "../../utils/channelAvatars";
+import { installTooltips, stepperHtml, wireCombobox, wireSteppers } from "../../utils/controls";
 import {
   detectLanguageFromPlayerResponse,
   languageTextFromPlayerResponse,
@@ -419,8 +423,33 @@ function scheduleProbeResultsToUi(): void {
 }
 
 /** Coalesced metadata updates: patch cards in place; full rebuild only when layout structure changes. */
+let deskChannelAvatars: ChannelAvatars = {};
+const avatarRequested = new Set<string>();
+
+/** Channels on the desk without an avatar yet get one looked up from one of their open videos. */
+function requestMissingChannelAvatars(): void {
+  const missing = new Map<string, string>();
+  for (const video of allVideos) {
+    const videoId = getVideoIdFromUrl(video.url);
+    const name = video.channelName?.trim();
+    if (!name || !videoId || deskChannelAvatars[name] || avatarRequested.has(name) || missing.has(name)) continue;
+    missing.set(name, videoId);
+  }
+  if (missing.size === 0) return;
+  for (const name of missing.keys()) avatarRequested.add(name);
+  void browser.runtime
+    .sendMessage({ action: "fill-channel-avatars", channels: [...missing].map(([channelName, videoId]) => ({ channelName, videoId })) })
+    .catch(() => {});
+}
+
+function deskAvatarHtml(channelName: string | null | undefined, size = "w-4 h-4 text-[8px]"): string {
+  const name = channelName?.trim();
+  return name ? channelAvatarHtml(name, deskChannelAvatars[name] ?? null, size) : "";
+}
+
 function applyProbeResultsToUi(): void {
   recomputeWindowGroupDurations();
+  requestMissingChannelAvatars();
 
   const nextStructureFp = tabListStructureFingerprint();
   if (!selectedSession && nextStructureFp !== lastTabListFingerprint) {
@@ -431,6 +460,8 @@ function applyProbeResultsToUi(): void {
   updateLiveTabListCardsFromState();
   updateTabListAggregateHeadersFromState();
   updateCurrentViewStatsFromState();
+  // Languages and channels arrive with the metadata, so the facet counts change even when the list layout doesn't.
+  renderFacetRail();
   renderSidebar();
   updateSelectionUI();
 }
@@ -1661,7 +1692,7 @@ function renderSessionTabsInnerHtml(
                 <button type="button" class="p-1 rounded hover:bg-surface-hover text-text-muted transition-transform duration-200 nested-group-toggle ${isCollapsed ? "-rotate-90" : ""}" data-nested-group="${escapeHtml(ck)}">
                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
                 </button>
-                <div class="flex-1 font-medium text-xs text-text-secondary truncate nested-group-toggle cursor-pointer" data-nested-group="${escapeHtml(ck)}">${escapeHtml(groupName)}</div>
+                <div class="flex-1 min-w-0 flex items-center gap-2 font-medium text-xs text-text-secondary nested-group-toggle cursor-pointer" data-nested-group="${escapeHtml(ck)}">${groupingMode === "channel" ? deskAvatarHtml(groupName, "w-5 h-5 text-[9px]") : ""}<span class="truncate">${escapeHtml(groupName)}</span></div>
                 <div class="aggregate-group-stats text-[10px] text-text-muted font-mono flex items-center gap-2" data-group-name="${escapeHtml(groupName)}">
                   <span>${tabList.length} videos</span>
                   <span class="w-px h-3 bg-border"></span>
@@ -1716,7 +1747,7 @@ function renderLiveVideosInnerHtml(
                           <div class="w-2 h-0.5 bg-accent"></div>
                        </div>
                     </div>
-                    <div class="flex-1 font-medium text-xs text-text-secondary truncate nested-group-toggle cursor-pointer" data-nested-group="${escapeHtml(ck)}">${escapeHtml(groupName)}</div>
+                    <div class="flex-1 min-w-0 flex items-center gap-2 font-medium text-xs text-text-secondary nested-group-toggle cursor-pointer" data-nested-group="${escapeHtml(ck)}">${groupingMode === "channel" ? deskAvatarHtml(groupName, "w-5 h-5 text-[9px]") : ""}<span class="truncate">${escapeHtml(groupName)}</span></div>
                     <div class="aggregate-group-stats text-[10px] text-text-muted font-mono flex items-center gap-2" data-group-name="${escapeHtml(groupName)}">
                         <span>${groupVideos.length} videos</span>
                         <span class="w-px h-3 bg-border"></span>
@@ -2772,7 +2803,11 @@ function updateLiveTabListCardsFromState() {
       (titleEl as HTMLElement).title = video.title;
     }
     const channelEl = card.querySelector(".manager-card-channel");
-    if (channelEl) channelEl.textContent = video.channelName;
+    if (channelEl && channelEl.textContent !== video.channelName) {
+      channelEl.textContent = video.channelName;
+      if (channelEl.previousElementSibling?.matches(".ui-avatar")) channelEl.previousElementSibling.remove();
+      channelEl.insertAdjacentHTML("beforebegin", deskAvatarHtml(video.channelName));
+    }
 
     const durEl = card.querySelector(".manager-card-duration");
     if (durEl) durEl.textContent = video.isLive ? "LIVE" : formatCompact(video.seconds);
@@ -3315,6 +3350,9 @@ const FACET_ICONS: Record<string, string> = {
 };
 
 function facetIconHtml(row: FacetRow): string {
+  if (row.kind === "channel" && deskChannelAvatars[row.value]) {
+    return `<span class="facet-icon">${deskAvatarHtml(row.value)}</span>`;
+  }
   if (row.kind === "language" || (row.kind === "pile" && row.value !== "__unsorted")) {
     return `<span class="facet-icon"><span class="facet-dot" style="background: ${row.color ?? "var(--color-border-hover)"}"></span></span>`;
   }
@@ -3632,7 +3670,7 @@ function openLanguageModal(target: { videoId: string | null; channelName: string
   list.innerHTML = options
     .map((option) => `
       <label class="language-option">
-        <input type="radio" name="language-choice" value="${escapeHtml(option.name)}" data-code="${escapeHtml(option.code ?? "")}" ${current?.name === option.name ? "checked" : ""} />
+        <input type="radio" class="ui-radio" name="language-choice" value="${escapeHtml(option.name)}" data-code="${escapeHtml(option.code ?? "")}" ${current?.name === option.name ? "checked" : ""} />
         <span>${escapeHtml(option.name)}</span>
         ${option.code ? `<span class="text-xs text-text-muted uppercase">${escapeHtml(option.code)}</span>` : ""}
       </label>`)
@@ -3863,6 +3901,7 @@ function renderVideoList(videos: VideoData[], sectionColorIndex?: number | "unso
           <div class="flex-1 min-w-0 cursor-pointer video-click-target">
             <h3 class="manager-card-title queue-title" title="${escapeHtml(video.title)}">${escapeHtml(video.title)}</h3>
             <div class="queue-meta">
+              ${deskAvatarHtml(video.channelName)}
               <span class="manager-card-channel truncate">${escapeHtml(video.channelName)}</span>
               <span class="opacity-60">·</span>
               <span class="manager-card-time whitespace-nowrap"><span class="manager-card-time-current ${watchedPercent > 0 ? "text-text-primary" : "text-text-muted"}">${formatCompact(video.currentTime)}</span> of <span class="manager-card-time-total">${formatCompact(video.seconds)}</span></span>
@@ -3950,7 +3989,7 @@ function renderSessionGrid(tabs: SavedSessionTab[], sectionColorIndex?: number |
         <div class="p-2 session-video-click-target cursor-pointer">
           <h3 class="text-xs font-medium text-text-primary line-clamp-2 leading-snug mb-1 min-h-[2.5em]" title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
           <div class="flex items-center justify-between gap-2">
-            <div class="text-[10px] text-text-muted truncate">${escapeHtml(channel)}</div>
+            <div class="text-[10px] text-text-muted flex items-center gap-1.5 min-w-0">${deskAvatarHtml(tab.channelName, "w-3.5 h-3.5 text-[7px]")}<span class="truncate">${escapeHtml(channel)}</span></div>
             <div class="flex items-center gap-1 shrink-0">
               ${duplicateBadgeHtml(tab.url)}
               ${tab.languageName ? `<div class="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0">${escapeHtml(tab.languageName.split('(')[0].trim())}</div>` : ''}
@@ -3988,6 +4027,7 @@ function renderSessionList(tabs: SavedSessionTab[], sectionColorIndex?: number |
           <div class="flex-1 min-w-0 session-video-click-target cursor-pointer">
             <h3 class="queue-title" title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
             <div class="queue-meta">
+              ${deskAvatarHtml(tab.channelName)}
               <span class="truncate">${escapeHtml(channel)}</span>
               ${languageLabel ? `<span class="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0">${escapeHtml(languageLabel)}</span>` : ""}
               ${duplicateBadgeHtml(tab.url)}
@@ -5770,17 +5810,31 @@ let lastTimeResponse: TimeSummaryResponse | null = null;
 let timePanelWired = false;
 let showAllChannels = false;
 let openChannel: string | null = null;
+let channelLanguageFilter: string | null = null;
 let videoRowsShown = 0;
+let newRuleKind: "goal" | "limit" = "goal";
+let ruleSaveTimer: ReturnType<typeof setTimeout> | null = null;
+const RULE_SAVE_DELAY_MS = 600;
 
 const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
+const WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const TIME_RANGES = [7, 30, 90] as const;
 const CHANNEL_ROWS = 8;
 const VIDEO_ROWS_PAGE = 20;
 const CHANNEL_TOOLTIP_TITLES = 10;
+const HEAT_LEVELS = 5;
+
+const TRASH_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`;
+const CHEVRON_RIGHT_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-text-muted transition-transform" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>`;
 
 function dayLetter(key: string): string {
   const [year, month, day] = key.split("-").map(Number);
   return DAY_LETTERS[new Date(year, month - 1, day).getDay()];
+}
+
+function longDate(key: string): string {
+  const [year, month, day] = key.split("-").map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 }
 
 function timeAgoWords(timestamp: number): string {
@@ -5805,8 +5859,12 @@ function speedWords(rate: number): string {
   return `${rate.toFixed(2).replace(/\.?0+$/, "")}×`;
 }
 
+function plural(count: number, word: string): string {
+  return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
+
 function timeSectionHeading(title: string, extra = ""): string {
-  return `<div class="flex items-center gap-3"><h2 class="font-display text-[22px] font-medium m-0 flex-1">${escapeHtml(title)}</h2>${extra}</div>`;
+  return `<div class="flex items-center gap-3 flex-wrap"><h2 class="font-display text-[22px] font-medium m-0 flex-1">${escapeHtml(title)}</h2>${extra}</div>`;
 }
 
 function watchStatTile(label: string, value: string, note: string): string {
@@ -5817,29 +5875,195 @@ function watchStatTile(label: string, value: string, note: string): string {
   </div>`;
 }
 
-function watchVideoRowHtml(video: WatchVideoRow): string {
+function languageDot(color: string): string {
+  return `<span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:${color}"></span>`;
+}
+
+/** One colour per language for the whole page, in the order of time spent, so charts and lists agree. */
+function languageColorMap(watch: WatchSummary): Map<string, string> {
+  const colors = new Map<string, string>();
+  watch.byLanguage.forEach((row, index) => colors.set(row.label, row.label === UNKNOWN_LANGUAGE ? "var(--color-border-hover)" : FACET_PALETTE[index % FACET_PALETTE.length]));
+  return colors;
+}
+
+function colorOfLanguage(colors: Map<string, string>, label: string): string {
+  return colors.get(label) ?? "var(--color-border-hover)";
+}
+
+function watchVideoRowHtml(video: WatchVideoRow, colors: Map<string, string>): string {
   const url = video.isShort ? `https://www.youtube.com/shorts/${encodeURIComponent(video.videoId)}` : `https://www.youtube.com/watch?v=${encodeURIComponent(video.videoId)}`;
   const progress = video.isLive ? "Live" : video.durationSeconds > 0 ? shareWords(video.coverage, 1) : "";
   const speed = video.playedSeconds > 0 ? video.videoSeconds / video.playedSeconds : 1;
-  return `<li class="flex items-center gap-3 min-w-0 text-sm">
-    <img src="https://i.ytimg.com/vi/${encodeURIComponent(video.videoId)}/mqdefault.jpg" alt="" loading="lazy" class="w-16 h-9 rounded object-cover shrink-0 bg-surface-elevated" />
-    <span class="flex-1 min-w-0 flex flex-col">
+  const faster = !video.isLive && Math.abs(speed - 1) >= 0.05;
+  return `<li class="grid grid-cols-[4rem_minmax(0,1fr)_3.5rem_3rem_5.5rem] items-center gap-3 min-w-0 text-sm">
+    <img src="https://i.ytimg.com/vi/${encodeURIComponent(video.videoId)}/mqdefault.jpg" alt="" loading="lazy" class="w-16 h-9 rounded object-cover bg-surface-hover manager-card-thumb" />
+    <span class="min-w-0 flex flex-col">
       <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="truncate text-text-primary no-underline hover:text-accent" title="${escapeHtml(video.title || video.videoId)}">${escapeHtml(video.title || video.videoId)}</a>
-      <span class="truncate text-xs text-text-muted">${escapeHtml([video.channelName, video.language, Math.abs(speed - 1) >= 0.05 ? speedWords(speed) : "", timeAgoWords(video.lastAt)].filter(Boolean).join(" · "))}</span>
+      <span class="truncate text-xs text-text-muted flex items-center gap-1.5">${languageDot(colorOfLanguage(colors, video.language))}<span class="truncate">${escapeHtml([video.channelName, video.language, timeAgoWords(video.lastAt)].filter(Boolean).join(" · "))}</span></span>
     </span>
-    <span class="w-12 text-right text-xs text-text-muted tabular-nums" title="${video.durationSeconds > 0 ? `Of ${formatMinutesWords(video.durationSeconds)}` : ""}">${progress}</span>
-    <span class="w-20 text-right text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(video.playedSeconds)}</span>
+    <span class="justify-self-start">${faster ? `<span class="speed-chip" title="${escapeHtml(`${formatMinutesWords(video.videoSeconds)} of video in ${formatMinutesWords(video.playedSeconds)}`)}">${speedWords(speed)}</span>` : ""}</span>
+    <span class="text-right text-xs text-text-muted tabular-nums" title="${video.durationSeconds > 0 ? `Of ${formatMinutesWords(video.durationSeconds)}` : ""}">${progress}</span>
+    <span class="text-right text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(video.playedSeconds)}</span>
   </li>`;
 }
 
-function channelLetterHtml(letter: string): string {
-  return `<span class="inline-flex items-center justify-center w-5 h-5 rounded-full shrink-0 bg-surface-elevated border border-border text-[10px] font-medium text-text-secondary" aria-hidden="true">${escapeHtml(letter)}</span>`;
+function channelLetterHtml(letter: string, size = "w-5 h-5 text-[10px]"): string {
+  return `<span class="ui-avatar ${size}" aria-hidden="true">${escapeHtml(letter)}</span>`;
 }
 
-function channelAvatarHtml(channel: WatchSummary["byChannel"][number]): string {
-  const letter = Array.from(channel.channelName.trim())[0]?.toUpperCase() ?? "?";
-  if (!channel.avatarUrl) return channelLetterHtml(letter);
-  return `<img src="${escapeHtml(channel.avatarUrl)}" alt="" class="channel-avatar w-5 h-5 rounded-full shrink-0 object-cover bg-surface-elevated" loading="lazy" referrerpolicy="no-referrer" data-letter="${escapeHtml(letter)}">`;
+function channelAvatarHtml(channelName: string, avatarUrl: string | null, size = "w-5 h-5 text-[10px]"): string {
+  const letter = Array.from(channelName.trim())[0]?.toUpperCase() ?? "?";
+  if (!avatarUrl) return channelLetterHtml(letter, size);
+  return `<img src="${escapeHtml(avatarUrl)}" alt="" class="channel-avatar ui-avatar ${size}" loading="lazy" referrerpolicy="no-referrer" data-letter="${escapeHtml(letter)}" data-size="${escapeHtml(size)}">`;
+}
+
+function dayBarsHtml(watch: WatchSummary, colors: Map<string, string>): string {
+  const peakDay = Math.max(60, ...watch.days.map((day) => day.seconds));
+  const dense = watch.days.length > 30;
+  const order = watch.byLanguage.map((row) => row.label);
+  const bars = watch.days
+    .map((day, index) => {
+      const segments = order
+        .filter((label) => (day.byLanguage[label] ?? 0) > 0)
+        .map((label) => `<div class="w-full shrink-0 ${dense ? "" : "rounded-[3px]"}" style="height:${((day.byLanguage[label] / peakDay) * 100).toFixed(2)}%;background:${colorOfLanguage(colors, label)}"></div>`)
+        .join("");
+      const breakdown = order
+        .filter((label) => (day.byLanguage[label] ?? 0) >= 60)
+        .map((label) => `${label}: ${formatMinutesWords(day.byLanguage[label])}`);
+      const tip = [`${longDate(day.key)}: ${formatMinutesWords(day.seconds)}`, ...breakdown].join("\n");
+      const label = timeRange === 7 ? dayLetter(day.key) : !dense || index % 15 === 0 ? day.key.slice(dense ? 5 : 8) : "";
+      return `<div class="flex flex-col items-center gap-1.5 min-w-0" title="${escapeHtml(tip)}">
+        <div class="w-full h-40 flex flex-col-reverse ${dense ? "" : "gap-[2px]"} rounded-md bg-surface-elevated overflow-hidden">${segments}</div>
+        <span class="text-[11px] text-text-muted tabular-nums whitespace-nowrap">${label || "&nbsp;"}</span>
+        ${dense ? "" : `<span class="font-display text-[13px] text-text-secondary tabular-nums whitespace-nowrap">${day.seconds >= 60 ? formatMinutesWords(day.seconds) : "·"}</span>`}
+      </div>`;
+    })
+    .join("");
+  const legend = watch.byLanguage
+    .map((row) => `<span class="flex items-center gap-1.5">${languageDot(colorOfLanguage(colors, row.label))}${escapeHtml(row.label)}</span>`)
+    .join("");
+  const busiest = watch.days.reduce((best, day) => (day.seconds > best.seconds ? day : best), watch.days[0]);
+  return `<section class="flex flex-col gap-3">
+    ${timeSectionHeading("By day", busiest && busiest.seconds >= 60 ? `<span class="text-xs text-text-muted">Most on ${escapeHtml(longDate(busiest.key))}</span>` : "")}
+    <div class="grid ${dense ? "gap-px" : "gap-2"}" style="grid-template-columns: repeat(${watch.days.length}, minmax(0, 1fr))">${bars}</div>
+    <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-secondary">${legend}</div>
+  </section>`;
+}
+
+function heatmapHtml(watch: WatchSummary): string {
+  const peak = Math.max(...watch.byWeekdayHour.flat());
+  if (peak <= 0) return "";
+  let peakDay = 0;
+  let peakHour = 0;
+  watch.byWeekdayHour.forEach((hours, weekday) =>
+    hours.forEach((seconds, hour) => {
+      if (seconds === peak) {
+        peakDay = weekday;
+        peakHour = hour;
+      }
+    })
+  );
+  const hourLabels = Array.from({ length: 24 }, (_unused, hour) => `<span class="text-[10px] text-text-muted tabular-nums text-center">${hour % 3 === 0 ? escapeHtml(hourWords(hour)) : ""}</span>`).join("");
+  const rows = watch.byWeekdayHour
+    .map(
+      (hours, weekday) =>
+        `<span class="text-[11px] text-text-muted self-center">${WEEKDAY_NAMES[weekday]}</span>` +
+        hours
+          .map((seconds, hour) => {
+            const level = seconds <= 0 ? 0 : Math.max(1, Math.ceil((seconds / peak) * (HEAT_LEVELS - 1)));
+            return `<span class="heat-cell" data-level="${level}" title="${escapeHtml(`${WEEKDAY_NAMES[weekday]} ${hourWords(hour)}: ${formatMinutesWords(seconds)}`)}"></span>`;
+          })
+          .join("")
+    )
+    .join("");
+  const legend = Array.from({ length: HEAT_LEVELS }, (_unused, level) => `<span class="heat-cell legend-swatch" data-level="${level}"></span>`).join("");
+  return `<section class="flex flex-col gap-3">
+    ${timeSectionHeading("When you watch", `<span class="text-xs text-text-muted">Most on ${WEEKDAY_NAMES[peakDay]} around ${escapeHtml(hourWords(peakHour))}</span>`)}
+    <div class="grid gap-[3px]" style="grid-template-columns: 2.5rem repeat(24, minmax(0, 1fr))"><span></span>${hourLabels}${rows}</div>
+    <div class="flex items-center justify-end gap-1.5 text-[11px] text-text-muted">Less ${legend} More</div>
+  </section>`;
+}
+
+function speedSectionHtml(watch: WatchSummary): string {
+  const rows = watch.bySpeed.filter((row) => row.playedSeconds >= 60);
+  if (rows.length === 0 || (rows.length === 1 && rows[0].rate === 1)) return "";
+  const realTime = rows.reduce((sum, row) => sum + row.playedSeconds, 0);
+  const videoTime = rows.reduce((sum, row) => sum + row.videoSeconds, 0);
+  const longest = Math.max(...rows.map((row) => row.playedSeconds));
+  const rowsHtml = rows
+    .map(
+      (row) => `<li class="grid grid-cols-[4rem_minmax(0,1fr)_6rem_9rem] items-center gap-3 text-sm">
+        <span class="speed-chip justify-self-start${row.rate === 1 ? " speed-chip--plain" : ""}">${speedWords(row.rate)}</span>
+        <span class="h-2 rounded-full bg-surface-elevated overflow-hidden flex"><span class="h-full rounded-full bg-accent" style="width:${Math.max(2, (row.playedSeconds / longest) * 100)}%;opacity:${(0.45 + Math.min(1, (row.rate - 0.75) / 1.25) * 0.55).toFixed(2)}"></span></span>
+        <span class="text-right text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(row.playedSeconds)}</span>
+        <span class="text-right text-xs text-text-muted tabular-nums whitespace-nowrap">${row.rate === 1 ? "" : `${formatMinutesWords(row.videoSeconds)} of video`}</span>
+      </li>`
+    )
+    .join("");
+  const saved = videoTime - realTime;
+  return `<section class="flex flex-col gap-3">
+    ${timeSectionHeading("Playback speed")}
+    <p class="text-xs text-text-muted m-0">${formatMinutesWords(videoTime)} of video took ${formatMinutesWords(realTime)} of real time${saved >= 60 ? `, ${formatMinutesWords(saved)} saved by watching faster` : ""}. Goals, limits and every total here use real time.</p>
+    <ul class="m-0 p-0 list-none flex flex-col gap-2">${rowsHtml}</ul>
+  </section>`;
+}
+
+function channelsSectionHtml(watch: WatchSummary, colors: Map<string, string>): string {
+  // The summary names channel-less videos "Unknown channel", so match it the same way.
+  const videosByChannel = new Map<string, WatchVideoRow[]>();
+  for (const video of watch.videos) {
+    const name = video.channelName || "Unknown channel";
+    videosByChannel.set(name, [...(videosByChannel.get(name) ?? []), video]);
+  }
+  const languages = [...new Set(watch.byChannel.map((channel) => channel.language))];
+  if (channelLanguageFilter && !languages.includes(channelLanguageFilter)) channelLanguageFilter = null;
+  const filtered = channelLanguageFilter ? watch.byChannel.filter((channel) => channel.language === channelLanguageFilter) : watch.byChannel;
+  const shown = showAllChannels ? filtered : filtered.slice(0, CHANNEL_ROWS);
+  const longest = filtered[0]?.seconds ?? 1;
+  const rowsHtml = shown
+    .map((channel, index) => {
+      const open = openChannel === channel.channelName;
+      const channelVideos = [...(videosByChannel.get(channel.channelName) ?? [])].sort((first, second) => second.playedSeconds - first.playedSeconds);
+      const titles = channelVideos.slice(0, CHANNEL_TOOLTIP_TITLES).map((video) => `• ${video.title || video.videoId}`);
+      if (channelVideos.length > CHANNEL_TOOLTIP_TITLES) titles.push(`and ${channelVideos.length - CHANNEL_TOOLTIP_TITLES} more`);
+      const color = colorOfLanguage(colors, channel.language);
+      return `<li class="border-b border-border/60">
+        <button type="button" class="time-channel channel-row${open ? " channel-row--open" : ""}" data-channel="${escapeHtml(channel.channelName)}" aria-expanded="${open}" title="${escapeHtml(open ? "" : titles.join("\n"))}">
+          <span class="font-display text-[15px] text-text-muted tabular-nums w-5 text-right">${index + 1}</span>
+          ${channelAvatarHtml(channel.channelName, channel.avatarUrl, "w-8 h-8 text-xs")}
+          <span class="min-w-0 flex flex-col text-left">
+            <span class="truncate text-sm text-text-primary">${escapeHtml(channel.channelName)}</span>
+            <span class="truncate text-xs text-text-muted flex items-center gap-1.5">${languageDot(color)}${escapeHtml(channel.language)} · ${plural(channel.videos, "video")}</span>
+          </span>
+          <span class="h-2 rounded-full overflow-hidden flex"><span class="h-full rounded-full" style="width:${Math.max(2, (channel.seconds / longest) * 100)}%;background:${color}"></span></span>
+          <span class="text-right text-sm text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(channel.seconds)}</span>
+          ${CHEVRON_RIGHT_ICON}
+        </button>
+        ${open ? `<ul class="m-0 list-none flex flex-col gap-2.5 pl-[4.25rem] pr-2 pt-1 pb-4">${channelVideos.map((video) => watchVideoRowHtml(video, colors)).join("")}</ul>` : ""}
+      </li>`;
+    })
+    .join("");
+  const filterHtml =
+    languages.length > 1
+      ? `<span class="flex flex-wrap gap-1.5" role="group" aria-label="Filter channels by language">
+          <button type="button" class="time-channel-filter chip h-7 text-xs" data-language="" aria-pressed="${channelLanguageFilter === null}">All</button>
+          ${languages
+            .map(
+              (language) =>
+                `<button type="button" class="time-channel-filter chip h-7 text-xs" data-language="${escapeHtml(language)}" aria-pressed="${channelLanguageFilter === language}">${languageDot(colorOfLanguage(colors, language))}${escapeHtml(language)}</button>`
+            )
+            .join("")}
+        </span>`
+      : "";
+  const hidden = filtered.length - CHANNEL_ROWS;
+  const toggleHtml =
+    hidden > 0 ? `<button type="button" id="time-channels-toggle" class="chip h-8 text-xs self-start">${showAllChannels ? `Show top ${CHANNEL_ROWS}` : `Show all ${filtered.length} channels`}</button>` : "";
+  return `<section class="flex flex-col gap-3">
+    ${timeSectionHeading("Channels", `<span class="text-xs text-text-muted tabular-nums">${watch.byChannel.length}</span>`)}
+    ${filterHtml}
+    <ul class="m-0 p-0 list-none flex flex-col">${rowsHtml}</ul>
+    ${toggleHtml}
+  </section>`;
 }
 
 function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): string {
@@ -5847,6 +6071,7 @@ function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): strin
   if (total.playedSeconds <= 0) {
     return `<p class="text-sm text-text-muted m-0">${prefs.watchHistory ? "Nothing watched yet." : "Watch history is off."}</p>`;
   }
+  const colors = languageColorMap(watch);
 
   const speed = total.videoSeconds / total.playedSeconds;
   const saved = total.videoSeconds - total.playedSeconds;
@@ -5856,113 +6081,36 @@ function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): strin
     watchStatTile("Speed", speedWords(speed), saved >= 60 ? `${formatMinutesWords(saved)} saved` : ""),
     watchStatTile("Subtitles", shareWords(total.captionSeconds, total.playedSeconds), formatMinutesWords(total.captionSeconds)),
     watchStatTile("Background", shareWords(background, total.playedSeconds), formatMinutesWords(background)),
-    watchStatTile("Streak", `${watch.streak.current} ${watch.streak.current === 1 ? "day" : "days"}`, `Best ${watch.streak.longest}`),
+    watchStatTile("Active days", `${total.activeDays} of ${watch.days.length}`, total.activeDays > 0 ? `${formatMinutesWords(total.playedSeconds / total.activeDays)} a day` : ""),
     watchStatTile("Ads", formatMinutesWords(total.adSeconds), ""),
   ].join("");
 
-  const peakDay = Math.max(60, ...watch.days.map((day) => day.seconds));
-  const dense = watch.days.length > 30;
-  const daysHtml = watch.days
-    .map((day, index) => {
-      const behind = Math.max(0, day.seconds - day.visible);
-      const label = timeRange === 7 ? dayLetter(day.key) : !dense || index % 15 === 0 ? day.key.slice(dense ? 5 : 8) : "";
-      return `<div class="flex flex-col items-center gap-1.5 min-w-0" title="${escapeHtml(day.key)}: ${formatMinutesWords(day.visible)} on screen${behind > 0 ? `, ${formatMinutesWords(behind)} in the background` : ""}">
-        <div class="w-full h-24 flex flex-col justify-end rounded-md bg-surface-elevated overflow-hidden">
-          <div class="w-full bg-accent/35" style="height:${Math.round((behind / peakDay) * 100)}%"></div>
-          <div class="w-full bg-accent" style="height:${Math.round((day.visible / peakDay) * 100)}%"></div>
-        </div>
-        <span class="text-[11px] text-text-muted tabular-nums whitespace-nowrap">${label || "&nbsp;"}</span>
-        ${dense ? "" : `<span class="text-[11px] text-text-secondary tabular-nums">${day.seconds >= 60 ? formatMinutesWords(day.seconds) : "·"}</span>`}
-      </div>`;
-    })
-    .join("");
-
-  const colorOf = (label: string, index: number) => (label === UNKNOWN_LANGUAGE ? "var(--color-border-hover)" : FACET_PALETTE[index % FACET_PALETTE.length]);
-  const languageColors = new Map(watch.byLanguage.map((row, index) => [row.label, colorOf(row.label, index)]));
   const longestLanguage = watch.byLanguage[0]?.seconds ?? 1;
   const languagesHtml = watch.byLanguage
     .map(
       (row) => `<li class="grid grid-cols-[minmax(0,12rem)_minmax(0,1fr)_auto] items-center gap-3 text-sm">
-        <span class="truncate font-medium text-text-primary flex items-center gap-2"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:${languageColors.get(row.label)}"></span>${escapeHtml(row.label)}</span>
-        <span class="h-2 rounded-full bg-surface-elevated overflow-hidden flex"><span class="h-full" style="width:${Math.max(2, (row.seconds / longestLanguage) * 100)}%;background:${languageColors.get(row.label)}"></span></span>
-        <span class="text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(row.seconds)} <span class="text-text-muted">· ${shareWords(row.seconds, total.playedSeconds)} · ${row.videos} ${row.videos === 1 ? "video" : "videos"}</span></span>
+        <span class="truncate font-medium text-text-primary flex items-center gap-2">${languageDot(colorOfLanguage(colors, row.label))}${escapeHtml(row.label)}</span>
+        <span class="h-2 rounded-full bg-surface-elevated overflow-hidden flex"><span class="h-full rounded-full" style="width:${Math.max(2, (row.seconds / longestLanguage) * 100)}%;background:${colorOfLanguage(colors, row.label)}"></span></span>
+        <span class="text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(row.seconds)} <span class="text-text-muted">· ${shareWords(row.seconds, total.playedSeconds)} · ${plural(row.videos, "video")}</span></span>
       </li>`
     )
     .join("");
 
-  const peakHourSeconds = Math.max(...watch.byHour);
-  const peakHour = watch.byHour.indexOf(peakHourSeconds);
-  const hoursHtml = watch.byHour
-    .map(
-      (seconds, hour) => `<div class="flex flex-col items-center gap-1 min-w-0" title="${escapeHtml(hourWords(hour))}: ${formatMinutesWords(seconds)}">
-        <div class="w-full h-16 flex flex-col justify-end rounded-sm bg-surface-elevated overflow-hidden"><div class="w-full ${hour === peakHour ? "bg-accent" : "bg-accent/50"}" style="height:${peakHourSeconds > 0 ? Math.round((seconds / peakHourSeconds) * 100) : 0}%"></div></div>
-        <span class="text-[10px] text-text-muted tabular-nums">${hour % 6 === 0 ? escapeHtml(hourWords(hour)) : "&nbsp;"}</span>
-      </div>`
-    )
-    .join("");
-
-  // The summary names channel-less videos "Unknown channel", so match it the same way.
-  const videosByChannel = new Map<string, WatchVideoRow[]>();
-  for (const video of watch.videos) {
-    const name = video.channelName || "Unknown channel";
-    videosByChannel.set(name, [...(videosByChannel.get(name) ?? []), video]);
-  }
-  const shownChannels = showAllChannels ? watch.byChannel : watch.byChannel.slice(0, CHANNEL_ROWS);
-  const channelsHtml = shownChannels
-    .map((channel) => {
-      const open = openChannel === channel.channelName;
-      const channelVideos = [...(videosByChannel.get(channel.channelName) ?? [])].sort((first, second) => second.playedSeconds - first.playedSeconds);
-      const titles = channelVideos.slice(0, CHANNEL_TOOLTIP_TITLES).map((video) => `• ${video.title || video.videoId}`);
-      if (channelVideos.length > CHANNEL_TOOLTIP_TITLES) titles.push(`and ${channelVideos.length - CHANNEL_TOOLTIP_TITLES} more`);
-      return `<tr class="time-channel border-t border-border/60 cursor-pointer hover:bg-surface-elevated${open ? " bg-surface-elevated" : ""}" data-channel="${escapeHtml(channel.channelName)}" title="${escapeHtml(titles.join("\n"))}">
-        <td class="py-2 pr-3 text-sm text-text-primary max-w-[18rem]">
-          <button type="button" class="flex items-center gap-1.5 w-full min-w-0 p-0 border-0 bg-transparent text-left text-inherit cursor-pointer" aria-expanded="${open}"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-text-muted transition-transform${open ? " rotate-90" : ""}" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>${channelAvatarHtml(channel)}<span class="truncate">${escapeHtml(channel.channelName)}</span></button>
-        </td>
-        <td class="py-2 pr-3 text-sm text-text-secondary whitespace-nowrap"><span class="inline-flex items-center gap-1.5"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:${languageColors.get(channel.language) ?? "var(--color-border-hover)"}"></span>${escapeHtml(channel.language)}</span></td>
-        <td class="py-2 pr-3 text-sm text-text-secondary tabular-nums">${channel.videos}</td>
-        <td class="py-2 text-sm text-text-secondary tabular-nums whitespace-nowrap text-right">${formatMinutesWords(channel.seconds)}</td>
-      </tr>${
-        open
-          ? `<tr class="bg-surface-elevated"><td colspan="4" class="pt-1 pb-3 pl-5"><ul class="m-0 p-0 list-none flex flex-col gap-2.5">${channelVideos.map(watchVideoRowHtml).join("")}</ul></td></tr>`
-          : ""
-      }`;
-    })
-    .join("");
-  const hiddenChannels = watch.byChannel.length - CHANNEL_ROWS;
-  const channelsToggleHtml =
-    hiddenChannels > 0
-      ? `<button type="button" id="time-channels-toggle" class="chip h-8 text-xs self-start">${showAllChannels ? `Show top ${CHANNEL_ROWS}` : `Show all ${watch.byChannel.length} channels`}</button>`
-      : "";
-
   const shownVideos = Math.min(watch.videos.length, Math.max(videoRowsShown, VIDEO_ROWS_PAGE));
-  const videosHtml = watch.videos.slice(0, shownVideos).map(watchVideoRowHtml).join("");
+  const videosHtml = watch.videos.slice(0, shownVideos).map((video) => watchVideoRowHtml(video, colors)).join("");
   const moreVideos = Math.min(VIDEO_ROWS_PAGE * 2, watch.videos.length - shownVideos);
   const videosMoreHtml = moreVideos > 0 ? `<button type="button" id="time-videos-more" class="chip h-8 text-xs self-start" data-shown="${shownVideos}">Show ${moreVideos} more</button>` : "";
 
   return `
     <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">${tilesHtml}</div>
-    <section class="flex flex-col gap-3">
-      ${timeSectionHeading(
-        "By day",
-        `<span class="flex items-center gap-3 text-xs text-text-muted"><span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-accent"></span>On screen</span><span class="flex items-center gap-1.5"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-accent/35"></span>Background</span></span>`
-      )}
-      <div class="grid ${dense ? "gap-px" : "gap-1.5"}" style="grid-template-columns: repeat(${watch.days.length}, minmax(0, 1fr))">${daysHtml}</div>
-    </section>
+    ${dayBarsHtml(watch, colors)}
     <section class="flex flex-col gap-3">
       ${timeSectionHeading("Languages")}
       <ul class="m-0 p-0 list-none flex flex-col gap-2">${languagesHtml}</ul>
     </section>
-    <section class="flex flex-col gap-3">
-      ${timeSectionHeading("Time of day")}
-      <div class="grid gap-1" style="grid-template-columns: repeat(24, minmax(0, 1fr))">${hoursHtml}</div>
-    </section>
-    <section class="flex flex-col gap-3">
-      ${timeSectionHeading("Channels", `<span class="text-xs text-text-muted tabular-nums">${watch.byChannel.length}</span>`)}
-      <div>
-        <table class="w-full border-collapse"><thead><tr class="text-[11px] uppercase tracking-[0.1em] text-text-muted text-left"><th class="font-semibold pb-1 pr-3">Channel</th><th class="font-semibold pb-1 pr-3">Language</th><th class="font-semibold pb-1 pr-3">Videos</th><th class="font-semibold pb-1 text-right">Watched</th></tr></thead><tbody>${channelsHtml}</tbody></table>
-      </div>
-      ${channelsToggleHtml}
-    </section>
+    ${heatmapHtml(watch)}
+    ${speedSectionHtml(watch)}
+    ${channelsSectionHtml(watch, colors)}
     <section class="flex flex-col gap-3">
       ${timeSectionHeading("Videos", `<span class="text-xs text-text-muted tabular-nums">${shownVideos < watch.videos.length ? `${shownVideos} of ${watch.videos.length}` : watch.videos.length}</span>`)}
       <ul class="m-0 p-0 list-none flex flex-col gap-2.5">${videosHtml}</ul>
@@ -5971,41 +6119,132 @@ function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs): strin
   `;
 }
 
-function languageLimitsHtml(limits: LanguageLimitUsage[], watch: WatchSummary, prefs: TimeTrackingPrefs): string {
-  const rowsHtml = limits
-    .map((limit) => {
-      const share = Math.min(1, limit.usedSeconds / (limit.minutes * 60));
-      const barColor = limit.level === "over" ? "var(--color-danger)" : limit.level === "near" ? "var(--color-warning)" : "var(--color-accent)";
-      return `<li class="grid grid-cols-[minmax(0,12rem)_minmax(0,1fr)_7rem_auto] items-center gap-3 text-sm">
-        <span class="truncate font-medium text-text-primary">${escapeHtml(limit.language)}</span>
-        <span class="h-2 rounded-full bg-surface-elevated overflow-hidden flex" role="meter" aria-valuemin="0" aria-valuemax="${limit.minutes}" aria-valuenow="${Math.floor(limit.usedSeconds / 60)}" aria-label="${escapeHtml(limit.language)} today"><span class="h-full" style="width:${Math.max(share > 0 ? 2 : 0, share * 100)}%;background:${barColor}"></span></span>
-        <span class="text-right text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(limit.usedSeconds)} <span class="text-text-muted">of</span></span>
-        <span class="flex items-center gap-2">
-          <input type="number" class="time-limit-minutes h-8 w-20 px-2 rounded-md border border-border bg-surface-elevated text-xs text-text-primary tabular-nums" min="1" max="${MAX_LIMIT_MINUTES}" step="1" value="${limit.minutes}" data-language="${escapeHtml(limit.language)}" aria-label="Daily minutes for ${escapeHtml(limit.language)}" />
-          <span class="text-xs text-text-muted">min</span>
-          <button type="button" class="time-limit-remove chip h-7 px-2.5 text-xs chip--danger" data-language="${escapeHtml(limit.language)}">Remove</button>
-        </span>
+function ruleStatusHtml(rule: LanguageLimitUsage): string {
+  const target = rule.minutes * 60;
+  if (isGoal(rule)) {
+    return rule.usedSeconds >= target
+      ? `<span class="text-success font-medium">✓ Done</span>`
+      : `<span class="text-text-muted">${formatMinutesWords(target - rule.usedSeconds)} to go</span>`;
+  }
+  return rule.usedSeconds > target
+    ? `<span class="text-danger font-medium">${formatMinutesWords(rule.usedSeconds - target)} over</span>`
+    : `<span class="text-text-muted">${formatMinutesWords(target - rule.usedSeconds)} left</span>`;
+}
+
+function dailyRulesHtml(rules: LanguageLimitUsage[], watch: WatchSummary, prefs: TimeTrackingPrefs): string {
+  const colors = languageColorMap(watch);
+  // Goals first, as the things to do today; limits after.
+  const ordered = [...rules].sort((first, second) => Number(isGoal(second)) - Number(isGoal(first)));
+  const rowsHtml = ordered
+    .map((rule) => {
+      const share = Math.min(1, rule.usedSeconds / (rule.minutes * 60));
+      const barColor = isGoal(rule)
+        ? rule.level === "met"
+          ? "var(--color-success)"
+          : colorOfLanguage(colors, rule.language)
+        : rule.level === "over"
+          ? "var(--color-danger)"
+          : rule.level === "near"
+            ? "var(--color-warning)"
+            : "var(--color-accent)";
+      const kindWord = isGoal(rule) ? "goal" : "limit";
+      return `<li class="grid grid-cols-[minmax(0,10rem)_4.5rem_minmax(0,1fr)_8.5rem_7.5rem_auto_auto] items-center gap-3 text-sm">
+        <span class="truncate font-medium text-text-primary flex items-center gap-2">${languageDot(colorOfLanguage(colors, rule.language))}${escapeHtml(rule.language)}</span>
+        <span class="rule-kind${isGoal(rule) ? " rule-kind--goal" : ""}">${isGoal(rule) ? "At least" : "At most"}</span>
+        <span class="h-2 rounded-full bg-surface-elevated overflow-hidden flex" role="meter" aria-valuemin="0" aria-valuemax="${rule.minutes}" aria-valuenow="${Math.floor(rule.usedSeconds / 60)}" aria-label="${escapeHtml(rule.language)} ${kindWord} today"><span class="h-full rounded-full transition-[width] duration-500" style="width:${Math.max(share > 0 ? 2 : 0, share * 100)}%;background:${barColor}"></span></span>
+        <span class="text-right text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(rule.usedSeconds)} <span class="text-text-muted">of</span></span>
+        ${stepperHtml({ value: rule.minutes, min: 1, max: MAX_LIMIT_MINUTES, step: 5, className: "time-rule-minutes", suffix: "min", ariaLabel: `Daily minutes for the ${escapeHtml(rule.language)} ${kindWord}`, attributes: { "data-language": rule.language, "data-kind": rule.kind ?? "" } })}
+        <span class="text-xs whitespace-nowrap">${ruleStatusHtml(rule)}</span>
+        <button type="button" class="time-rule-delete icon-btn w-8 h-8 hover:text-danger" data-language="${escapeHtml(rule.language)}" data-kind="${escapeHtml(rule.kind ?? "")}" title="Remove the ${escapeHtml(rule.language)} ${kindWord}">${TRASH_ICON}</button>
       </li>`;
     })
     .join("");
-  const limited = new Set(limits.map((limit) => languageKey(limit.language)));
-  const suggestions = watch.byLanguage.filter((row) => row.label !== UNKNOWN_LANGUAGE && !limited.has(languageKey(row.label)));
   return `<section class="flex flex-col gap-3">
-    ${timeSectionHeading("Daily limits")}
-    <p class="text-xs text-text-muted m-0">A note shows on the YouTube player at 80% and again at 100%. Time is real time, so 2× speed counts half.${prefs.watchHistory ? "" : " Limits need YouTube history, which is off."}</p>
-    ${rowsHtml ? `<ul class="m-0 p-0 list-none flex flex-col gap-2">${rowsHtml}</ul>` : ""}
-    <form id="time-limit-add" class="flex flex-wrap items-center gap-2">
-      <input type="text" name="language" list="time-limit-languages" required maxlength="80" placeholder="Language, e.g. English" class="h-8 w-48 px-2 rounded-md border border-border bg-surface-elevated text-xs text-text-primary" aria-label="Language" />
-      <datalist id="time-limit-languages">${suggestions.map((row) => `<option value="${escapeHtml(row.label)}"></option>`).join("")}</datalist>
-      <input type="number" name="minutes" required min="1" max="${MAX_LIMIT_MINUTES}" step="1" placeholder="Minutes" class="h-8 w-24 px-2 rounded-md border border-border bg-surface-elevated text-xs text-text-primary tabular-nums" aria-label="Minutes per day" />
-      <button type="submit" class="chip h-8 text-xs">Add limit</button>
+    ${timeSectionHeading("Daily goals and limits")}
+    <p class="text-xs text-text-muted m-0">A goal is the least you want in a language each day, a limit the most. The player shows a note when a goal is reached and when a limit is close or passed. Time is real time, so 2× speed counts half.${prefs.watchHistory ? "" : " Goals and limits need YouTube history, which is off."}</p>
+    ${rowsHtml ? `<ul class="m-0 p-0 list-none flex flex-col gap-2.5">${rowsHtml}</ul>` : ""}
+    <form id="time-rule-add" class="flex flex-wrap items-center gap-2">
+      <span class="ui-segmented" role="group" aria-label="Kind">
+        <button type="button" class="time-rule-kind budget-chip text-xs" data-kind="goal" aria-pressed="${newRuleKind === "goal"}">At least</button>
+        <button type="button" class="time-rule-kind budget-chip text-xs" data-kind="limit" aria-pressed="${newRuleKind === "limit"}">At most</button>
+      </span>
+      <span class="ui-combobox"><input type="text" id="time-rule-language" name="language" required maxlength="80" placeholder="Language, e.g. Slovak" class="ui-field w-48" aria-label="Language" /></span>
+      ${stepperHtml({ name: "minutes", min: 1, max: MAX_LIMIT_MINUTES, step: 5, required: true, placeholder: "30", suffix: "min a day", ariaLabel: "Minutes per day" })}
+      <button type="submit" class="chip chip--accent h-8 text-xs">Add ${newRuleKind === "goal" ? "goal" : "limit"}</button>
     </form>
   </section>`;
 }
 
-async function saveLanguageLimitList(limits: LanguageLimit[]): Promise<void> {
-  await browser.runtime.sendMessage({ action: "set-language-limits", limits });
+function streakSectionHtml(streaks: GoalStreaks, watch: WatchSummary): string {
+  const colors = languageColorMap(watch);
+  const byRules = streaks.mode === "rules";
+  const goals = streaks.rules.filter((rule) => isGoal(rule)).length;
+  const what = !byRules ? "Days with at least a minute watched" : goals > 0 ? "Days that reached every goal and kept every limit" : "Days that kept every limit";
+  const statusWords: Record<string, string> = {
+    all: byRules ? "Everything kept" : "Watched",
+    some: "Some goals reached",
+    none: byRules ? "Not kept" : "Nothing watched",
+    before: "Before your history",
+    future: "",
+  };
+  const weeks: string[] = [];
+  for (let week = 0; week < CALENDAR_WEEKS; week++) {
+    const days = streaks.calendar.slice(week * 7, week * 7 + 7);
+    weeks.push(
+      `<div class="flex flex-col gap-1.5">${days
+        .map((day) => {
+          const today = day.key === dateKeyOf(Date.now());
+          const words = today && day.status !== "all" ? "Today, still open" : statusWords[day.status];
+          return `<span class="streak-day streak-day--${day.status}${today ? " streak-day--today" : ""}"${day.status === "future" ? "" : ` title="${escapeHtml(`${longDate(day.key)}${words ? `\n${words}` : ""}`)}"`}></span>`;
+        })
+        .join("")}</div>`
+    );
+  }
+  const dayLabels = WEEKDAY_NAMES.map((name) => `<span class="h-[26px] leading-[26px] text-[11px] text-text-muted">${name}</span>`).join("");
+  const rulesHtml = streaks.rules
+    .map(
+      (rule) => `<li class="flex items-center gap-2.5 py-2 border-b border-border/60 text-sm">
+        ${languageDot(colorOfLanguage(colors, rule.language))}
+        <span class="flex-1 min-w-0 truncate text-text-primary">${escapeHtml(rule.language)} <span class="text-text-muted">${isGoal(rule) ? "goal" : "limit kept"}</span></span>
+        <span class="font-display text-lg tabular-nums text-text-primary">${rule.current}</span>
+        <span class="w-9 text-xs text-text-muted">${rule.current === 1 ? "day" : "days"}</span>
+      </li>`
+    )
+    .join("");
+  const legend = (byRules ? (["all", "some", "none"] as const) : (["all", "none"] as const))
+    .map((status) => `<span class="flex items-center gap-1.5"><span class="streak-day streak-day--${status} legend-swatch"></span>${statusWords[status]}</span>`)
+    .join("");
+  return `<section class="flex flex-col gap-3">
+    ${timeSectionHeading("Streak")}
+    <div class="streak-card">
+      <div class="flex flex-col gap-4 min-w-0">
+        <div>
+          <div class="flex items-baseline gap-2"><span class="font-display text-[56px] leading-none tabular-nums text-text-primary">${streaks.current}</span><span class="font-display text-2xl text-text-secondary">${streaks.current === 1 ? "day" : "days"} in a row</span></div>
+          <p class="text-xs text-text-muted mt-1.5 mb-0">${escapeHtml(what)} · best ${plural(streaks.longest, "day")}</p>
+        </div>
+        <div class="flex gap-1.5"><div class="flex flex-col gap-1.5 pr-1">${dayLabels}</div>${weeks.join("")}</div>
+        <div class="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-text-muted">${legend}<span class="flex items-center gap-1.5"><span class="streak-day streak-day--today legend-swatch"></span>Today</span></div>
+      </div>
+      ${
+        rulesHtml
+          ? `<div class="min-w-0 border-t md:border-t-0 md:border-l border-border pt-4 md:pt-0 md:pl-6"><div class="text-xs text-text-muted mb-1">Each on its own</div><ul class="m-0 p-0 list-none">${rulesHtml}</ul></div>`
+          : `<div class="min-w-0 border-t md:border-t-0 md:border-l border-border pt-4 md:pt-0 md:pl-6 text-sm text-text-muted self-center">Add a daily goal above and the streak counts the days you reach it.</div>`
+      }
+    </div>
+  </section>`;
+}
+
+async function saveDailyRules(rules: LanguageLimit[]): Promise<void> {
+  await browser.runtime.sendMessage({ action: "set-language-limits", limits: rules });
   await renderTimePanel();
+}
+
+function plainRules(): LanguageLimit[] {
+  return (lastTimeResponse?.limits ?? []).map(({ language, minutes, kind }) => (kind ? { language, minutes, kind } : { language, minutes }));
+}
+
+function sameRule(rule: LanguageLimit, language: string | undefined, kind: string | undefined): boolean {
+  return rule.language === language && (rule.kind ?? "") === (kind ?? "");
 }
 
 function mandalaSectionHtml(data: TimeSummaryResponse): string {
@@ -6020,7 +6259,7 @@ function mandalaSectionHtml(data: TimeSummaryResponse): string {
     ? pillarRows
         .map(
           (row) => `<li class="grid grid-cols-[minmax(0,12rem)_minmax(0,1fr)_auto] items-center gap-3 text-sm">
-            <span class="truncate font-medium text-text-primary flex items-center gap-2"><span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:${pillarColor(row.pillarIndex)}"></span>${escapeHtml(pillarTitleOf(mandala, row.pillarIndex))}</span>
+            <span class="truncate font-medium text-text-primary flex items-center gap-2">${languageDot(pillarColor(row.pillarIndex))}${escapeHtml(pillarTitleOf(mandala, row.pillarIndex))}</span>
             <span class="h-2 rounded-full bg-surface-elevated overflow-hidden flex"><span class="h-full" style="width:${Math.max(2, (row.active / longest) * 100)}%;background:${pillarColor(row.pillarIndex)}"></span><span class="h-full opacity-40" style="width:${(row.passive / longest) * 100}%;background:${pillarColor(row.pillarIndex)}"></span></span>
             <span class="text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(row.active)}${row.passive > 0 ? ` <span class="text-text-muted">+ ${formatMinutesWords(row.passive)}</span>` : ""}</span>
           </li>`
@@ -6034,7 +6273,7 @@ function mandalaSectionHtml(data: TimeSummaryResponse): string {
           const rule = rules.find((each) => each.kind === "host" && (site.host === each.pattern || site.host.endsWith(`.${each.pattern}`)));
           return `<tr class="border-t border-border/60">
             <td class="py-2 pr-3 text-sm text-text-primary truncate max-w-[18rem]" title="${escapeHtml(site.host)}">${escapeHtml(site.host)}</td>
-            <td class="py-2 pr-3"><select class="time-site-pillar h-8 px-2 rounded-md border border-border bg-surface-elevated text-xs text-text-primary" data-host="${escapeHtml(site.host)}" data-rule-id="${escapeHtml(rule?.id ?? "")}" aria-label="Pillar for ${escapeHtml(site.host)}">${pillarOptionsHtml(mandala, site.pillarIndex)}</select></td>
+            <td class="py-2 pr-3"><div class="time-select" data-select="site-pillar" data-host="${escapeHtml(site.host)}" data-rule-id="${escapeHtml(rule?.id ?? "")}" data-value="${site.pillarIndex ?? ""}" data-label="Pillar for ${escapeHtml(site.host)}"></div></td>
             <td class="py-2 pr-3 text-sm text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(site.active)}</td>
             <td class="py-2 pr-3 text-sm text-text-muted tabular-nums whitespace-nowrap">${site.passive > 0 ? formatMinutesWords(site.passive) : "·"}</td>
             <td class="py-2 pr-3 text-xs text-text-muted whitespace-nowrap">${timeAgoWords(site.lastAt)}</td>
@@ -6049,10 +6288,8 @@ function mandalaSectionHtml(data: TimeSummaryResponse): string {
       const rule = rules.find((each) => each.kind === "pile" && each.pattern === section.id);
       return `<li class="flex items-center gap-3 text-sm">
         <span class="flex-1 min-w-0 truncate text-text-primary">${section.emoji ? `${escapeHtml(section.emoji)} ` : ""}${escapeHtml(section.name)}</span>
-        <select class="time-pile-pillar h-8 px-2 rounded-md border border-border bg-surface-elevated text-xs text-text-primary" data-section-id="${escapeHtml(section.id)}" data-section-name="${escapeHtml(section.name)}" data-rule-id="${escapeHtml(rule?.id ?? "")}" aria-label="Pillar for the pile ${escapeHtml(section.name)}">
-          <option value=""${rule ? "" : " selected"}>Not counted</option>${pillarOptionsHtml(mandala, rule?.pillarIndex ?? null)}
-        </select>
-        <select class="time-pile-action h-8 px-2 rounded-md border border-border bg-surface-elevated text-xs text-text-primary${rule ? "" : " invisible"}" data-section-id="${escapeHtml(section.id)}" aria-label="Action for the pile ${escapeHtml(section.name)}">${actionOptionsHtml(mandala, rule?.pillarIndex ?? 0, rule?.actionId)}</select>
+        <div class="time-select" data-select="pile-pillar" data-section-id="${escapeHtml(section.id)}" data-section-name="${escapeHtml(section.name)}" data-rule-id="${escapeHtml(rule?.id ?? "")}" data-value="${rule ? rule.pillarIndex : ""}" data-label="Pillar for the pile ${escapeHtml(section.name)}"></div>
+        ${rule ? `<div class="time-select" data-select="pile-action" data-section-id="${escapeHtml(section.id)}" data-pillar="${rule.pillarIndex}" data-value="${escapeHtml(rule.actionId ?? "")}" data-label="Action for the pile ${escapeHtml(section.name)}"></div>` : ""}
       </li>`;
     })
     .join("");
@@ -6061,7 +6298,7 @@ function mandalaSectionHtml(data: TimeSummaryResponse): string {
     .filter((rule) => rule.kind === "prefix")
     .map(
       (rule) => `<li class="flex items-center gap-3 text-sm">
-        <span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:${pillarColor(rule.pillarIndex)}"></span>
+        ${languageDot(pillarColor(rule.pillarIndex))}
         <span class="flex-1 min-w-0 truncate text-text-primary" title="${escapeHtml(rule.pattern)}">${escapeHtml(rule.label || rule.pattern)}</span>
         <span class="text-xs text-text-muted">${escapeHtml(pillarTitleOf(mandala, rule.pillarIndex))}</span>
         <button type="button" class="time-rule-remove chip h-7 px-2.5 text-xs chip--danger" data-rule-id="${escapeHtml(rule.id)}">Stop counting</button>
@@ -6079,7 +6316,7 @@ function mandalaSectionHtml(data: TimeSummaryResponse): string {
 
   return `
     <details class="group flex flex-col gap-4"${inUse ? " open" : ""}>
-      <summary class="flex items-center gap-3 cursor-pointer list-none">
+      <summary class="flex items-center gap-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
         <h2 class="font-display text-[22px] font-medium m-0 flex items-center gap-2">Mandala<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-text-muted transition-transform group-open:rotate-90" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></h2>
         ${counted > 0 ? `<span class="text-sm text-text-muted tabular-nums">${formatMinutesWords(counted)}</span>` : ""}
       </summary>
@@ -6096,6 +6333,75 @@ function mandalaSectionHtml(data: TimeSummaryResponse): string {
       </div>
     </details>
   `;
+}
+
+const IDLE_CHOICES = [30, 60, 120, 300];
+
+function mountTimeSelects(panel: HTMLElement, data: TimeSummaryResponse): void {
+  const saveRule = async (rule: Omit<SiteRule, "id" | "createdAt"> & { id?: string }) => {
+    await browser.runtime.sendMessage({ action: "set-site-rule", rule });
+    await renderTimePanel();
+  };
+  for (const root of panel.querySelectorAll<HTMLElement>(".time-select")) {
+    const { select, value = "", label = "" } = root.dataset;
+    if (select === "idle") {
+      mountCustomSelect(root, {
+        options: IDLE_CHOICES.map((seconds) => ({ value: String(seconds), label: seconds < 60 ? `${seconds} s` : `${seconds / 60} min` })),
+        value,
+        size: "field",
+        ariaLabel: label,
+        onChange: (next) => void saveTrackingPrefs(panel, { idleSeconds: Number(next) }),
+      });
+    } else if (select === "site-pillar") {
+      const host = root.dataset.host ?? "";
+      mountCustomSelect(root, {
+        options: [...(value === "" ? [{ value: "", label: "Not counted" }] : []), ...pillarSelectOptions(data.mandala)],
+        value,
+        size: "field",
+        ariaLabel: label,
+        onChange: (next) => void (next ? saveRule({ id: root.dataset.ruleId || undefined, kind: "host", pattern: host, label: host, pillarIndex: Number(next) }) : undefined),
+      });
+    } else if (select === "pile-pillar") {
+      mountCustomSelect(root, {
+        options: [{ value: "", label: "Not counted" }, ...pillarSelectOptions(data.mandala)],
+        value,
+        size: "field",
+        ariaLabel: label,
+        onChange: async (next) => {
+          if (!next) {
+            if (root.dataset.ruleId) await browser.runtime.sendMessage({ action: "remove-site-rule", id: root.dataset.ruleId });
+            await renderTimePanel();
+            return;
+          }
+          await saveRule({ id: root.dataset.ruleId || undefined, kind: "pile", pattern: root.dataset.sectionId ?? "", label: root.dataset.sectionName ?? "", pillarIndex: Number(next) });
+        },
+      });
+    } else if (select === "pile-action") {
+      mountCustomSelect(root, {
+        options: actionSelectOptions(data.mandala, Number(root.dataset.pillar)),
+        value,
+        size: "field",
+        ariaLabel: label,
+        onChange: async (next) => {
+          const rule = data.rules.find((each) => each.kind === "pile" && each.pattern === root.dataset.sectionId);
+          if (rule) await saveRule({ ...rule, actionId: next || undefined });
+        },
+      });
+    }
+  }
+}
+
+async function saveTrackingPrefs(panel: HTMLElement, change: Partial<TimeTrackingPrefs>): Promise<void> {
+  const current = lastTimeResponse?.prefs;
+  const prefs: TimeTrackingPrefs = {
+    enabled: panel.querySelector<HTMLInputElement>("#time-enabled")?.checked ?? current?.enabled ?? true,
+    idleSeconds: current?.idleSeconds ?? 60,
+    watchHistory: panel.querySelector<HTMLInputElement>("#time-watch-history")?.checked ?? current?.watchHistory ?? true,
+    ...change,
+  };
+  await browser.runtime.sendMessage({ action: "set-time-tracking-prefs", prefs });
+  if (lastTimeResponse) lastTimeResponse.prefs = prefs;
+  if (change.watchHistory !== undefined) await renderTimePanel();
 }
 
 async function renderTimePanel(): Promise<void> {
@@ -6116,7 +6422,6 @@ async function renderTimePanel(): Promise<void> {
   const { watch, prefs } = data;
   const headerStats = document.getElementById("current-view-stats");
   if (headerStats) {
-    const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
     headerStats.textContent = watch.total.videos > 0 ? [plural(watch.total.videos, "video"), plural(watch.byLanguage.length, "language"), plural(watch.byChannel.length, "channel")].join(" · ") : "";
   }
   setDeskHero({
@@ -6126,32 +6431,42 @@ async function renderTimePanel(): Promise<void> {
     suffix: timeRange === 7 ? " watched this week" : ` watched in ${timeRange} days`,
   });
 
-  const rangeHtml = `<span class="inline-flex gap-0.5 p-0.5 rounded-full border border-border bg-surface" role="group" aria-label="Range">
+  const rangeHtml = `<span class="ui-segmented" role="group" aria-label="Range">
     ${TIME_RANGES.map((days) => `<button type="button" class="time-range budget-chip" data-days="${days}" aria-pressed="${timeRange === days}">${days} days</button>`).join("")}
   </span>`;
 
+  // Keep what was being typed in the add form across the re-render that a save causes.
+  const typedLanguage = panel.querySelector<HTMLInputElement>("#time-rule-language")?.value ?? "";
+
   panel.innerHTML = `
     <div class="flex justify-end">${rangeHtml}</div>
+    ${dailyRulesHtml(data.limits ?? [], watch, prefs)}
+    ${data.streaks ? streakSectionHtml(data.streaks, watch) : ""}
     <div id="time-watch" class="contents">${watchSectionsHtml(watch, prefs)}</div>
-    ${languageLimitsHtml(data.limits ?? [], watch, prefs)}
     ${mandalaSectionHtml(data)}
     <section class="flex flex-col gap-3 pb-6">
       <h2 class="font-display text-[22px] font-medium m-0">Tracking</h2>
-      <div class="flex flex-wrap items-center gap-x-5 gap-y-3">
-        <label class="flex items-center gap-2 text-sm text-text-primary cursor-pointer"><input type="checkbox" id="time-watch-history" class="w-4 h-4 accent-accent"${prefs.watchHistory ? " checked" : ""} /> YouTube history</label>
-        <label class="flex items-center gap-2 text-sm text-text-primary cursor-pointer"><input type="checkbox" id="time-enabled" class="w-4 h-4 accent-accent"${prefs.enabled ? " checked" : ""} /> Mandala page time</label>
-        <label class="flex items-center gap-2 text-sm text-text-secondary">Idle after
-          <select id="time-idle" class="h-8 px-2 rounded-md border border-border bg-surface-elevated text-xs text-text-primary">
-            ${[30, 60, 120, 300].map((seconds) => `<option value="${seconds}"${prefs.idleSeconds === seconds ? " selected" : ""}>${seconds < 60 ? `${seconds} s` : `${seconds / 60} min`}</option>`).join("")}
-          </select>
-        </label>
+      <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
+        <label class="flex items-center gap-2.5 text-sm text-text-primary cursor-pointer"><input type="checkbox" role="switch" id="time-watch-history" class="ui-switch"${prefs.watchHistory ? " checked" : ""} /> YouTube history</label>
+        <label class="flex items-center gap-2.5 text-sm text-text-primary cursor-pointer"><input type="checkbox" role="switch" id="time-enabled" class="ui-switch"${prefs.enabled ? " checked" : ""} /> Mandala page time</label>
+        <span class="flex items-center gap-2 text-sm text-text-secondary">Idle after <div class="time-select" data-select="idle" data-value="${prefs.idleSeconds}" data-label="Idle after"></div></span>
         <span class="flex-1"></span>
-        <button type="button" id="time-export" class="chip h-8 text-xs">Export JSON</button>
+        <button type="button" id="time-export-csv" class="chip h-8 text-xs">Export CSV</button>
+        <button type="button" id="time-export" class="chip h-8 text-xs" title="Everything, including Mandala page time, as JSON">Back up JSON</button>
         <button type="button" id="time-clear" class="chip h-8 text-xs chip--danger">Delete all time data</button>
       </div>
       <p class="text-xs text-text-muted m-0">Stored only in this browser.</p>
     </section>
   `;
+  mountTimeSelects(panel, data);
+  const languageInput = panel.querySelector<HTMLInputElement>("#time-rule-language");
+  if (languageInput) {
+    languageInput.value = typedLanguage;
+    wireCombobox(languageInput, () => {
+      const taken = new Set((lastTimeResponse?.limits ?? []).filter((rule) => (newRuleKind === "goal") === isGoal(rule)).map((rule) => languageKey(rule.language)));
+      return (lastTimeResponse?.watch.byLanguage ?? []).map((row) => row.label).filter((label) => label !== UNKNOWN_LANGUAGE && !taken.has(languageKey(label)));
+    });
+  }
   panel.setAttribute("aria-busy", "false");
 }
 
@@ -6160,24 +6475,125 @@ function repaintWatchSections(panel: HTMLElement): void {
   if (box && lastTimeResponse) box.innerHTML = watchSectionsHtml(lastTimeResponse.watch, lastTimeResponse.prefs);
 }
 
+let exportDays: number | null = 30;
+let exportColumns = new Set<CsvColumn>(DEFAULT_CSV_COLUMNS);
+const EXPORT_RANGES: { days: number | null; label: string }[] = [
+  { days: 1, label: "Today" },
+  { days: 7, label: "7 days" },
+  { days: 30, label: "30 days" },
+  { days: 90, label: "90 days" },
+  { days: null, label: "All time" },
+];
+const EXPORT_PREVIEW_ROWS = 4;
+
+async function requestWatchCsv(): Promise<{ csv: string; rows: number } | null> {
+  const response = (await browser.runtime.sendMessage({ action: "export-watch-csv", days: exportDays, columns: [...exportColumns] })) as { csv?: string; rows?: number };
+  return typeof response?.csv === "string" ? { csv: response.csv, rows: response.rows ?? 0 } : null;
+}
+
+async function refreshExportPreview(): Promise<void> {
+  const range = document.getElementById("export-range");
+  const columns = document.getElementById("export-columns");
+  const preview = document.getElementById("export-preview");
+  const count = document.getElementById("export-count");
+  const download = document.getElementById("export-download") as HTMLButtonElement | null;
+  if (range) {
+    range.innerHTML = EXPORT_RANGES.map(
+      (option) => `<button type="button" class="export-range budget-chip text-xs" data-days="${option.days ?? ""}" aria-pressed="${exportDays === option.days}">${option.label}</button>`
+    ).join("");
+  }
+  if (columns) {
+    columns.innerHTML = CSV_COLUMNS.map(
+      (column) => `<label class="flex items-center gap-2.5 text-sm text-text-secondary cursor-pointer"><input type="checkbox" class="ui-check export-column" value="${column.id}"${exportColumns.has(column.id) ? " checked" : ""} /> ${escapeHtml(column.label)}</label>`
+    ).join("");
+  }
+  const result = exportColumns.size > 0 ? await requestWatchCsv() : null;
+  const lines = result?.csv.trimEnd().split("\r\n") ?? [];
+  if (preview) {
+    const more = lines.length - 1 - EXPORT_PREVIEW_ROWS;
+    preview.textContent = exportColumns.size === 0 ? "Pick at least one column." : [...lines.slice(0, EXPORT_PREVIEW_ROWS + 1), ...(more > 0 ? [`… ${more} more ${more === 1 ? "row" : "rows"}`] : [])].join("\n");
+  }
+  if (count) count.textContent = result ? plural(result.rows, "sitting") : "";
+  if (download) download.disabled = !result || result.rows === 0;
+}
+
+function openExportModal(): void {
+  const modal = document.getElementById("export-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  modal.classList.add("flex");
+  void refreshExportPreview().then(() => document.getElementById("export-download")?.focus());
+}
+
+function closeExportModal(): void {
+  const modal = document.getElementById("export-modal");
+  modal?.classList.add("hidden");
+  modal?.classList.remove("flex");
+}
+
+function downloadText(text: string, type: string, filename: string): void {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function wireExportModal(): void {
+  const modal = document.getElementById("export-modal");
+  const form = document.getElementById("export-form") as HTMLFormElement | null;
+  if (!modal || !form) return;
+  modal.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    if (target === modal || target.closest("#export-cancel")) {
+      closeExportModal();
+      return;
+    }
+    const range = target.closest<HTMLElement>(".export-range");
+    if (range) {
+      exportDays = range.dataset.days ? Number(range.dataset.days) : null;
+      void refreshExportPreview();
+    }
+  });
+  modal.addEventListener("change", (event) => {
+    const box = event.target as HTMLInputElement;
+    if (!box.classList.contains("export-column")) return;
+    if (box.checked) exportColumns.add(box.value as CsvColumn);
+    else exportColumns.delete(box.value as CsvColumn);
+    void refreshExportPreview();
+  });
+  modal.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeExportModal();
+  });
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const result = await requestWatchCsv();
+    if (!result) return;
+    // A byte order mark makes Excel read the file as UTF-8, so titles in other scripts survive.
+    downloadText(`﻿${result.csv}`, "text/csv;charset=utf-8", `study-harvester-history-${new Date().toISOString().slice(0, 10)}.csv`);
+    closeExportModal();
+  });
+}
+
 function wireTimePanel(panel: HTMLElement): void {
   if (timePanelWired) return;
   timePanelWired = true;
+  wireSteppers(panel);
+  wireExportModal();
 
-  // Avatar URLs go stale when a channel changes its picture; error doesn't bubble, so listen in capture.
-  panel.addEventListener(
-    "error",
-    (event) => {
-      const img = event.target;
-      if (img instanceof HTMLImageElement && img.classList.contains("channel-avatar")) img.outerHTML = channelLetterHtml(img.dataset.letter ?? "?");
-    },
-    true
-  );
-
-  const saveRule = async (rule: Omit<SiteRule, "id" | "createdAt"> & { id?: string }) => {
-    await browser.runtime.sendMessage({ action: "set-site-rule", rule });
-    await renderTimePanel();
-  };
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !changes[CHANNEL_AVATARS_KEY] || !lastTimeResponse || !isTimeView) return;
+    const avatars = (changes[CHANNEL_AVATARS_KEY].newValue ?? {}) as Record<string, string>;
+    let found = false;
+    for (const channel of lastTimeResponse.watch.byChannel) {
+      if (!channel.avatarUrl && avatars[channel.channelName]) {
+        channel.avatarUrl = avatars[channel.channelName];
+        found = true;
+      }
+    }
+    if (found) repaintWatchSections(panel);
+  });
 
   panel.addEventListener("click", async (event) => {
     const target = event.target as HTMLElement;
@@ -6190,8 +6606,24 @@ function wireTimePanel(panel: HTMLElement): void {
       await renderTimePanel();
       return;
     }
+    const kind = target.closest<HTMLElement>(".time-rule-kind");
+    if (kind) {
+      newRuleKind = kind.dataset.kind === "limit" ? "limit" : "goal";
+      for (const button of panel.querySelectorAll<HTMLElement>(".time-rule-kind")) button.setAttribute("aria-pressed", String(button === kind));
+      const submit = panel.querySelector<HTMLElement>("#time-rule-add [type=submit]");
+      if (submit) submit.textContent = newRuleKind === "goal" ? "Add goal" : "Add limit";
+      return;
+    }
     if (target.closest("#time-channels-toggle")) {
       showAllChannels = !showAllChannels;
+      repaintWatchSections(panel);
+      return;
+    }
+    const filter = target.closest<HTMLElement>(".time-channel-filter");
+    if (filter) {
+      channelLanguageFilter = filter.dataset.language || null;
+      showAllChannels = false;
+      openChannel = null;
       repaintWatchSections(panel);
       return;
     }
@@ -6207,10 +6639,9 @@ function wireTimePanel(panel: HTMLElement): void {
       repaintWatchSections(panel);
       return;
     }
-    const removeLimit = target.closest<HTMLElement>(".time-limit-remove");
-    if (removeLimit) {
-      const limits = lastTimeResponse?.limits ?? [];
-      await saveLanguageLimitList(limits.filter((limit) => limit.language !== removeLimit.dataset.language));
+    const removeRule = target.closest<HTMLElement>(".time-rule-delete");
+    if (removeRule) {
+      await saveDailyRules(plainRules().filter((rule) => !sameRule(rule, removeRule.dataset.language, removeRule.dataset.kind)));
       return;
     }
     const remove = target.closest<HTMLElement>(".time-rule-remove");
@@ -6223,16 +6654,13 @@ function wireTimePanel(panel: HTMLElement): void {
       await browser.tabs.create({ url: "https://mandalamethod.vercel.app/" });
       return;
     }
+    if (target.closest("#time-export-csv")) {
+      openExportModal();
+      return;
+    }
     if (target.closest("#time-export")) {
       const response = (await browser.runtime.sendMessage({ action: "export-time-log" })) as { json?: string };
-      if (!response?.json) return;
-      const blob = new Blob([response.json], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `study-harvester-time-${new Date().toISOString().slice(0, 10)}.json`;
-      anchor.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      if (response?.json) downloadText(response.json, "application/json", `study-harvester-time-${new Date().toISOString().slice(0, 10)}.json`);
       return;
     }
     if (target.closest("#time-clear")) {
@@ -6251,7 +6679,7 @@ function wireTimePanel(panel: HTMLElement): void {
 
   panel.addEventListener("submit", async (event) => {
     const form = event.target;
-    if (!(form instanceof HTMLFormElement) || form.id !== "time-limit-add") return;
+    if (!(form instanceof HTMLFormElement) || form.id !== "time-rule-add") return;
     event.preventDefault();
     const fields = new FormData(form);
     const language = String(fields.get("language") ?? "").trim();
@@ -6259,49 +6687,28 @@ function wireTimePanel(panel: HTMLElement): void {
     if (!language || !(minutes > 0)) return;
     // Pick up the label as the Time page spells it, so "english" still matches "English".
     const known = lastTimeResponse?.watch.byLanguage.find((row) => languageKey(row.label) === languageKey(language));
-    const others = (lastTimeResponse?.limits ?? []).filter((limit) => languageKey(limit.language) !== languageKey(language));
-    await saveLanguageLimitList([...others, { language: known?.label ?? language, minutes }]);
+    const rule: LanguageLimit = newRuleKind === "goal" ? { language: known?.label ?? language, minutes, kind: "goal" } : { language: known?.label ?? language, minutes };
+    const others = plainRules().filter((each) => ruleKey(each) !== ruleKey(rule));
+    form.querySelector<HTMLInputElement>("#time-rule-language")!.value = "";
+    await saveDailyRules([...others, rule]);
   });
 
   panel.addEventListener("change", async (event) => {
     const target = event.target as HTMLElement;
-    if (target.id === "time-enabled" || target.id === "time-idle" || target.id === "time-watch-history") {
-      const prefs: TimeTrackingPrefs = {
-        enabled: panel.querySelector<HTMLInputElement>("#time-enabled")?.checked ?? true,
-        idleSeconds: Number(panel.querySelector<HTMLSelectElement>("#time-idle")?.value ?? 60),
-        watchHistory: panel.querySelector<HTMLInputElement>("#time-watch-history")?.checked ?? true,
-      };
-      await browser.runtime.sendMessage({ action: "set-time-tracking-prefs", prefs });
-      if (target.id === "time-watch-history") await renderTimePanel();
+    if (target.id === "time-enabled" || target.id === "time-watch-history") {
+      const checked = (target as HTMLInputElement).checked;
+      await saveTrackingPrefs(panel, target.id === "time-enabled" ? { enabled: checked } : { watchHistory: checked });
       return;
     }
-    if (target instanceof HTMLInputElement && target.classList.contains("time-limit-minutes")) {
+    if (target instanceof HTMLInputElement && target.classList.contains("time-rule-minutes")) {
       const minutes = Number(target.value);
       if (!target.checkValidity() || !(minutes > 0)) return;
-      const limits = (lastTimeResponse?.limits ?? []).map((limit) => (limit.language === target.dataset.language ? { ...limit, minutes } : limit));
-      await saveLanguageLimitList(limits);
-      return;
-    }
-    const sitePillar = target.closest<HTMLSelectElement>(".time-site-pillar");
-    if (sitePillar?.dataset.host) {
-      await saveRule({ id: sitePillar.dataset.ruleId || undefined, kind: "host", pattern: sitePillar.dataset.host, label: sitePillar.dataset.host, pillarIndex: Number(sitePillar.value) });
-      return;
-    }
-    const pilePillar = target.closest<HTMLSelectElement>(".time-pile-pillar");
-    if (pilePillar?.dataset.sectionId) {
-      if (!pilePillar.value) {
-        if (pilePillar.dataset.ruleId) await browser.runtime.sendMessage({ action: "remove-site-rule", id: pilePillar.dataset.ruleId });
-        await renderTimePanel();
-        return;
-      }
-      await saveRule({ id: pilePillar.dataset.ruleId || undefined, kind: "pile", pattern: pilePillar.dataset.sectionId, label: pilePillar.dataset.sectionName ?? "", pillarIndex: Number(pilePillar.value) });
-      return;
-    }
-    const pileAction = target.closest<HTMLSelectElement>(".time-pile-action");
-    if (pileAction?.dataset.sectionId) {
-      const rule = lastTimeResponse?.rules.find((each) => each.kind === "pile" && each.pattern === pileAction.dataset.sectionId);
-      if (!rule) return;
-      await saveRule({ ...rule, actionId: pileAction.value || undefined });
+      // Each press of a stepper button fires change; saving after a pause keeps the panel from redrawing under the pointer.
+      if (ruleSaveTimer !== null) clearTimeout(ruleSaveTimer);
+      ruleSaveTimer = setTimeout(() => {
+        ruleSaveTimer = null;
+        void saveDailyRules(plainRules().map((rule) => (sameRule(rule, target.dataset.language, target.dataset.kind) ? { ...rule, minutes } : rule)));
+      }, RULE_SAVE_DELAY_MS);
     }
   });
 }
@@ -6326,6 +6733,30 @@ document.addEventListener("DOMContentLoaded", () => {
     appearanceControl.innerHTML = THEME_CONTROL_HTML;
     mountThemeControl(appearanceControl);
   }
+  installTooltips();
+  // Avatar URLs go stale when a channel changes its picture; error doesn't bubble, so listen in capture.
+  document.addEventListener(
+    "error",
+    (event) => {
+      const img = event.target;
+      if (img instanceof HTMLImageElement && img.classList.contains("channel-avatar")) img.outerHTML = channelLetterHtml(img.dataset.letter ?? "?", img.dataset.size);
+    },
+    true
+  );
+  void loadChannelAvatars().then((avatars) => {
+    deskChannelAvatars = avatars;
+    lastFacetRailHtml = "";
+    lastTabListFingerprint = "";
+    render();
+  });
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !changes[CHANNEL_AVATARS_KEY]) return;
+    deskChannelAvatars = (changes[CHANNEL_AVATARS_KEY].newValue ?? {}) as ChannelAvatars;
+    if (isTimeView) return;
+    lastFacetRailHtml = "";
+    lastTabListFingerprint = "";
+    render();
+  });
   setupListeners();
   const urlParameters = new URLSearchParams(window.location.search);
   if (urlParameters.get("view") === "reading-list") {

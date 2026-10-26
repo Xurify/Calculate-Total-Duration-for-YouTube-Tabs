@@ -22,7 +22,12 @@ import { formatTime, formatCompact, formatDurationWords, formatOffset, parseTime
 import { queryReadingList } from "../../utils/readingList";
 import { loadCachedMandalaSummary, type CachedMandalaSummary } from "../../utils/storage";
 import { hostOf, isTrackableUrl, pagePrefixOf, pillarColor, type SiteRule } from "../../utils/timeLog";
-import { actionOptionsHtml, escapeHtml as escapeText, matchWords, pillarChoices, pillarOptionsHtml, type CurrentSiteResponse } from "../../utils/timeUi";
+import { actionSelectOptions, escapeHtml as escapeText, matchWords, pillarChoices, pillarSelectOptions, type CurrentSiteResponse } from "../../utils/timeUi";
+import { closeAllCustomSelects, mountCustomSelect } from "../manager/custom-select";
+import { installTooltips, syncRangeFill } from "../../utils/controls";
+import { loadChannelAvatars, type ChannelAvatars } from "../../utils/channelAvatars";
+
+let popupChannelAvatars: ChannelAvatars = {};
 
 const VERSION_NUMBER = packageJson.version;
 
@@ -984,6 +989,8 @@ function showConfirm(options: { title: string; message: string }): Promise<boole
 let siteBlockLoaded = false;
 let sitePickerOpen = false;
 let pickedPillarIndex: number | null = null;
+let pickedActionId: string | null = null;
+let pickedScope: "host" | "prefix" | null = null;
 let siteBlockTab: Browser.tabs.Tab | null = null;
 let siteBlockSummary: CachedMandalaSummary | null = null;
 let siteBlockStatus: CurrentSiteResponse | null = null;
@@ -1041,18 +1048,11 @@ function renderSiteBlock(): void {
                   ? ""
                   : `<p class="m-0 text-[10px] text-text-muted">Open Mandala once so your pillars show here. Until then the rule counts for a pillar by its number.</p>`
               }
-              <label class="flex items-center gap-2 text-[11px] text-text-secondary">Pillar
-                <select id="site-pillar" class="flex-1 min-w-0 h-7 px-1.5 rounded-md border border-border bg-surface text-[11px] text-text-primary">${pillarOptionsHtml(siteBlockSummary, shownPillarIndex)}</select>
-              </label>
-              <label class="flex items-center gap-2 text-[11px] text-text-secondary">Action
-                <select id="site-action" class="flex-1 min-w-0 h-7 px-1.5 rounded-md border border-border bg-surface text-[11px] text-text-primary">${actionOptionsHtml(siteBlockSummary, shownPillarIndex, match?.actionId)}</select>
-              </label>
-              <label class="flex items-center gap-2 text-[11px] text-text-secondary">Scope
-                <select id="site-scope" class="flex-1 min-w-0 h-7 px-1.5 rounded-md border border-border bg-surface text-[11px] text-text-primary">
-                  <option value="host"${match?.source === "prefix" ? "" : " selected"}>Whole site (${escapeText(host)})</option>
-                  <option value="prefix"${match?.source === "prefix" ? " selected" : ""}>This page and what is under it</option>
-                </select>
-              </label>
+              <div class="grid grid-cols-[3.25rem_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 text-[11px] text-text-secondary">
+                <span>Pillar</span><div id="site-pillar"></div>
+                <span>Action</span><div id="site-action"></div>
+                <span>Scope</span><div id="site-scope"></div>
+              </div>
               <div class="flex items-center gap-2 pt-0.5">
                 <button type="button" id="site-save" class="h-7 px-3 rounded-md border-0 bg-accent text-on-accent text-[11px] font-semibold cursor-pointer hover:bg-accent-hover transition-colors">Count it</button>
                 ${canRemove ? `<button type="button" id="site-remove" class="h-7 px-2.5 rounded-md border border-border bg-surface text-[11px] font-medium text-text-secondary hover:text-danger hover:border-danger/40 cursor-pointer transition-colors">Stop counting</button>` : ""}
@@ -1065,23 +1065,64 @@ function renderSiteBlock(): void {
     </div>
   `;
 
+  const shownActionId = pickedActionId ?? (pickedPillarIndex === null ? (match?.actionId ?? "") : "");
+  const shownScope = pickedScope ?? (match?.source === "prefix" ? "prefix" : "host");
+  const pillarRoot = document.getElementById("site-pillar");
+  const actionRoot = document.getElementById("site-action");
+  const scopeRoot = document.getElementById("site-scope");
+  if (pillarRoot && actionRoot && scopeRoot) {
+    mountCustomSelect(pillarRoot, {
+      options: pillarSelectOptions(siteBlockSummary),
+      value: String(shownPillarIndex),
+      block: true,
+      size: "small",
+      ariaLabel: "Pillar",
+      onChange: (value) => {
+        pickedPillarIndex = Number(value);
+        pickedActionId = "";
+        renderSiteBlock();
+      },
+    });
+    mountCustomSelect(actionRoot, {
+      options: actionSelectOptions(siteBlockSummary, shownPillarIndex),
+      value: shownActionId,
+      block: true,
+      size: "small",
+      ariaLabel: "Action",
+      onChange: (value) => (pickedActionId = value),
+    });
+    mountCustomSelect(scopeRoot, {
+      options: [
+        { value: "host", label: `Whole site (${host})` },
+        { value: "prefix", label: "This page and what is under it" },
+      ],
+      value: shownScope,
+      block: true,
+      size: "small",
+      ariaLabel: "Scope",
+      onChange: (value) => (pickedScope = value === "prefix" ? "prefix" : "host"),
+    });
+  }
+
+  const resetPicks = () => {
+    pickedPillarIndex = null;
+    pickedActionId = null;
+    pickedScope = null;
+  };
   document.getElementById("site-pick")?.addEventListener("click", () => {
     sitePickerOpen = !sitePickerOpen;
-    pickedPillarIndex = null;
+    resetPicks();
     renderSiteBlock();
   });
   document.getElementById("site-cancel")?.addEventListener("click", () => {
     sitePickerOpen = false;
-    renderSiteBlock();
-  });
-  document.getElementById("site-pillar")?.addEventListener("change", (event) => {
-    pickedPillarIndex = Number((event.target as HTMLSelectElement).value);
+    resetPicks();
     renderSiteBlock();
   });
   document.getElementById("site-save")?.addEventListener("click", async () => {
-    const pillarIndex = Number((document.getElementById("site-pillar") as HTMLSelectElement | null)?.value ?? shownPillarIndex);
-    const actionId = (document.getElementById("site-action") as HTMLSelectElement | null)?.value || undefined;
-    const scope = (document.getElementById("site-scope") as HTMLSelectElement | null)?.value === "prefix" ? "prefix" : "host";
+    const pillarIndex = shownPillarIndex;
+    const actionId = (pickedActionId ?? shownActionId) || undefined;
+    const scope = pickedScope ?? shownScope;
     const pattern = scope === "host" ? host : pagePrefixOf(tab.url!);
     const rule: Omit<SiteRule, "id" | "createdAt"> & { id?: string } = {
       id: match?.ruleId && match.source === scope ? match.ruleId : undefined,
@@ -1093,13 +1134,13 @@ function renderSiteBlock(): void {
     };
     await browser.runtime.sendMessage({ action: "set-site-rule", rule });
     sitePickerOpen = false;
-    pickedPillarIndex = null;
+    resetPicks();
     await loadSiteBlock();
   });
   document.getElementById("site-remove")?.addEventListener("click", async () => {
     if (match?.ruleId) await browser.runtime.sendMessage({ action: "remove-site-rule", id: match.ruleId });
     sitePickerOpen = false;
-    pickedPillarIndex = null;
+    resetPicks();
     await loadSiteBlock();
   });
 }
@@ -1152,7 +1193,7 @@ function setupApp() {
             <span class="np-time text-[12px] text-text-secondary tabular-nums shrink-0 min-w-[5rem]"></span>
             <svg class="np-volume-icon shrink-0 text-text-muted" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
             <div class="flex-1 min-w-0 flex items-center h-3">
-              <input type="range" class="np-volume w-full h-1 m-0 p-0 cursor-pointer appearance-none rounded-full bg-border accent-accent" min="0" max="100" value="0" aria-label="Volume" />
+              <input type="range" class="np-volume ui-range w-full" min="0" max="100" value="0" aria-label="Volume" />
             </div>
             <button type="button" class="np-go-to-tab shrink-0 text-[12px] font-semibold text-accent hover:text-accent-hover border-0 bg-transparent p-0 cursor-pointer" title="Go to tab">Go to tab</button>
           </div>
@@ -1292,6 +1333,7 @@ function bindNowPlayingCardEvents(): void {
   card.addEventListener("input", async (event) => {
     const target = event.target as HTMLElement;
     if (!target.classList.contains("np-volume")) return;
+    syncRangeFill(target as HTMLInputElement);
     const tabId = parseInt(card.dataset.npTabId || "0", 10);
     const video = tabId ? findVideoByTabId(tabId) : undefined;
     if (!tabId || !video) return;
@@ -1400,6 +1442,7 @@ function updateNowPlayingCard(
     if (!isInteracting) {
       const displayVolume = state.muted ? 0 : Math.round(state.volume * 100);
       volumeInput.value = String(displayVolume);
+      syncRangeFill(volumeInput);
     }
   }
   if (volumeIcon) {
@@ -1607,6 +1650,12 @@ function updateVideoListItem(item: HTMLElement, video: VideoData): void {
         ? "Suspended tab"
         : "YouTube";
   channelEl.innerText = channelLabel;
+  const avatarEl = item.querySelector(".meta-avatar") as HTMLImageElement | null;
+  if (avatarEl) {
+    const avatar = popupChannelAvatars[video.channelName?.trim() ?? ""];
+    if (avatar && avatarEl.getAttribute("src") !== avatar) avatarEl.src = avatar;
+    avatarEl.classList.toggle("hidden", !avatar);
+  }
 
   const titleEl = item.querySelector(".meta-title") as HTMLElement;
   titleEl.innerText = video.title;
@@ -1718,7 +1767,7 @@ function updateVideoList(videos: VideoData[]) {
             <div class="flex-1 min-w-0 flex flex-col justify-center gap-[2px]">
               <span class="meta-now-badge hidden self-start text-[9px] font-semibold uppercase tracking-[0.1em] text-accent leading-none">Playing</span>
               <div class="meta-title text-[13px] font-medium text-text-primary truncate leading-snug"></div>
-              <div class="meta-channel text-[11px] text-text-muted truncate"></div>
+              <div class="flex items-center gap-1.5 min-w-0"><img class="meta-avatar ui-avatar w-3.5 h-3.5 hidden" alt="" referrerpolicy="no-referrer" /><div class="meta-channel text-[11px] text-text-muted truncate"></div></div>
               <div class="flex items-center gap-1.5 min-w-0">
                 <span class="meta-lang hidden text-[9px] font-bold uppercase tracking-wide px-1.5 py-px rounded-full bg-accent/10 text-accent shrink-0"></span>
                 <div class="meta-time text-[10px] text-text-muted tabular-nums truncate"></div>
@@ -2100,7 +2149,22 @@ async function getYouTubeTabs(): Promise<void> {
   }
 }
 
-document.addEventListener("DOMContentLoaded", getYouTubeTabs);
+document.addEventListener("DOMContentLoaded", () => {
+  installTooltips();
+  // A stale avatar URL just hides; the channel name is still there.
+  document.addEventListener(
+    "error",
+    (event) => {
+      if (event.target instanceof HTMLImageElement && event.target.classList.contains("meta-avatar")) event.target.classList.add("hidden");
+    },
+    true
+  );
+  document.addEventListener("click", closeAllCustomSelects);
+  void loadChannelAvatars()
+    .then((avatars) => (popupChannelAvatars = avatars))
+    .catch(() => {})
+    .finally(() => void getYouTubeTabs());
+});
 window.addEventListener("pagehide", stopLiveTick);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {

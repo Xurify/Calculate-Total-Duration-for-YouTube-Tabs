@@ -136,3 +136,31 @@ describe("summarizeWatch", () => {
     expect(summarizeWatch(log, 7, at(23, 7)).streak.current).toBe(0);
   });
 });
+
+describe("summarizeWatch breakdowns", () => {
+  const at = (day: number, hour: number) => new Date(2026, 9, day, hour).getTime();
+  const base = {
+    title: "t", channelName: "C", durationSeconds: 600, isLive: false, isShort: false, visibleSeconds: 0, captionSeconds: 0, adSeconds: 0, lastPosition: 0,
+  };
+  const log: WatchEntry[] = [
+    { ...base, id: "a", videoId: "aaaaaaaaaaa", language: "sk", languageName: "Slovak", startedAt: at(19, 9), endedAt: at(19, 10), playedSeconds: 600, videoSeconds: 750, hours: { 9: 600 } },
+    { ...base, id: "b", videoId: "bbbbbbbbbbb", language: "en", languageName: "English", startedAt: at(19, 21), endedAt: at(19, 22), playedSeconds: 300, videoSeconds: 300, hours: { 21: 300 } },
+  ];
+  const summary = summarizeWatch(log, 7, at(20, 22));
+
+  test("splits each day by language", () => {
+    expect(summary.days.find((day) => day.key === "2026-10-19")?.byLanguage).toEqual({ Slovak: 600, English: 300 });
+  });
+
+  test("fills the weekday × hour grid, Monday first", () => {
+    expect(summary.byWeekdayHour[0][9]).toBe(600);
+    expect(summary.byWeekdayHour[0][21]).toBe(300);
+  });
+
+  test("groups time by playback speed", () => {
+    expect(summary.bySpeed).toEqual([
+      { rate: 1, playedSeconds: 300, videoSeconds: 300 },
+      { rate: 1.25, playedSeconds: 600, videoSeconds: 750 },
+    ]);
+  });
+});

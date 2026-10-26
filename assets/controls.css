@@ -1,5 +1,3 @@
-/* Controls shared by the desk and the popup, drawn in the theme instead of the browser's own widgets. */
-
 @layer components {
   .chip {
     @apply h-8 px-3 rounded-full border border-border bg-surface-elevated text-[13px] font-medium text-text-secondary inline-flex items-center gap-1.5 cursor-pointer transition-colors hover:text-text-primary hover:border-border-hover;
@@ -141,7 +139,6 @@
   @apply h-8 rounded-md px-2.5 py-0 text-xs text-text-primary;
 }
 
-/* Switches stand in for checkboxes that turn a setting on or off. */
 .ui-switch {
   appearance: none;
   position: relative;
@@ -179,7 +176,7 @@
   background-color: var(--color-on-accent);
 }
 
-/* Checkboxes for picking items, with the tick drawn as a mask so it follows the theme. */
+/* The tick is a mask, so it takes the theme colour. */
 .ui-check {
   appearance: none;
   flex: none;
@@ -253,7 +250,6 @@
   transform: scale(1);
 }
 
-/* Radio rows that read as cards; the whole row is the target. */
 .ui-choice {
   @apply flex items-center gap-2.5 rounded-[10px] border border-border bg-surface px-3 py-2 text-sm text-text-secondary cursor-pointer transition-colors hover:border-border-hover hover:text-text-primary;
 }
@@ -262,7 +258,6 @@
   @apply border-accent/50 bg-accent/5 text-text-primary;
 }
 
-/* Number fields with their own − and + buttons; the browser's spinners are hidden. */
 .ui-stepper {
   @apply inline-flex items-center h-8 rounded-md border border-border bg-surface-elevated overflow-hidden transition-colors;
 }
@@ -295,7 +290,6 @@
   @apply h-8 px-2.5 rounded-md border border-border bg-surface-elevated text-xs text-text-primary placeholder:text-text-muted outline-none transition-colors focus:border-accent/60;
 }
 
-/* Segmented control: one pressed button among a few. */
 .ui-segmented {
   @apply inline-flex gap-0.5 p-0.5 rounded-full border border-border bg-surface;
 }

@@ -17,7 +17,6 @@ interface MountCustomSelectOptions {
   value?: string;
   compact?: boolean;
   block?: boolean;
-  /** "small" for dense rows such as the popup's, "field" to sit beside text fields. */
   size?: "small" | "field";
   ariaLabel?: string;
   onChange?: (value: string) => void;

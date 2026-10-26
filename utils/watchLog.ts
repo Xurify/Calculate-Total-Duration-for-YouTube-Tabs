@@ -167,7 +167,7 @@ export interface WatchSpeedRow {
 }
 
 export interface WatchSummary {
-  days: { key: string; seconds: number; visible: number; byLanguage: Record<string, number> }[];
+  days: { key: string; seconds: number; visible: number; languages: Record<string, number> }[];
   total: {
     playedSeconds: number;
     videoSeconds: number;
@@ -184,7 +184,7 @@ export interface WatchSummary {
   byLanguage: { label: string; seconds: number; videos: number }[];
   byChannel: { channelName: string; avatarUrl: string | null; seconds: number; videos: number; language: string; lastVideoId: string }[];
   byHour: number[];
-  /** [weekday][hour] in seconds, Monday first. */
+  /** Seven rows, Monday first, of 24 hours each. */
   byWeekdayHour: number[][];
   bySpeed: WatchSpeedRow[];
   videos: WatchVideoRow[];
@@ -240,7 +240,7 @@ export function summarizeWatch(
     date.setDate(start.getDate() + offset);
     dayKeys.push(dateKeyOf(date.getTime()));
   }
-  const perDay = new Map(dayKeys.map((key) => [key, { key, seconds: 0, visible: 0, byLanguage: {} as Record<string, number> }]));
+  const perDay = new Map(dayKeys.map((key) => [key, { key, seconds: 0, visible: 0, languages: {} as Record<string, number> }]));
   const total: WatchSummary["total"] = {
     playedSeconds: 0,
     videoSeconds: 0,
@@ -285,7 +285,7 @@ export function summarizeWatch(
 
     const language = entryLanguage(entry, overrides);
     if (entry.playedSeconds > 0) {
-      day.byLanguage[language] = (day.byLanguage[language] ?? 0) + entry.playedSeconds;
+      day.languages[language] = (day.languages[language] ?? 0) + entry.playedSeconds;
       if (!entry.isLive) {
         const rate = Math.max(0.25, Math.round((entry.videoSeconds / entry.playedSeconds) * 4) / 4);
         const speed = speeds.get(rate) ?? { rate, playedSeconds: 0, videoSeconds: 0 };

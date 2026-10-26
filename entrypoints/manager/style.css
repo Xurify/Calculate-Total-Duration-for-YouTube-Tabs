@@ -638,7 +638,6 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Time page */
 .speed-chip {
   display: inline-flex;
   align-items: center;
@@ -712,8 +711,10 @@ body {
   }
 }
 
+.legend-swatch,
 .legend-swatch.streak-day,
 .legend-swatch.heat-cell {
+  display: inline-block;
   width: 12px;
   height: 12px;
   border-radius: 3px;

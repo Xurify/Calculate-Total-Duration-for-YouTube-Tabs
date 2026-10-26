@@ -22,6 +22,7 @@ import { formatTime, formatCompact, formatDurationWords, formatOffset, parseTime
 import { queryReadingList } from "../../utils/readingList";
 import { loadCachedMandalaSummary, type CachedMandalaSummary } from "../../utils/storage";
 import { hostOf, isTrackableUrl, pagePrefixOf, pillarColor, type SiteRule } from "../../utils/timeLog";
+import { languageFlagHtml } from "../../utils/languageFlags";
 import { actionSelectOptions, escapeHtml as escapeText, matchWords, pillarChoices, pillarSelectOptions, type CurrentSiteResponse } from "../../utils/timeUi";
 import { closeAllCustomSelects, mountCustomSelect } from "../manager/custom-select";
 import { installTooltips, syncRangeFill } from "../../utils/controls";
@@ -1658,7 +1659,7 @@ function updateVideoListItem(item: HTMLElement, video: VideoData): void {
   const langEl = item.querySelector(".meta-lang") as HTMLElement | null;
   if (langEl) {
     const label = popupLanguageLabel(video);
-    langEl.textContent = label ?? "";
+    langEl.innerHTML = label ? `${languageFlagHtml(video.language || label, "lang-flag lang-flag--xs mr-1 align-[-1px]")}${escapeText(label)}` : "";
     langEl.classList.toggle("hidden", label == null);
   }
 

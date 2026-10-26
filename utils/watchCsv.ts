@@ -2,8 +2,6 @@ import type { LanguageOverrides } from "./languageOverrides";
 import { dateKeyOf } from "./timeLog";
 import { entryLanguage, type WatchEntry } from "./watchLog";
 
-/** The watch history as CSV, one row per sitting, for spreadsheets. */
-
 export const CSV_COLUMNS = [
   { id: "date", label: "Date" },
   { id: "time", label: "Start time" },

@@ -2,8 +2,6 @@ import { isGoal, languageKey, secondsTodayByLanguage, type LanguageLimit } from 
 import type { LanguageOverrides } from "./languageOverrides";
 import { COMPLETED_SHARE, entryLanguage, UNKNOWN_LANGUAGE, type WatchEntry } from "./watchLog";
 
-/** Videos from the watch history to offer instead, once a language's daily limit is reached. */
-
 export interface Recommendation {
   videoId: string;
   title: string;

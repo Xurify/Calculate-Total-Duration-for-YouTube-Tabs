@@ -1,5 +1,3 @@
-/** Behaviour for the themed controls in assets/controls.css, shared by the desk and the popup. */
-
 const TOOLTIP_DELAY_MS = 350;
 const TOOLTIP_GAP = 8;
 
@@ -135,7 +133,6 @@ export function wireSteppers(root: HTMLElement): void {
   });
 }
 
-/** A text field with a themed suggestion list in place of a native datalist. */
 export function wireCombobox(input: HTMLInputElement, suggestions: () => string[]): void {
   const box = input.closest<HTMLElement>(".ui-combobox") ?? input.parentElement!;
   const menu = document.createElement("div");
@@ -212,7 +209,6 @@ export function wireCombobox(input: HTMLInputElement, suggestions: () => string[
   });
 }
 
-/** Keeps a themed range's filled part in step with its value. */
 export function syncRangeFill(input: HTMLInputElement): void {
   const min = Number(input.min) || 0;
   const max = Number(input.max) || 100;

@@ -41,7 +41,6 @@ function decodeJsonString(raw: string): string | null {
   }
 }
 
-/** The uploader's avatar from a watch page's ytInitialData. */
 export function avatarFromWatchHtml(html: string): string | null {
   const match = html.match(/"videoOwnerRenderer":\{"thumbnail":\{"thumbnails":\[\{"url":"((?:[^"\\]|\\.)+)"/);
   const url = match ? cleanChannelAvatarUrl(decodeJsonString(match[1])) : null;

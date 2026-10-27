@@ -51,7 +51,7 @@ export async function refreshSavedSessionsSidebar() {
       : `<div class="col-span-full flex flex-col items-center justify-center py-16 px-6 text-center">
           <div class="font-display text-xl text-text-primary">No saved sessions yet</div>
           <div class="text-sm text-text-muted mt-1 max-w-sm">A session keeps a set of tabs so you can close them now and open them again later.</div>
-          <button type="button" class="chip mt-4" data-empty-save-session>Save today's tabs</button>
+          <button type="button" class="chip mt-4" data-empty-save-session>Save the open tabs</button>
         </div>`;
     return;
   }
@@ -161,7 +161,7 @@ function sessionCardHtml(session: SavedSession, active: boolean): string {
           <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
           Open tabs
         </button>
-        <button type="button" class="chip h-8" data-session-action="add" title="Add today's open tabs to this session">+ Today's tabs</button>
+        <button type="button" class="chip h-8" data-session-action="add" title="Add the tabs open now to this session">+ Open tabs</button>
         <span class="flex-1"></span>
         <button type="button" class="queue-action" data-session-action="more" title="Rename, pin, duplicate, delete" aria-label="More actions">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>

@@ -40,7 +40,7 @@
           <span class="w-1.5 h-1.5 rounded-full bg-success"></span>
           WebMCP
         </span>
-        <button type="button" id="btn-save-session" class="icon-btn" title="Save today's tabs as a session (S)" aria-label="Save session" aria-keyshortcuts="s">
+        <button type="button" id="btn-save-session" class="icon-btn" title="Save the open tabs as a session (S)" aria-label="Save session" aria-keyshortcuts="s">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
         </button>
         <button type="button" id="btn-refresh" class="icon-btn" title="Refresh" aria-label="Refresh">
@@ -68,7 +68,7 @@
               <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted truncate">
                 <span id="desk-kicker">On the desk</span> · <span id="current-view-title">All windows</span>
               </div>
-              <div id="desk-time" class="font-display text-[40px] leading-none tracking-[-0.02em] text-text-primary whitespace-nowrap">
+              <div id="desk-time" role="heading" aria-level="2" class="font-display text-[40px] leading-none tracking-[-0.02em] text-text-primary whitespace-nowrap">
                 <span id="desk-time-value">Reading your tabs</span><span class="text-text-muted ml-[0.25em]" id="desk-time-suffix">…</span>
               </div>
               <div id="current-view-stats" class="text-sm text-text-secondary truncate min-h-5">&nbsp;</div>

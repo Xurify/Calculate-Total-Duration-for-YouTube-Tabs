@@ -1,3 +1,5 @@
+import { formatDurationInput, MAX_LIMIT_MINUTES, parseDurationMinutes, stepDurationMinutes } from "./languageLimits";
+
 const TOOLTIP_DELAY_MS = 350;
 const TOOLTIP_GAP = 8;
 
@@ -109,10 +111,65 @@ export function stepperHtml(options: StepperOptions): string {
   </span>`;
 }
 
+export interface DurationFieldOptions {
+  minutes?: number | null;
+  name?: string;
+  className?: string;
+  attributes?: Record<string, string>;
+  ariaLabel: string;
+  suffix?: string;
+  required?: boolean;
+}
+
+/** A stepper that takes "3 h" or "1:30" as well as minutes; read it back with parseDurationMinutes. */
+export function durationFieldHtml(options: DurationFieldOptions): string {
+  const attributes = Object.entries(options.attributes ?? {})
+    .map(([key, value]) => ` ${key}="${escapeAttribute(value)}"`)
+    .join("");
+  const value = options.minutes != null ? formatDurationInput(options.minutes) : "";
+  return `<span class="ui-stepper ui-stepper--duration">
+    <button type="button" class="ui-stepper-btn" data-stepper="-1" tabindex="-1" aria-label="Less">${MINUS_ICON}</button>
+    <input type="text" inputmode="text" autocomplete="off" spellcheck="false" class="duration-input ${escapeAttribute(options.className ?? "")}"${options.name ? ` name="${escapeAttribute(options.name)}"` : ""} value="${escapeAttribute(value)}" placeholder="30 min"${options.required ? " required" : ""} aria-label="${escapeAttribute(options.ariaLabel)}" title="Type 45 min, 3 h or 1:30"${attributes} />
+    ${options.suffix ? `<span class="ui-stepper-suffix">${escapeAttribute(options.suffix)}</span>` : ""}
+    <button type="button" class="ui-stepper-btn" data-stepper="1" tabindex="-1" aria-label="More">${PLUS_ICON}</button>
+  </span>`;
+}
+
+function checkDuration(input: HTMLInputElement): number | null {
+  const minutes = parseDurationMinutes(input.value);
+  const valid = minutes !== null && minutes >= 1 && minutes <= MAX_LIMIT_MINUTES;
+  input.setCustomValidity(input.value.trim() === "" || valid ? "" : "Type a time from 1 min to 24 h, like 45 min, 3 h or 1:30.");
+  return valid ? minutes : null;
+}
+
 /** One delegated listener for every stepper under `root`; a press fires the same events as typing. */
 export function wireSteppers(root: HTMLElement): void {
+  root.addEventListener("input", (event) => {
+    const input = event.target;
+    if (input instanceof HTMLInputElement && input.classList.contains("duration-input")) checkDuration(input);
+  });
+  root.addEventListener(
+    "change",
+    (event) => {
+      const input = event.target;
+      if (!(input instanceof HTMLInputElement) || !input.classList.contains("duration-input")) return;
+      const minutes = checkDuration(input);
+      if (minutes !== null) input.value = formatDurationInput(minutes);
+    },
+    true
+  );
   root.addEventListener("click", (event) => {
     const button = (event.target as Element).closest<HTMLButtonElement>("[data-stepper]");
+    const duration = button?.closest(".ui-stepper")?.querySelector<HTMLInputElement>("input.duration-input");
+    if (button && duration) {
+      event.preventDefault();
+      const current = parseDurationMinutes(duration.value);
+      duration.value = formatDurationInput(current === null ? 30 : stepDurationMinutes(current, button.dataset.stepper === "1" ? 1 : -1));
+      duration.setCustomValidity("");
+      duration.dispatchEvent(new Event("input", { bubbles: true }));
+      duration.dispatchEvent(new Event("change", { bubbles: true }));
+      return;
+    }
     const input = button?.closest(".ui-stepper")?.querySelector<HTMLInputElement>("input[type=number]");
     if (!button || !input) return;
     event.preventDefault();

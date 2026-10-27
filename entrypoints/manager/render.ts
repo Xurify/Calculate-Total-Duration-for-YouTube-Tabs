@@ -305,7 +305,8 @@ function renderMain() {
   if (app.isSessionsView) {
     if (viewToolbar) viewToolbar.classList.add("hidden");
     headerTitle.innerText = "sets of tabs kept for later";
-    headerStats.innerText = "Open one to put it on the desk, or add the open tabs to it.";
+    // With no sessions the empty state below explains them; a line about opening one would point at nothing.
+    headerStats.innerText = app.savedSessionsCount === 0 ? "" : "Open one to put it on the desk, or add the open tabs to it.";
     setDeskHero({
       kicker: "Saved sessions",
       title: "",

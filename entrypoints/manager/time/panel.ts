@@ -235,6 +235,7 @@ export async function renderTimePanel(): Promise<void> {
       <p class="text-xs text-text-muted m-0">${escapeHtml(error instanceof Error ? error.message : String(error))}</p>
       <button type="button" id="time-retry" class="chip">Try again</button>
     </div>`;
+    setDeskHero({ kicker: "Time", title: "", value: "Watch time", suffix: "didn't load" });
     panel.setAttribute("aria-busy", "false");
     return;
   }
@@ -250,7 +251,7 @@ export async function renderTimePanel(): Promise<void> {
     kicker: "Time",
     title: "",
     value: formatMinutesWords(watch.total.playedSeconds),
-    suffix: timeRange === 7 ? "watched this week" : `watched in ${timeRange} days`,
+    suffix: `watched in the last ${timeRange} days`,
   });
   paintTimePanel(panel, data);
   panel.setAttribute("aria-busy", "false");

@@ -16,7 +16,7 @@ import { orderedSections, partitionLiveVideosBySection } from "./sections";
 import { applyTabListCheckboxIndeterminateFromAttr, updateSelectionUI } from "./selection";
 import { liveHeroTime, renderSidebar, setDeskHero, syncTopNavState } from "./sidebar";
 import { sortSessionTabsForDisplay, sortVideosForDisplay, videoGroupKey } from "./sorting";
-import { plural } from "./time/html";
+import { languageTagInnerHtml, plural } from "./time/html";
 import { renderTimePanel, scheduleTimeRefresh } from "./time/panel";
 import { showToast } from "./toast";
 import {
@@ -152,13 +152,11 @@ export function updateLiveTabListCardsFromState() {
     const languageLabel = video.languageName ? video.languageName.split("(")[0].trim() : "";
     const langEl = card.querySelector(".manager-card-language") as HTMLElement | null;
     if (langEl) {
-      if (languageLabel) {
-        langEl.textContent = languageLabel;
-        langEl.classList.remove("hidden");
-      } else {
-        langEl.textContent = "";
-        langEl.classList.add("hidden");
+      if (langEl.dataset.label !== languageLabel) {
+        langEl.dataset.label = languageLabel;
+        langEl.innerHTML = languageTagInnerHtml(languageLabel);
       }
+      langEl.classList.toggle("hidden", !languageLabel);
     }
   });
 }

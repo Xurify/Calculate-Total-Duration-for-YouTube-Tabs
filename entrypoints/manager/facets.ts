@@ -1,10 +1,11 @@
 import { VideoData, type SavedSessionTab, type SessionSection } from "../../utils/storage";
 import { formatDurationWords, formatShortDuration, getVideoIdFromUrl } from "../../utils/format";
-import { languageFlagHtml } from "../../utils/languageFlags";
+import { englishLanguageName, languageFlagHtml } from "../../utils/languageFlags";
+import { languageColor as sharedLanguageColor, NO_LANGUAGE_COLOR } from "../../utils/languageColor";
 import { languageOverrideFor } from "../../utils/languageOverrides";
 import { app } from "./state";
 import { deskAvatarHtml } from "./avatars";
-import { FACET_PALETTE, sectionRailVar } from "./palette";
+import { sectionRailVar } from "./palette";
 import { remainingOf } from "./playback";
 import { render } from "./render";
 import {
@@ -26,8 +27,6 @@ const facets: { language?: string; channel?: string; pile?: string; continue?: b
 export const UNKNOWN_LANGUAGE = "Unknown language";
 export const DETECTING_LANGUAGE = "Detecting…";
 
-/** Language → palette slot, assigned by share of time so the biggest language keeps its colour as filters change. */
-const languageColorSlots = new Map<string, number>();
 
 export function hasAnyFacet(): boolean {
   return Boolean(facets.language || facets.channel || facets.pile || facets.continue);
@@ -42,6 +41,8 @@ export function clearFacets(): void {
 
 function languageLabelOf(languageName: string | null | undefined, code: string | null | undefined): string {
   const stripped = languageName ? languageName.split("(")[0].trim() : "";
+  const english = englishLanguageName(code) ?? englishLanguageName(stripped);
+  if (english) return english;
   if (stripped) return stripped;
   if (code) return code.toUpperCase();
   return UNKNOWN_LANGUAGE;
@@ -61,9 +62,8 @@ export function sessionTabLanguageLabel(tab: SavedSessionTab): string {
 }
 
 export function languageColor(label: string): string {
-  if (label === UNKNOWN_LANGUAGE || label === DETECTING_LANGUAGE) return "var(--color-border-hover)";
-  const slot = languageColorSlots.get(label);
-  return slot == null ? "var(--color-border-hover)" : FACET_PALETTE[slot % FACET_PALETTE.length];
+  if (label === UNKNOWN_LANGUAGE || label === DETECTING_LANGUAGE) return NO_LANGUAGE_COLOR;
+  return sharedLanguageColor(label);
 }
 
 export function toggleFacet(kind: FacetKind, value = ""): void {
@@ -110,26 +110,7 @@ export function tally<T>(items: T[], keyOf: (item: T) => string, secondsOf: (ite
   return map;
 }
 
-export function assignLanguageColors(languages: Map<string, { count: number; seconds: number }>): void {
-  const ordered = Array.from(languages.entries())
-    .filter(([label]) => label !== UNKNOWN_LANGUAGE && label !== DETECTING_LANGUAGE)
-    .sort((a, b) => b[1].seconds - a[1].seconds || a[0].localeCompare(b[0]));
-  const stillPresent = new Set(ordered.map(([label]) => label));
-  for (const label of Array.from(languageColorSlots.keys())) {
-    if (!stillPresent.has(label)) languageColorSlots.delete(label);
-  }
-  const taken = new Set(languageColorSlots.values());
-  for (const [label] of ordered) {
-    if (languageColorSlots.has(label)) continue;
-    let slot = 0;
-    while (taken.has(slot)) slot += 1;
-    languageColorSlots.set(label, slot);
-    taken.add(slot);
-  }
-}
-
 function languageRowsFrom(languages: Map<string, { count: number; seconds: number }>): FacetRow[] {
-  assignLanguageColors(languages);
   return Array.from(languages.entries())
     .sort((a, b) => {
       const rank = (label: string) => (label === DETECTING_LANGUAGE ? 2 : label === UNKNOWN_LANGUAGE ? 1 : 0);
@@ -365,12 +346,10 @@ export function renderTimeBar(): void {
   if (live) {
     const base = filterVideosForDisplay(currentLiveBaseVideos(), { ignoreFacet: true });
     const languages = tally(base, videoLanguageLabel, remainingOf);
-    assignLanguageColors(languages);
     entries = Array.from(languages.entries()).map(([label, entry]) => ({ label, seconds: entry.seconds, count: entry.count }));
   } else {
     const base = filterSessionTabsForDisplay(app.selectedSession!.tabs ?? [], { ignoreFacet: true });
     const languages = tally(base, sessionTabLanguageLabel, (tab) => tab.seconds ?? 0);
-    assignLanguageColors(languages);
     entries = Array.from(languages.entries()).map(([label, entry]) => ({ label, seconds: entry.seconds, count: entry.count }));
   }
   const rank = (label: string) => (label === DETECTING_LANGUAGE ? 2 : label === UNKNOWN_LANGUAGE ? 1 : 0);

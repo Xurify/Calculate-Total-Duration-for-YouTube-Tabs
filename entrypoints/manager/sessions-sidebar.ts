@@ -4,7 +4,6 @@ import { sessionTotalSeconds } from "../../utils/sessions";
 import { app } from "./state";
 import { deskAvatarHtml } from "./avatars";
 import {
-  assignLanguageColors,
   DETECTING_LANGUAGE,
   languageColor,
   sessionTabLanguageLabel,
@@ -68,7 +67,7 @@ function renderSessionsTotals(sessions: SavedSession[]): void {
   stats.textContent = sessions.length === 0 ? "" : `${plural(sessions.length, "session")} · ${plural(totalVideos, "video")} · ${formatDurationWords(totalSeconds)} kept`;
 }
 
-const AUTO_SESSION_NAME = /^Session \d{1,2}\/\d{1,2}\/\d{2,4}, \d{1,2}:\d{2} (?:AM|PM)\s*(?:\((.+)\))?$/;
+export const AUTO_SESSION_NAME = /^Session \d{1,2}\/\d{1,2}\/\d{2,4}, \d{1,2}:\d{2} (?:AM|PM)\s*(?:\((.+)\))?$/;
 
 /** Auto-named sessions ("Session 10/15/26, 7:27 AM") read as what they hold instead of when they were saved. */
 export function sessionDisplayName(session: SavedSession): { title: string; custom: boolean } {
@@ -93,7 +92,6 @@ function sessionSavedLabel(savedAt: number): string {
 
 function sessionLanguageBarHtml(tabs: SavedSessionTab[]): string {
   const languages = tally(tabs, sessionTabLanguageLabel, (tab) => tab.seconds ?? 0);
-  assignLanguageColors(languages);
   const entries = Array.from(languages.entries())
     .filter(([, entry]) => entry.seconds > 0)
     .sort((a, b) => b[1].seconds - a[1].seconds || a[0].localeCompare(b[0]));

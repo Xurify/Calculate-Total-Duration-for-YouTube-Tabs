@@ -7,7 +7,7 @@ import { playbackRate } from "./playback";
 import { tabCardDnDHtml } from "./sections";
 import { selectedSessionTabUrls, selectedTabIds } from "./state";
 import { getThumbnailSrc } from "./tabs";
-import { plural } from "./time/html";
+import { languageTagInnerHtml, plural } from "./time/html";
 import { escapeHtml } from "./util";
 import { duplicateBadgeHtml, windowBadgeHtml } from "./view-filter";
 
@@ -92,7 +92,7 @@ export function renderVideoList(videos: VideoData[], sectionColorIndex?: number 
               <span class="manager-card-time whitespace-nowrap"><span class="manager-card-time-current ${watchedPercent > 0 ? "text-text-primary" : "text-text-muted"}">${formatCompact(video.currentTime)}</span> of <span class="manager-card-time-total">${formatCompact(video.seconds)}</span></span>
               ${plannedTabIds.has(video.id) ? `<span class="text-accent font-medium whitespace-nowrap">${planIsPartial ? "in plan, partly" : `in plan ${plannedOrder.indexOf(video.id) + 1} of ${plannedOrder.length}`}</span>` : ""}
               ${stateLabel}
-              <span class="manager-card-language text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0 ${languageLabel ? "" : "hidden"}">${escapeHtml(languageLabel)}</span>
+              <span class="manager-card-language lang-tag ${languageLabel ? "" : "hidden"}">${languageTagInnerHtml(languageLabel)}</span>
               ${windowBadgeHtml(video)}
               ${duplicateBadgeHtml(video.url)}
             </div>
@@ -156,7 +156,7 @@ export function renderSessionGrid(tabs: SavedSessionTab[], sectionColorIndex?: n
             <div class="text-[10px] text-text-muted flex items-center gap-1.5 min-w-0">${deskAvatarHtml(tab.channelName)}<span class="truncate">${escapeHtml(channel)}</span></div>
             <div class="flex items-center gap-1 shrink-0">
               ${duplicateBadgeHtml(tab.url)}
-              ${tab.languageName ? `<div class="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0">${escapeHtml(tab.languageName.split('(')[0].trim())}</div>` : ''}
+              ${tab.languageName ? `<span class="lang-tag">${languageTagInnerHtml(tab.languageName.split("(")[0].trim())}</span>` : ""}
             </div>
           </div>
         </div>
@@ -193,7 +193,7 @@ export function renderSessionList(tabs: SavedSessionTab[], sectionColorIndex?: n
             <div class="queue-meta">
               ${deskAvatarHtml(tab.channelName)}
               <span class="truncate">${escapeHtml(channel)}</span>
-              ${languageLabel ? `<span class="text-[10px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0">${escapeHtml(languageLabel)}</span>` : ""}
+              ${languageLabel ? `<span class="lang-tag">${languageTagInnerHtml(languageLabel)}</span>` : ""}
               ${duplicateBadgeHtml(tab.url)}
             </div>
           </div>
@@ -263,7 +263,7 @@ export function renderVideoGrid(videos: VideoData[], sectionColorIndex?: number 
                         <div class="flex items-center gap-1 shrink-0">
                           ${windowBadgeHtml(video)}
                           ${duplicateBadgeHtml(video.url)}
-                          ${video.languageName ? `<span class="manager-card-language bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold uppercase shrink-0">${escapeHtml(video.languageName.split('(')[0].trim())}</span>` : `<span class="manager-card-language hidden"></span>`}
+                          <span class="manager-card-language lang-tag ${video.languageName ? "" : "hidden"}">${languageTagInnerHtml(video.languageName ? video.languageName.split("(")[0].trim() : "")}</span>
                         </div>
                     </div>
                     ${

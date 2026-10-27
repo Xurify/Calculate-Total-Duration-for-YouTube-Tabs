@@ -66,6 +66,7 @@ export function mountDeskSelects() {
       ariaLabel: "Existing session",
       options: [],
       value: "",
+      onChange: () => app.onSaveSessionTargetChange?.(),
     });
     app.saveSessionTargetSelect.setHidden(true);
   }

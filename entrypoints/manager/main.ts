@@ -43,13 +43,13 @@ import { formatTime, formatCompact, formatDurationWords, formatOffset, formatSho
 import { dateKeyOf, pillarColor, type SiteRule, type TimeTrackingPrefs } from "../../utils/timeLog";
 import { actionSelectOptions, formatMinutesWords, pillarChoices, pillarSelectOptions, pillarTitleOf, type TimeSummaryResponse } from "../../utils/timeUi";
 import type { WatchSummary, WatchVideoRow } from "../../utils/watchLog";
-import { isGoal, languageKey, MAX_LIMIT_MINUTES, ruleKey, type LanguageLimit, type LanguageLimitUsage } from "../../utils/languageLimits";
+import { formatDurationInput, isGoal, languageKey, MAX_LIMIT_MINUTES, parseDurationMinutes, ruleKey, type LanguageLimit, type LanguageLimitUsage } from "../../utils/languageLimits";
 import { CALENDAR_WEEKS, type GoalStreaks } from "../../utils/goals";
 import { MILESTONE_HOURS, type LanguageHoursRow } from "../../utils/languageHours";
 import { handlePracticeKeydown, refreshPracticeBadge, renderPracticePanel } from "./practice";
 import { CSV_COLUMNS, DEFAULT_CSV_COLUMNS, type CsvColumn } from "../../utils/watchCsv";
 import { CHANNEL_AVATARS_KEY, loadChannelAvatars, type ChannelAvatars } from "../../utils/channelAvatars";
-import { installDialogs, installTooltips, stepperHtml, wireCombobox, wireSteppers } from "../../utils/controls";
+import { durationFieldHtml, durationFieldMinutes, installDialogs, installTooltips, wireCombobox, wireSteppers } from "../../utils/controls";
 import {
   detectLanguageFromPlayerResponse,
   languageTextFromPlayerResponse,
@@ -2244,9 +2244,9 @@ function setDeskHero(options: { kicker: string; title: string; value: string; su
   const kicker = document.getElementById("desk-kicker");
   const value = document.getElementById("desk-time-value");
   const suffix = document.getElementById("desk-time-suffix");
-  if (kicker) kicker.textContent = options.kicker;
-  if (value) value.textContent = options.value;
-  if (suffix) suffix.textContent = options.suffix;
+  if (kicker && kicker.textContent !== options.kicker) kicker.textContent = options.kicker;
+  if (value && value.textContent !== options.value) value.textContent = options.value;
+  if (suffix && suffix.textContent !== options.suffix) suffix.textContent = options.suffix;
 }
 
 function liveHeroTime(videos: VideoData[]): { value: string; suffix: string } {
@@ -3030,6 +3030,8 @@ function renderMain() {
 
   if (!container || !headerTitle || !headerStats) return;
 
+  const enteringTime = isTimeView && !timeViewShown;
+  timeViewShown = isTimeView;
   const viewToolbar = document.getElementById("view-toolbar");
 
   syncTopNavState();
@@ -3069,6 +3071,10 @@ function renderMain() {
   }
 
   if (isTimeView) {
+    if (!enteringTime) {
+      scheduleTimeRefresh();
+      return;
+    }
     if (viewToolbar) viewToolbar.classList.add("hidden");
     headerTitle.innerText = "where the time went";
     headerStats.innerText = "";
@@ -6059,6 +6065,13 @@ let videoRowsShown = 0;
 let newRuleKind: "goal" | "limit" = "goal";
 let ruleSaveTimer: ReturnType<typeof setTimeout> | null = null;
 const RULE_SAVE_DELAY_MS = 600;
+let timeViewShown = false;
+let timeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let lastTimeRefreshAt = 0;
+const TIME_REFRESH_MIN_MS = 2000;
+const TIME_SLOTS = ["rules", "add", "streak", "hours", "range", "watch", "mandala", "tracking"] as const;
+type TimeSlot = (typeof TIME_SLOTS)[number];
+const paintedTimeSlots = new Map<TimeSlot, string>();
 let dayChartMode: "screen" | "language" = "language";
 
 const TIME_RANGES = [7, 30, 90] as const;
@@ -6438,12 +6451,12 @@ function dailyRulesHtml(rules: LanguageLimitUsage[], watch: WatchSummary, prefs:
             ? "var(--color-warning)"
             : "var(--color-accent)";
       const kindWord = isGoal(rule) ? "goal" : "limit";
-      return `<li class="grid grid-cols-[minmax(0,10rem)_4.5rem_minmax(0,1fr)_8.5rem_7.5rem_auto_auto] items-center gap-3 text-sm">
+      return `<li class="grid grid-cols-[minmax(0,10rem)_4.5rem_minmax(0,1fr)_8.5rem_auto_7.5rem_auto] items-center gap-3 text-sm" data-rule="${escapeHtml(ruleKey(rule))}">
         <span class="truncate font-medium text-text-primary flex items-center gap-2">${languageMarkHtml(rule.language, colorOfLanguage(colors, rule.language))}<span class="truncate">${escapeHtml(rule.language)}</span></span>
         <span class="rule-kind${isGoal(rule) ? " rule-kind--goal" : ""}">${isGoal(rule) ? "At least" : "At most"}</span>
         <span class="h-2 rounded-full bg-surface-elevated overflow-hidden flex" role="meter" aria-valuemin="0" aria-valuemax="${rule.minutes}" aria-valuenow="${Math.floor(rule.usedSeconds / 60)}" aria-label="${escapeHtml(rule.language)} ${kindWord} today"><span class="h-full rounded-full transition-[width] duration-500" style="width:${Math.max(share > 0 ? 2 : 0, share * 100)}%;background:${barColor}"></span></span>
         <span class="text-right text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(rule.usedSeconds)} <span class="text-text-muted">of</span></span>
-        ${stepperHtml({ value: rule.minutes, min: 1, max: MAX_LIMIT_MINUTES, step: 5, className: "time-rule-minutes", suffix: "min", ariaLabel: `Daily minutes for the ${escapeHtml(rule.language)} ${kindWord}`, attributes: { "data-language": rule.language, "data-kind": rule.kind ?? "" } })}
+        ${durationFieldHtml({ minutes: rule.minutes, className: "time-rule-minutes", required: true, ariaLabel: `Daily time for the ${rule.language} ${kindWord}`, attributes: { "data-language": rule.language, "data-kind": rule.kind ?? "" } })}
         <span class="text-xs whitespace-nowrap">${ruleStatusHtml(rule)}</span>
         <button type="button" class="time-rule-delete icon-btn w-8 h-8 hover:text-danger" data-language="${escapeHtml(rule.language)}" data-kind="${escapeHtml(rule.kind ?? "")}" title="Remove the ${escapeHtml(rule.language)} ${kindWord}">${TRASH_ICON}</button>
       </li>`;
@@ -6453,16 +6466,20 @@ function dailyRulesHtml(rules: LanguageLimitUsage[], watch: WatchSummary, prefs:
     ${timeSectionHeading("Daily goals and limits", "", "goal")}
     <p class="text-xs text-text-muted m-0">A goal is the least you want in a language each day, a limit the most. The player shows a note when a goal is reached and when a limit is close or passed. Time is real time, so 2× speed counts half.${prefs.watchHistory ? "" : " Goals and limits need YouTube history, which is off."}</p>
     ${rowsHtml ? `<ul class="m-0 p-0 list-none flex flex-col gap-2.5">${rowsHtml}</ul>` : ""}
-    <form id="time-rule-add" class="flex flex-wrap items-center gap-2">
+  </section>`;
+}
+
+/** Painted once per visit, apart from the live rows above it, so a refresh never touches what is being typed. */
+function addRuleFormHtml(): string {
+  return `<form id="time-rule-add" class="flex flex-wrap items-center gap-2 -mt-3">
       <span class="ui-segmented" role="group" aria-label="Kind">
         <button type="button" class="time-rule-kind budget-chip text-xs" data-kind="goal" aria-pressed="${newRuleKind === "goal"}">At least</button>
         <button type="button" class="time-rule-kind budget-chip text-xs" data-kind="limit" aria-pressed="${newRuleKind === "limit"}">At most</button>
       </span>
       <span class="ui-combobox"><input type="text" id="time-rule-language" name="language" required maxlength="80" placeholder="Language, e.g. Slovak" class="ui-field w-48" aria-label="Language" /></span>
-      ${stepperHtml({ name: "minutes", min: 1, max: MAX_LIMIT_MINUTES, step: 5, required: true, placeholder: "30", suffix: "min a day", ariaLabel: "Minutes per day" })}
+      ${durationFieldHtml({ name: "minutes", minutes: 30, required: true, suffix: "a day", ariaLabel: "Time per day" })}
       <button type="submit" class="chip chip--accent h-8 text-xs">Add ${newRuleKind === "goal" ? "goal" : "limit"}</button>
-    </form>
-  </section>`;
+    </form>`;
 }
 
 function streakSectionHtml(streaks: GoalStreaks, watch: WatchSummary): string {
@@ -6569,9 +6586,13 @@ function languageHoursSectionHtml(rows: LanguageHoursRow[], watch: WatchSummary)
         <div class="flex items-baseline gap-2"><span class="font-display text-[44px] leading-none tabular-nums text-text-primary">${escapeHtml(hoursWords(row.hours))}</span><span class="text-sm text-text-muted">of listening</span></div>
         ${milestoneTrackHtml(row, color === "var(--color-border-hover)" ? "var(--color-accent)" : color)}
         <p class="text-xs text-text-secondary m-0">${escapeHtml(paceWords(row))}</p>
+        <form class="hours-add flex items-center gap-2" data-language="${escapeHtml(row.language)}">
+          ${durationFieldHtml({ name: "amount", bareUnit: "h", step: 30, required: true, placeholder: "e.g. 3 h", ariaLabel: `Listening time to add for ${row.language}` })}
+          <button type="submit" class="chip h-8 text-xs">Add time</button>
+        </form>
         <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-muted">
           <span>${row.earlierHours > 0 ? `Includes ${escapeHtml(hoursWords(row.earlierHours))} from before` : "Counted since Study Harvester was installed"}</span>
-          <button type="button" class="hours-edit link-btn whitespace-nowrap" data-language="${escapeHtml(row.language)}">${row.earlierHours > 0 ? "Change" : "Add earlier hours"}</button>
+          <button type="button" class="hours-edit link-btn whitespace-nowrap" data-language="${escapeHtml(row.language)}">${row.earlierHours > 0 ? "Change" : "Set hours from before"}</button>
         </div>
         <form class="hours-form hidden items-center gap-2" data-language="${escapeHtml(row.language)}">
           <label class="text-xs text-text-secondary" for="hours-${escapeHtml(languageKey(row.language))}">Hours before</label>
@@ -6763,11 +6784,17 @@ async function renderTimePanel(): Promise<void> {
   const panel = document.getElementById("time-panel");
   if (!panel) return;
   wireTimePanel(panel);
+  if (timeRefreshTimer !== null) {
+    clearTimeout(timeRefreshTimer);
+    timeRefreshTimer = null;
+  }
+  lastTimeRefreshAt = Date.now();
   let data: TimeSummaryResponse;
   try {
     data = (await browser.runtime.sendMessage({ action: "get-time-summary", days: timeRange })) as TimeSummaryResponse;
     if (!data || data.errorMessage) throw new Error(data?.errorMessage || "No answer");
   } catch (error) {
+    paintedTimeSlots.clear();
     panel.innerHTML = `<div class="flex flex-col items-start gap-3">
       <p class="text-sm text-text-secondary m-0">Your watch time could not be loaded. Nothing was lost. Try again in a moment.</p>
       <p class="text-xs text-text-muted m-0">${escapeHtml(error instanceof Error ? error.message : String(error))}</p>
@@ -6778,10 +6805,11 @@ async function renderTimePanel(): Promise<void> {
   }
   if (!isTimeView) return;
   lastTimeResponse = data;
-  const { watch, prefs } = data;
+  const { watch } = data;
   const headerStats = document.getElementById("current-view-stats");
   if (headerStats) {
-    headerStats.textContent = watch.total.videos > 0 ? [plural(watch.total.videos, "video"), plural(watch.byLanguage.length, "language"), plural(watch.byChannel.length, "channel")].join(" · ") : "";
+    const stats = watch.total.videos > 0 ? [plural(watch.total.videos, "video"), plural(watch.byLanguage.length, "language"), plural(watch.byChannel.length, "channel")].join(" · ") : "";
+    if (headerStats.textContent !== stats) headerStats.textContent = stats;
   }
   setDeskHero({
     kicker: "Time",
@@ -6789,22 +6817,41 @@ async function renderTimePanel(): Promise<void> {
     value: formatMinutesWords(watch.total.playedSeconds),
     suffix: timeRange === 7 ? "watched this week" : `watched in ${timeRange} days`,
   });
+  paintTimePanel(panel, data);
+  panel.setAttribute("aria-busy", "false");
+}
 
-  const rangeHtml = `<span class="ui-segmented" role="group" aria-label="Range">
-    ${TIME_RANGES.map((days) => `<button type="button" class="time-range budget-chip" data-days="${days}" aria-pressed="${timeRange === days}">${days} days</button>`).join("")}
-  </span>`;
+/** Called for every desk render while the Time view is open; tab events come in bursts, so fetch at most every couple of seconds. */
+function scheduleTimeRefresh(): void {
+  if (timeRefreshTimer !== null) return;
+  const wait = Math.max(0, lastTimeRefreshAt + TIME_REFRESH_MIN_MS - Date.now());
+  timeRefreshTimer = setTimeout(() => {
+    timeRefreshTimer = null;
+    if (isTimeView) void renderTimePanel();
+  }, wait);
+}
 
-  // Keep what was being typed in the add form across the re-render that a save causes.
-  const typedLanguage = panel.querySelector<HTMLInputElement>("#time-rule-language")?.value ?? "";
-
-  panel.innerHTML = `
-    ${dailyRulesHtml(data.limits ?? [], watch, prefs)}
-    ${data.streaks ? streakSectionHtml(data.streaks, watch) : ""}
-    ${languageHoursSectionHtml(data.hours ?? [], watch)}
-    <div class="flex items-center justify-between gap-3 pt-2 border-t border-border"><span class="text-sm text-text-secondary">Everything below covers the last</span>${rangeHtml}</div>
-    <div id="time-watch" class="contents">${watchSectionsHtml(watch, prefs)}</div>
-    ${mandalaSectionHtml(data)}
-    <section class="flex flex-col gap-3 pb-6">
+function timeSlotHtml(slot: TimeSlot, data: TimeSummaryResponse): string {
+  const { watch, prefs } = data;
+  switch (slot) {
+    case "rules":
+      return dailyRulesHtml(data.limits ?? [], watch, prefs);
+    case "add":
+      return addRuleFormHtml();
+    case "streak":
+      return data.streaks ? streakSectionHtml(data.streaks, watch) : "";
+    case "hours":
+      return languageHoursSectionHtml(data.hours ?? [], watch);
+    case "range":
+      return `<div class="flex items-center justify-between gap-3 pt-2 border-t border-border"><span class="text-sm text-text-secondary">Everything below covers the last</span><span class="ui-segmented" role="group" aria-label="Range">
+        ${TIME_RANGES.map((days) => `<button type="button" class="time-range budget-chip" data-days="${days}" aria-pressed="${timeRange === days}">${days} days</button>`).join("")}
+      </span></div>`;
+    case "watch":
+      return watchSectionsHtml(watch, prefs);
+    case "mandala":
+      return mandalaSectionHtml(data);
+    case "tracking":
+      return `<section class="flex flex-col gap-3 pb-6">
       <h2 class="font-display text-[22px] font-medium m-0">Tracking</h2>
       <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
         <label class="flex items-center gap-2.5 text-sm text-text-primary cursor-pointer"><input type="checkbox" role="switch" id="time-watch-history" class="ui-switch"${prefs.watchHistory ? " checked" : ""} /> YouTube history</label>
@@ -6816,23 +6863,74 @@ async function renderTimePanel(): Promise<void> {
         <button type="button" id="time-clear" class="chip h-8 text-xs chip--danger">Delete all time data</button>
       </div>
       <p class="text-xs text-text-muted m-0">Stored only in this browser.</p>
-    </section>
-  `;
-  mountTimeSelects(panel, data);
-  const languageInput = panel.querySelector<HTMLInputElement>("#time-rule-language");
-  if (languageInput) {
-    languageInput.value = typedLanguage;
-    wireCombobox(languageInput, () => {
-      const taken = new Set((lastTimeResponse?.limits ?? []).filter((rule) => (newRuleKind === "goal") === isGoal(rule)).map((rule) => languageKey(rule.language)));
-      return (lastTimeResponse?.watch.byLanguage ?? []).map((row) => row.label).filter((label) => label !== UNKNOWN_LANGUAGE && !taken.has(languageKey(label)));
-    });
+    </section>`;
   }
-  panel.setAttribute("aria-busy", "false");
+}
+
+/** A slot the person is using (focus, an open menu or form) waits until they leave it. */
+function timeSlotBusy(box: HTMLElement): boolean {
+  return box.contains(document.activeElement) || box.querySelector(".hours-form.flex, [aria-expanded=true]") !== null;
+}
+
+/**
+ * Replaces only the slots whose markup changed, so live watch time ticking in does not redraw the
+ * whole page, and the add form is drawn once per visit so typing in it is never interrupted.
+ */
+function paintTimePanel(panel: HTMLElement, data: TimeSummaryResponse): void {
+  if (!panel.querySelector("[data-time-slot]")) {
+    paintedTimeSlots.clear();
+    panel.innerHTML = TIME_SLOTS.map((slot) => `<div class="contents" data-time-slot="${slot}"${slot === "watch" ? ` id="time-watch"` : ""}></div>`).join("");
+  }
+  for (const slot of TIME_SLOTS) {
+    const box = panel.querySelector<HTMLElement>(`[data-time-slot="${slot}"]`);
+    if (!box) continue;
+    if (slot === "add" && paintedTimeSlots.has(slot)) continue;
+    const html = timeSlotHtml(slot, data);
+    if (paintedTimeSlots.get(slot) === html) continue;
+    if (timeSlotBusy(box)) {
+      if (slot === "rules") patchIdleRuleRows(box, html);
+      continue;
+    }
+    const mandalaOpen = slot === "mandala" ? box.querySelector<HTMLDetailsElement>("details")?.open : undefined;
+    box.innerHTML = html;
+    paintedTimeSlots.set(slot, html);
+    if (mandalaOpen !== undefined) {
+      const details = box.querySelector<HTMLDetailsElement>("details");
+      if (details) details.open = mandalaOpen;
+    }
+    mountTimeSelects(box, data);
+    if (slot === "add") wireAddRuleLanguage(box);
+  }
+}
+
+/** While one rule's time is being edited, the other rows still show today's progress. */
+function patchIdleRuleRows(box: HTMLElement, html: string): void {
+  const next = document.createElement("template");
+  next.innerHTML = html;
+  const fresh = [...next.content.querySelectorAll<HTMLElement>("li[data-rule]")];
+  const rows = [...box.querySelectorAll<HTMLElement>("li[data-rule]")];
+  if (fresh.length !== rows.length || fresh.some((row, index) => row.dataset.rule !== rows[index].dataset.rule)) return;
+  rows.forEach((row, index) => {
+    if (!row.contains(document.activeElement) && row.outerHTML !== fresh[index].outerHTML) row.replaceWith(fresh[index]);
+  });
+  paintedTimeSlots.delete("rules");
+}
+
+function wireAddRuleLanguage(box: HTMLElement): void {
+  const languageInput = box.querySelector<HTMLInputElement>("#time-rule-language");
+  if (!languageInput) return;
+  wireCombobox(languageInput, () => {
+    const taken = new Set((lastTimeResponse?.limits ?? []).filter((rule) => (newRuleKind === "goal") === isGoal(rule)).map((rule) => languageKey(rule.language)));
+    return (lastTimeResponse?.watch.byLanguage ?? []).map((row) => row.label).filter((label) => label !== UNKNOWN_LANGUAGE && !taken.has(languageKey(label)));
+  });
 }
 
 function repaintWatchSections(panel: HTMLElement): void {
   const box = panel.querySelector<HTMLElement>("#time-watch");
-  if (box && lastTimeResponse) box.innerHTML = watchSectionsHtml(lastTimeResponse.watch, lastTimeResponse.prefs);
+  if (!box || !lastTimeResponse) return;
+  const html = watchSectionsHtml(lastTimeResponse.watch, lastTimeResponse.prefs);
+  box.innerHTML = html;
+  paintedTimeSlots.set("watch", html);
 }
 
 let exportDays: number | null = 30;
@@ -6941,6 +7039,12 @@ function wireTimePanel(panel: HTMLElement): void {
   timePanelWired = true;
   wireSteppers(panel);
   wireExportModal();
+  // Slots skipped while in use catch up once focus moves on.
+  panel.addEventListener("focusout", () => {
+    setTimeout(() => {
+      if (isTimeView && lastTimeResponse) paintTimePanel(panel, lastTimeResponse);
+    }, 0);
+  });
 
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== "local" || !changes[CHANNEL_AVATARS_KEY] || !lastTimeResponse || !isTimeView) return;
@@ -7061,6 +7165,27 @@ function wireTimePanel(panel: HTMLElement): void {
 
   panel.addEventListener("submit", async (event) => {
     const form = event.target;
+    if (form instanceof HTMLFormElement && form.classList.contains("hours-add")) {
+      event.preventDefault();
+      const field = form.querySelector<HTMLInputElement>(".duration-input");
+      const minutes = field ? durationFieldMinutes(field) : null;
+      const language = form.dataset.language ?? "";
+      const before = lastTimeResponse?.hours?.find((row) => row.language === language)?.earlierHours ?? 0;
+      if (!field || minutes === null || minutes < 1) return;
+      await browser.runtime.sendMessage({ action: "set-earlier-hours", language, hours: before + minutes / 60 });
+      field.value = "";
+      // Focus would keep the card from repainting with the new total.
+      field.blur();
+      await renderTimePanel();
+      showToast(`Added ${formatDurationInput(minutes)} to ${language}`, {
+        label: "Undo",
+        run: async () => {
+          await browser.runtime.sendMessage({ action: "set-earlier-hours", language, hours: before });
+          await renderTimePanel();
+        },
+      });
+      return;
+    }
     if (form instanceof HTMLFormElement && form.classList.contains("hours-form")) {
       event.preventDefault();
       const hours = Number(new FormData(form).get("hours"));
@@ -7072,8 +7197,8 @@ function wireTimePanel(panel: HTMLElement): void {
     event.preventDefault();
     const fields = new FormData(form);
     const language = String(fields.get("language") ?? "").trim();
-    const minutes = Number(fields.get("minutes"));
-    if (!language || !(minutes > 0)) return;
+    const minutes = parseDurationMinutes(String(fields.get("minutes") ?? ""));
+    if (!language || minutes === null || minutes < 1 || minutes > MAX_LIMIT_MINUTES) return;
     // Pick up the label as the Time page spells it, so "english" still matches "English".
     const known = lastTimeResponse?.watch.byLanguage.find((row) => languageKey(row.label) === languageKey(language));
     const rule: LanguageLimit = newRuleKind === "goal" ? { language: known?.label ?? language, minutes, kind: "goal" } : { language: known?.label ?? language, minutes };
@@ -7090,8 +7215,8 @@ function wireTimePanel(panel: HTMLElement): void {
       return;
     }
     if (target instanceof HTMLInputElement && target.classList.contains("time-rule-minutes")) {
-      const minutes = Number(target.value);
-      if (!target.checkValidity() || !(minutes > 0)) return;
+      const minutes = parseDurationMinutes(target.value);
+      if (!target.checkValidity() || minutes === null) return;
       // Each press of a stepper button fires change; saving after a pause keeps the panel from redrawing under the pointer.
       if (ruleSaveTimer !== null) clearTimeout(ruleSaveTimer);
       ruleSaveTimer = setTimeout(() => {

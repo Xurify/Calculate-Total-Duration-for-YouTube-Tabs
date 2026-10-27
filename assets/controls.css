@@ -272,6 +272,14 @@
   -moz-appearance: textfield;
 }
 
+.ui-stepper--duration input {
+  @apply w-[5.5rem];
+}
+
+.ui-stepper:has(input:invalid:not(:placeholder-shown)) {
+  @apply border-danger/70;
+}
+
 .ui-stepper input::-webkit-outer-spin-button,
 .ui-stepper input::-webkit-inner-spin-button {
   -webkit-appearance: none;

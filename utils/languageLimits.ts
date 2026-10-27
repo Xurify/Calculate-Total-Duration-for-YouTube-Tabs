@@ -73,6 +73,47 @@ export function cleanLanguageLimits(raw: unknown): LanguageLimit[] {
   return limits;
 }
 
+const UNIT_MINUTES: Record<string, number> = { h: 60, hr: 60, hrs: 60, hour: 60, hours: 60, m: 1, min: 1, mins: 1, minute: 1, minutes: 1 };
+
+/**
+ * Reads an amount typed the way people say it: "45", "45 min", "3h", "1h30", "1:30", "2.5 h".
+ * A bare number is in `bareUnit` (minutes by default), except right after hours ("1h 30"). Returns null when the text is not a time.
+ */
+export function parseDurationMinutes(text: string, bareUnit: "min" | "h" = "min"): number | null {
+  const value = text.trim().toLowerCase().replace(",", ".");
+  if (!value) return null;
+  const clock = /^(\d+):([0-5]?\d)$/.exec(value);
+  if (clock) return Number(clock[1]) * 60 + Number(clock[2]);
+  const part = /(\d+(?:\.\d+)?)\s*([a-z]*)\s*/y;
+  let total = 0;
+  let lastUnit = 0;
+  const bare = /^\d+(?:\.\d+)?$/.test(value) && bareUnit === "h" ? 60 : 1;
+  while (part.lastIndex < value.length) {
+    const match = part.exec(value);
+    if (!match) return null;
+    const unit = match[2] ? UNIT_MINUTES[match[2]] : lastUnit === 1 ? null : bare;
+    if (!unit) return null;
+    total += Number(match[1]) * unit;
+    lastUnit = unit;
+  }
+  return Math.round(total);
+}
+
+export function formatDurationInput(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours === 0) return `${rest} min`;
+  return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
+}
+
+/** Steps grow with the amount, so going from 30 min to 3 h takes a handful of presses rather than thirty. */
+export function stepDurationMinutes(minutes: number, direction: 1 | -1): number {
+  const stepAt = (value: number) => (value < 60 ? 5 : value < 180 ? 15 : 30);
+  const step = stepAt(direction === 1 ? minutes : minutes - 1);
+  const next = direction === 1 ? Math.floor(minutes / step) * step + step : Math.ceil(minutes / step) * step - step;
+  return Math.min(MAX_LIMIT_MINUTES, Math.max(1, next));
+}
+
 export async function loadLanguageLimits(): Promise<LanguageLimit[]> {
   if (!browser.storage?.local) return [];
   const data = await browser.storage.local.get(LANGUAGE_LIMITS_KEY);

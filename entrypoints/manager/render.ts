@@ -17,6 +17,7 @@ import { applyTabListCheckboxIndeterminateFromAttr, updateSelectionUI } from "./
 import { liveHeroTime, renderSidebar, setDeskHero, syncTopNavState } from "./sidebar";
 import { sortSessionTabsForDisplay, sortVideosForDisplay, videoGroupKey } from "./sorting";
 import { languageTagInnerHtml, plural } from "./time/html";
+import { syncCompactHeader } from "./compact-header";
 import { renderTimePanel, scheduleTimeRefresh } from "./time/panel";
 import { showToast } from "./toast";
 import {
@@ -439,6 +440,7 @@ export function render() {
     renderTimeout = null;
     renderSidebar();
     renderMain();
+    syncCompactHeader();
     if (!app.selectedSession && app.skippedTabListDom) updateLiveTabListCardsFromState();
     updateSelectionUI();
     if (app.tabListContainerInnerHtmlUpdated) {

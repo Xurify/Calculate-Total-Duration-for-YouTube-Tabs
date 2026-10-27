@@ -55,7 +55,7 @@ export function renderVideoList(videos: VideoData[], sectionColorIndex?: number 
               <svg class="chapter-toggle-arrow shrink-0 transition-transform" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
               <span>${plural(video.chapters.length, "chapter")}</span>
             </button>
-            <div class="video-chapters-list hidden mt-1.5 space-y-1 pl-2.5 border-l-2 border-accent/30 text-xs">
+            <div class="video-chapters-list hidden mt-1.5 space-y-1 text-xs">
               ${video.chapters
                 .map(
                   (chapter) => `
@@ -274,7 +274,7 @@ export function renderVideoGrid(videos: VideoData[], sectionColorIndex?: number 
                               <svg class="chapter-toggle-arrow shrink-0 transition-transform" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
                               <span>${plural(video.chapters.length, "chapter")}</span>
                             </button>
-                            <div class="video-chapters-list hidden mt-1 space-y-0.5 pl-2 border-l-2 border-accent/30 text-[11px] max-h-36 overflow-y-auto custom-scrollbar">
+                            <div class="video-chapters-list hidden mt-1 space-y-0.5 text-[11px] max-h-36 overflow-y-auto custom-scrollbar">
                               ${video.chapters
                                 .map(
                                   (chapter) => `

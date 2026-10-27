@@ -20,6 +20,7 @@ import { wireSessionContextMenu } from "./session-menu";
 import { refreshSavedSessionsSidebar } from "./sessions-sidebar";
 import { wireSettings } from "./settings";
 import { wireSidebarClicks } from "./sidebar";
+import { wireCompactHeader } from "./compact-header";
 import { wireStudyModal } from "./study-session";
 import { wireTabList } from "./tab-list-events";
 import { fetchTabs, handleStoreUpdated, scheduleFetchTabsFromEvents, scheduleProbeResultsToUi } from "./tabs";
@@ -36,6 +37,7 @@ function setupListeners() {
   wirePileFacetMenu();
   wireStudyModal();
   wireSidebarClicks();
+  wireCompactHeader();
   wireTabList();
   wireViewControls();
   wireSessionContextMenu();

@@ -92,7 +92,7 @@ export async function getYouTubeTabs(): Promise<void> {
                                !/^\(\d+\)\s*/.test(video.title);
 
       // Inactive tabs: still refresh playback position from cache estimate, or light probe
-      if (hasValidMetadata && !video.active && !video.audible) {
+      if (hasValidMetadata && video.language !== undefined && !video.active && !video.audible) {
         return;
       }
 
@@ -116,6 +116,8 @@ export async function getYouTubeTabs(): Promise<void> {
             paused: contentMeta.paused,
             volume: contentMeta.volume,
             muted: contentMeta.muted,
+            language: contentMeta.language,
+            languageName: contentMeta.languageName,
           });
           requestMetadataUpdate(video.url, buildMetadataForCache(video, expectedVideoId ?? undefined));
           scheduleProbeRender();
@@ -279,6 +281,8 @@ export async function getYouTubeTabs(): Promise<void> {
                   paused: meta.paused,
                   volume: meta.volume,
                   muted: meta.muted,
+                  language: meta.language,
+                  languageName: meta.languageName,
                 });
                 if (video.seconds > 0 || video.isLive) {
                   requestMetadataUpdate(video.url, buildMetadataForCache(video, expectedId ?? undefined));

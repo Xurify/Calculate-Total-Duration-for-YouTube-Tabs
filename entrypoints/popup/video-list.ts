@@ -156,7 +156,7 @@ export function updateVideoListCardsFromState(): void {
   updateQueueOffsets();
 }
 
-const clockFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
+const clockFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 
 /** "Next" / "in 10 min" plus the clock time each video starts if the queue plays straight through. */
 function updateQueueOffsets(): void {

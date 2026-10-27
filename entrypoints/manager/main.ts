@@ -43,13 +43,13 @@ import { formatTime, formatCompact, formatDurationWords, formatOffset, formatSho
 import { dateKeyOf, pillarColor, type SiteRule, type TimeTrackingPrefs } from "../../utils/timeLog";
 import { actionSelectOptions, formatMinutesWords, pillarChoices, pillarSelectOptions, pillarTitleOf, type TimeSummaryResponse } from "../../utils/timeUi";
 import type { WatchSummary, WatchVideoRow } from "../../utils/watchLog";
-import { isGoal, languageKey, MAX_LIMIT_MINUTES, parseDurationMinutes, ruleKey, type LanguageLimit, type LanguageLimitUsage } from "../../utils/languageLimits";
+import { formatDurationInput, isGoal, languageKey, MAX_LIMIT_MINUTES, parseDurationMinutes, ruleKey, type LanguageLimit, type LanguageLimitUsage } from "../../utils/languageLimits";
 import { CALENDAR_WEEKS, type GoalStreaks } from "../../utils/goals";
 import { MILESTONE_HOURS, type LanguageHoursRow } from "../../utils/languageHours";
 import { handlePracticeKeydown, refreshPracticeBadge, renderPracticePanel } from "./practice";
 import { CSV_COLUMNS, DEFAULT_CSV_COLUMNS, type CsvColumn } from "../../utils/watchCsv";
 import { CHANNEL_AVATARS_KEY, loadChannelAvatars, type ChannelAvatars } from "../../utils/channelAvatars";
-import { durationFieldHtml, installDialogs, installTooltips, wireCombobox, wireSteppers } from "../../utils/controls";
+import { durationFieldHtml, durationFieldMinutes, installDialogs, installTooltips, wireCombobox, wireSteppers } from "../../utils/controls";
 import {
   detectLanguageFromPlayerResponse,
   languageTextFromPlayerResponse,
@@ -6586,9 +6586,13 @@ function languageHoursSectionHtml(rows: LanguageHoursRow[], watch: WatchSummary)
         <div class="flex items-baseline gap-2"><span class="font-display text-[44px] leading-none tabular-nums text-text-primary">${escapeHtml(hoursWords(row.hours))}</span><span class="text-sm text-text-muted">of listening</span></div>
         ${milestoneTrackHtml(row, color === "var(--color-border-hover)" ? "var(--color-accent)" : color)}
         <p class="text-xs text-text-secondary m-0">${escapeHtml(paceWords(row))}</p>
+        <form class="hours-add flex items-center gap-2" data-language="${escapeHtml(row.language)}">
+          ${durationFieldHtml({ name: "amount", bareUnit: "h", step: 30, required: true, placeholder: "e.g. 3 h", ariaLabel: `Listening time to add for ${row.language}` })}
+          <button type="submit" class="chip h-8 text-xs">Add time</button>
+        </form>
         <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-muted">
           <span>${row.earlierHours > 0 ? `Includes ${escapeHtml(hoursWords(row.earlierHours))} from before` : "Counted since Study Harvester was installed"}</span>
-          <button type="button" class="hours-edit link-btn whitespace-nowrap" data-language="${escapeHtml(row.language)}">${row.earlierHours > 0 ? "Change" : "Add earlier hours"}</button>
+          <button type="button" class="hours-edit link-btn whitespace-nowrap" data-language="${escapeHtml(row.language)}">${row.earlierHours > 0 ? "Change" : "Set hours from before"}</button>
         </div>
         <form class="hours-form hidden items-center gap-2" data-language="${escapeHtml(row.language)}">
           <label class="text-xs text-text-secondary" for="hours-${escapeHtml(languageKey(row.language))}">Hours before</label>
@@ -7161,6 +7165,27 @@ function wireTimePanel(panel: HTMLElement): void {
 
   panel.addEventListener("submit", async (event) => {
     const form = event.target;
+    if (form instanceof HTMLFormElement && form.classList.contains("hours-add")) {
+      event.preventDefault();
+      const field = form.querySelector<HTMLInputElement>(".duration-input");
+      const minutes = field ? durationFieldMinutes(field) : null;
+      const language = form.dataset.language ?? "";
+      const before = lastTimeResponse?.hours?.find((row) => row.language === language)?.earlierHours ?? 0;
+      if (!field || minutes === null || minutes < 1) return;
+      await browser.runtime.sendMessage({ action: "set-earlier-hours", language, hours: before + minutes / 60 });
+      field.value = "";
+      // Focus would keep the card from repainting with the new total.
+      field.blur();
+      await renderTimePanel();
+      showToast(`Added ${formatDurationInput(minutes)} to ${language}`, {
+        label: "Undo",
+        run: async () => {
+          await browser.runtime.sendMessage({ action: "set-earlier-hours", language, hours: before });
+          await renderTimePanel();
+        },
+      });
+      return;
+    }
     if (form instanceof HTMLFormElement && form.classList.contains("hours-form")) {
       event.preventDefault();
       const hours = Number(new FormData(form).get("hours"));

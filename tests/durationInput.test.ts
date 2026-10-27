@@ -44,3 +44,13 @@ describe("stepDurationMinutes", () => {
     expect(stepDurationMinutes(5, -1)).toBe(1);
   });
 });
+
+describe("parseDurationMinutes with hours as the bare unit", () => {
+  test("a bare number is hours, units still win", () => {
+    expect(parseDurationMinutes("3", "h")).toBe(180);
+    expect(parseDurationMinutes("1.5", "h")).toBe(90);
+    expect(parseDurationMinutes("45 min", "h")).toBe(45);
+    expect(parseDurationMinutes("1h30", "h")).toBe(90);
+    expect(parseDurationMinutes("1:30", "h")).toBe(90);
+  });
+});

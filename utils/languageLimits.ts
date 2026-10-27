@@ -76,10 +76,10 @@ export function cleanLanguageLimits(raw: unknown): LanguageLimit[] {
 const UNIT_MINUTES: Record<string, number> = { h: 60, hr: 60, hrs: 60, hour: 60, hours: 60, m: 1, min: 1, mins: 1, minute: 1, minutes: 1 };
 
 /**
- * Reads a daily amount typed the way people say it: "45", "45 min", "3h", "1h30", "1:30", "2.5 h".
- * A bare number is minutes, except right after hours ("1h 30"). Returns null when the text is not a time.
+ * Reads an amount typed the way people say it: "45", "45 min", "3h", "1h30", "1:30", "2.5 h".
+ * A bare number is in `bareUnit` (minutes by default), except right after hours ("1h 30"). Returns null when the text is not a time.
  */
-export function parseDurationMinutes(text: string): number | null {
+export function parseDurationMinutes(text: string, bareUnit: "min" | "h" = "min"): number | null {
   const value = text.trim().toLowerCase().replace(",", ".");
   if (!value) return null;
   const clock = /^(\d+):([0-5]?\d)$/.exec(value);
@@ -87,10 +87,11 @@ export function parseDurationMinutes(text: string): number | null {
   const part = /(\d+(?:\.\d+)?)\s*([a-z]*)\s*/y;
   let total = 0;
   let lastUnit = 0;
+  const bare = /^\d+(?:\.\d+)?$/.test(value) && bareUnit === "h" ? 60 : 1;
   while (part.lastIndex < value.length) {
     const match = part.exec(value);
     if (!match) return null;
-    const unit = match[2] ? UNIT_MINUTES[match[2]] : lastUnit === 1 ? null : 1;
+    const unit = match[2] ? UNIT_MINUTES[match[2]] : lastUnit === 1 ? null : bare;
     if (!unit) return null;
     total += Number(match[1]) * unit;
     lastUnit = unit;

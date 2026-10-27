@@ -66,7 +66,7 @@ export async function saveLanguageHours(store: LanguageHoursStore): Promise<void
 export function setEarlierHours(store: LanguageHoursStore, language: string, hours: number): LanguageHoursStore {
   const earlier = { ...store.earlier };
   const key = languageKey(language);
-  if (Number.isFinite(hours) && hours > 0) earlier[key] = Math.min(Math.round(hours * 10) / 10, MAX_EARLIER_HOURS);
+  if (Number.isFinite(hours) && hours > 0) earlier[key] = Math.min(Math.round(hours * 100) / 100, MAX_EARLIER_HOURS);
   else delete earlier[key];
   return { ...store, earlier };
 }

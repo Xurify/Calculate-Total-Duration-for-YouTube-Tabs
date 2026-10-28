@@ -44,7 +44,7 @@ export function renderReadingListCard(item: ReadingListItem): string {
         <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
         YouTube Study
       </span>`
-    : `<span class="text-[10px] bg-surface-elevated border border-border text-text-secondary px-2 py-0.5 rounded-full font-medium">
+    : `<span class="text-[10px] bg-surface-elevated border border-border text-text-secondary px-2 py-0.5 rounded font-medium">
         ${escapeHtml(domain)}
       </span>`;
 

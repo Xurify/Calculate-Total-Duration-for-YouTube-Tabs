@@ -16,7 +16,8 @@ import { orderedSections, partitionLiveVideosBySection } from "./sections";
 import { applyTabListCheckboxIndeterminateFromAttr, updateSelectionUI } from "./selection";
 import { liveHeroTime, renderSidebar, setDeskHero, syncTopNavState } from "./sidebar";
 import { sortSessionTabsForDisplay, sortVideosForDisplay, videoGroupKey } from "./sorting";
-import { plural } from "./time/html";
+import { languageTagInnerHtml, plural } from "./time/html";
+import { syncCompactHeader } from "./compact-header";
 import { renderTimePanel, scheduleTimeRefresh } from "./time/panel";
 import { showToast } from "./toast";
 import {
@@ -152,13 +153,11 @@ export function updateLiveTabListCardsFromState() {
     const languageLabel = video.languageName ? video.languageName.split("(")[0].trim() : "";
     const langEl = card.querySelector(".manager-card-language") as HTMLElement | null;
     if (langEl) {
-      if (languageLabel) {
-        langEl.textContent = languageLabel;
-        langEl.classList.remove("hidden");
-      } else {
-        langEl.textContent = "";
-        langEl.classList.add("hidden");
+      if (langEl.dataset.label !== languageLabel) {
+        langEl.dataset.label = languageLabel;
+        langEl.innerHTML = languageTagInnerHtml(languageLabel);
       }
+      langEl.classList.toggle("hidden", !languageLabel);
     }
   });
 }
@@ -307,7 +306,8 @@ function renderMain() {
   if (app.isSessionsView) {
     if (viewToolbar) viewToolbar.classList.add("hidden");
     headerTitle.innerText = "sets of tabs kept for later";
-    headerStats.innerText = "Open one to put it on the desk, or add today's tabs to it.";
+    // With no sessions the empty state below explains them; a line about opening one would point at nothing.
+    headerStats.innerText = app.savedSessionsCount === 0 ? "" : "Open one to put it on the desk, or add the open tabs to it.";
     setDeskHero({
       kicker: "Saved sessions",
       title: "",
@@ -440,6 +440,7 @@ export function render() {
     renderTimeout = null;
     renderSidebar();
     renderMain();
+    syncCompactHeader();
     if (!app.selectedSession && app.skippedTabListDom) updateLiveTabListCardsFromState();
     updateSelectionUI();
     if (app.tabListContainerInnerHtmlUpdated) {

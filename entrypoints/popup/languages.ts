@@ -1,23 +1,14 @@
 import { VideoData } from "../../utils/storage";
 import { formatDurationWords } from "../../utils/format";
 import { loadFocusLanguages, OTHER_LANGUAGES } from "../../utils/focusLanguages";
-import { languageCodeOf, languageFlagHtml } from "../../utils/languageFlags";
+import { englishLanguageName, languageCodeOf, languageFlagHtml } from "../../utils/languageFlags";
+import { languageColor, NO_LANGUAGE_COLOR } from "../../utils/languageColor";
 import { isGoal, languageKey, type LanguageTodayRow } from "../../utils/languageLimits";
 import { escapeHtml as escapeText } from "../../utils/timeUi";
 import { popup } from "./state";
 import { updateVideoListCardsFromState } from "./video-list";
 import { getEffectiveWatchedSeconds } from "./videos";
 
-const POPUP_LANGUAGE_PALETTE = [
-  "var(--section-coral)",
-  "var(--section-amber)",
-  "var(--section-lime)",
-  "var(--section-teal)",
-  "var(--section-sky)",
-  "var(--section-indigo)",
-  "var(--section-violet)",
-  "var(--section-rose)",
-];
 
 export function popupLanguageLabel(video: VideoData): string | null {
   const stripped = video.languageName ? video.languageName.split("(")[0].trim() : "";
@@ -41,17 +32,8 @@ function popupLanguageKey(label: string): string {
   return languageCodeOf(label) ?? languageKey(label);
 }
 
-let languageDisplayNames: Intl.DisplayNames | null = null;
-
 function popupLanguageName(row: PopupLanguageRow): string {
-  const code = languageCodeOf(row.flagSource) ?? languageCodeOf(row.label);
-  let name = row.label;
-  if (code) {
-    try {
-      languageDisplayNames ??= new Intl.DisplayNames([navigator.language, "en"], { type: "language" });
-      name = languageDisplayNames.of(code) ?? name;
-    } catch {}
-  }
+  const name = englishLanguageName(row.flagSource) ?? englishLanguageName(row.label) ?? row.label;
   return name.charAt(0).toLocaleUpperCase() + name.slice(1);
 }
 
@@ -69,9 +51,8 @@ function popupLanguageRows(): PopupLanguageRow[] {
     rows.set(key, row);
   }
   let queued = Array.from(rows.values()).sort((a, b) => b.seconds - a.seconds);
-  let colorIndex = 0;
   for (const row of queued) {
-    row.color = !row.key ? "var(--color-border-hover)" : POPUP_LANGUAGE_PALETTE[colorIndex++ % POPUP_LANGUAGE_PALETTE.length];
+    row.color = !row.key ? NO_LANGUAGE_COLOR : languageColor(row.flagSource || row.label);
   }
   // Rules come first from the background, so a language with a goal or limit keeps that row over a plain one.
   for (const today of languageToday) {

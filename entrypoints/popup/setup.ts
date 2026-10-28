@@ -20,8 +20,8 @@ export function setupApp() {
         </div>
         <div class="mt-2 flex flex-col gap-1.5">
           <div class="flex items-baseline justify-between gap-3">
-            <div class="font-display text-[32px] leading-none tracking-[-0.02em] text-text-primary"><span id="stat-remaining">0 min</span> <span class="text-text-muted">left</span></div>
-            <span class="text-[12px] text-text-secondary tabular-nums whitespace-nowrap"><span id="stat-watched-pct" class="font-semibold text-text-primary">0 %</span> watched</span>
+            <div class="font-display text-[32px] leading-none tracking-[-0.02em] text-text-primary"><span id="stat-remaining">0 min</span> <span id="stat-remaining-suffix" class="text-text-muted">left</span></div>
+            <span id="stat-watched" class="text-[12px] text-text-secondary tabular-nums whitespace-nowrap"><span id="stat-watched-pct" class="font-semibold text-text-primary">0 %</span> watched</span>
           </div>
           <div class="popup-langs" role="table" aria-label="Time by language">
             <div class="popup-langs-row popup-langs-head" role="row">
@@ -79,7 +79,7 @@ export function setupApp() {
       <div id="video-list" class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-2 pb-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent"></div>
 
       <footer class="shrink-0 px-3 py-2.5 border-t border-border bg-surface flex items-center gap-2">
-        <button id="popup-stage-study" type="button" class="flex-1 h-[38px] rounded-[10px] border-0 bg-accent text-on-accent text-[13px] font-semibold flex items-center justify-center gap-2 cursor-pointer hover:bg-accent-hover transition-colors active:scale-[0.98]" title="Start a focused study session from this window's tabs">
+        <button id="popup-stage-study" type="button" class="flex-1 h-[38px] rounded-[10px] border-0 bg-accent text-on-accent text-[13px] font-semibold flex items-center justify-center gap-2 cursor-pointer hover:bg-accent-hover transition-colors active:scale-[0.98] disabled:opacity-45 disabled:cursor-default disabled:hover:bg-accent disabled:active:scale-100" title="Start a focused study session from this window's tabs">
           <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           Start study session
         </button>

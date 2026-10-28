@@ -1,5 +1,6 @@
 import { VideoData } from "../../utils/storage";
 import { formatDurationWords } from "../../utils/format";
+import { loadFocusLanguages, OTHER_LANGUAGES } from "../../utils/focusLanguages";
 import { languageCodeOf, languageFlagHtml } from "../../utils/languageFlags";
 import { isGoal, languageKey, type LanguageTodayRow } from "../../utils/languageLimits";
 import { escapeHtml as escapeText } from "../../utils/timeUi";
@@ -67,7 +68,7 @@ function popupLanguageRows(): PopupLanguageRow[] {
     row.watched += getEffectiveWatchedSeconds(video);
     rows.set(key, row);
   }
-  const queued = Array.from(rows.values()).sort((a, b) => b.seconds - a.seconds);
+  let queued = Array.from(rows.values()).sort((a, b) => b.seconds - a.seconds);
   let colorIndex = 0;
   for (const row of queued) {
     row.color = !row.key ? "var(--color-border-hover)" : POPUP_LANGUAGE_PALETTE[colorIndex++ % POPUP_LANGUAGE_PALETTE.length];
@@ -84,24 +85,33 @@ function popupLanguageRows(): PopupLanguageRow[] {
       queued.push(extra);
     }
   }
+  if (focusLanguages.length > 0) {
+    const followed = queued.filter((row) => row.key && focusLanguages.includes(row.key));
+    const rest = queued.filter((row) => !followed.includes(row));
+    queued = rest.length > 0 ? [...followed, foldedRow(OTHER_LANGUAGES, rest)] : followed;
+  }
   if (queued.length <= POPUP_LANGUAGE_ROWS) return queued;
   // A language with a rule stays visible so its warning colour isn't folded away.
   const keep = new Set(queued.filter((row) => row.today?.minutes != null).slice(0, POPUP_LANGUAGE_ROWS - 1));
   for (const row of queued) if (keep.size < POPUP_LANGUAGE_ROWS - 1) keep.add(row);
   const shown = queued.filter((row) => keep.has(row));
   const rest = queued.filter((row) => !shown.includes(row));
-  const other: PopupLanguageRow = {
+  return [...shown, foldedRow(`${rest.length} more`, rest)];
+}
+
+function foldedRow(label: string, rows: PopupLanguageRow[]): PopupLanguageRow {
+  const folded: PopupLanguageRow = {
     key: "",
-    label: `${rest.length} more`,
+    label,
     flagSource: "",
-    seconds: rest.reduce((sum, row) => sum + row.seconds, 0),
-    watched: rest.reduce((sum, row) => sum + row.watched, 0),
+    seconds: rows.reduce((sum, row) => sum + row.seconds, 0),
+    watched: rows.reduce((sum, row) => sum + row.watched, 0),
     today: null,
     color: "var(--color-border-hover)",
   };
-  const otherToday = rest.reduce((sum, row) => sum + (row.today?.usedSeconds ?? 0), 0);
-  if (otherToday > 0) other.today = { language: other.label, usedSeconds: otherToday, level: null };
-  return [...shown, other];
+  const today = rows.reduce((sum, row) => sum + (row.today?.usedSeconds ?? 0), 0);
+  if (today > 0) folded.today = { language: label, usedSeconds: today, level: null };
+  return folded;
 }
 
 function popupTodayCellHtml(row: PopupLanguageRow): string {
@@ -146,12 +156,13 @@ export function renderPopupLanguages(): void {
 let lastLanguagesHtml = "";
 
 let languageToday: LanguageTodayRow[] = [];
+let focusLanguages: string[] = [];
 
 export function loadLanguageToday(): void {
-  void browser.runtime
-    .sendMessage({ action: "get-language-today" })
-    .then((response: { rows?: LanguageTodayRow[] } | undefined) => {
+  void Promise.all([browser.runtime.sendMessage({ action: "get-language-today" }), loadFocusLanguages().catch(() => [])])
+    .then(([response, focus]: [{ rows?: LanguageTodayRow[] } | undefined, string[]]) => {
       languageToday = response?.rows ?? [];
+      focusLanguages = focus;
       renderPopupLanguages();
       updateVideoListCardsFromState();
     })

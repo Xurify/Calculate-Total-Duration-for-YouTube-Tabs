@@ -8,6 +8,7 @@ import {
   DETECTING_LANGUAGE,
   languageColor,
   sessionTabLanguageLabel,
+  sessionTabSpokenLanguage,
   tally,
   UNKNOWN_LANGUAGE,
 } from "./facets";
@@ -75,7 +76,7 @@ export function sessionDisplayName(session: SavedSession): { title: string; cust
   const match = session.name.match(AUTO_SESSION_NAME);
   if (!match && session.name.trim()) return { title: session.name, custom: true };
   if (match?.[1]) return { title: match[1].trim(), custom: true };
-  const languages = Array.from(tally(session.tabs ?? [], sessionTabLanguageLabel, (tab) => tab.seconds ?? 0).entries())
+  const languages = Array.from(tally(session.tabs ?? [], sessionTabSpokenLanguage, (tab) => tab.seconds ?? 0).entries())
     .filter(([label]) => label !== UNKNOWN_LANGUAGE && label !== DETECTING_LANGUAGE)
     .sort((a, b) => b[1].seconds - a[1].seconds)
     .map(([label]) => label);

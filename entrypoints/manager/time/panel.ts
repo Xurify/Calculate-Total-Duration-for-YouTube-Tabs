@@ -18,10 +18,12 @@ import {
   type LanguageLimit,
 } from "../../../utils/languageLimits";
 import { CHANNEL_AVATARS_KEY } from "../../../utils/channelAvatars";
+import { focusHoursRows, focusWatchSummary, OTHER_LANGUAGES } from "../../../utils/focusLanguages";
 import { durationFieldMinutes, wireCombobox, wireSteppers } from "../../../utils/controls";
 import { app } from "../state";
 import { showConfirm } from "../dialogs";
 import { UNKNOWN_LANGUAGE } from "../facets";
+import { openSettings } from "../settings";
 import { setDeskHero } from "../sidebar";
 import { openExportModal, wireExportModal } from "./export";
 import { languageDot, plural, timeAgoWords } from "./html";
@@ -35,6 +37,8 @@ import { downloadText, escapeHtml } from "../util";
 
 export let timeRange: 7 | 30 | 90 = 7;
 export let lastTimeResponse: TimeSummaryResponse | null = null;
+/** Every watched language, before the ones outside Settings' list fold into "Other". */
+let watchedLanguageLabels: string[] = [];
 let timePanelWired = false;
 export let showAllChannels = false;
 export let openChannel: string | null = null;
@@ -239,11 +243,14 @@ export async function renderTimePanel(): Promise<void> {
     return;
   }
   if (!app.isTimeView) return;
+  watchedLanguageLabels = data.watch.byLanguage.map((row) => row.label);
+  data.watch = focusWatchSummary(data.watch, app.focusLanguages);
+  if (data.hours) data.hours = focusHoursRows(data.hours, app.focusLanguages);
   lastTimeResponse = data;
   const { watch } = data;
   const headerStats = document.getElementById("current-view-stats");
   if (headerStats) {
-    const stats = watch.total.videos > 0 ? [plural(watch.total.videos, "video"), plural(watch.byLanguage.length, "language"), plural(watch.byChannel.length, "channel")].join(" · ") : "";
+    const stats = watch.total.videos > 0 ? [plural(watch.total.videos, "video"), plural(watch.byLanguage.filter((row) => row.label !== OTHER_LANGUAGES).length, "language"), plural(watch.byChannel.length, "channel")].join(" · ") : "";
     if (headerStats.textContent !== stats) headerStats.textContent = stats;
   }
   setDeskHero({
@@ -356,7 +363,7 @@ function wireAddRuleLanguage(box: HTMLElement): void {
   if (!languageInput) return;
   wireCombobox(languageInput, () => {
     const taken = new Set((lastTimeResponse?.limits ?? []).filter((rule) => (newRuleKind === "goal") === isGoal(rule)).map((rule) => languageKey(rule.language)));
-    return (lastTimeResponse?.watch.byLanguage ?? []).map((row) => row.label).filter((label) => label !== UNKNOWN_LANGUAGE && !taken.has(languageKey(label)));
+    return watchedLanguageLabels.filter((label) => label !== UNKNOWN_LANGUAGE && !taken.has(languageKey(label)));
   });
 }
 
@@ -470,6 +477,10 @@ function wireTimePanel(panel: HTMLElement): void {
       await browser.tabs.create({ url: "https://mandalamethod.vercel.app/" });
       return;
     }
+    if (target.closest("#time-choose-languages")) {
+      openSettings("settings-languages");
+      return;
+    }
     if (target.closest("#time-retry")) {
       await renderTimePanel();
       return;
@@ -534,8 +545,8 @@ function wireTimePanel(panel: HTMLElement): void {
     const minutes = parseDurationMinutes(String(fields.get("minutes") ?? ""));
     if (!language || minutes === null || minutes < 1 || minutes > MAX_LIMIT_MINUTES) return;
     // Pick up the label as the Time page spells it, so "english" still matches "English".
-    const known = lastTimeResponse?.watch.byLanguage.find((row) => languageKey(row.label) === languageKey(language));
-    const rule: LanguageLimit = newRuleKind === "goal" ? { language: known?.label ?? language, minutes, kind: "goal" } : { language: known?.label ?? language, minutes };
+    const known = watchedLanguageLabels.find((label) => languageKey(label) === languageKey(language));
+    const rule: LanguageLimit = newRuleKind === "goal" ? { language: known ?? language, minutes, kind: "goal" } : { language: known ?? language, minutes };
     const others = plainRules().filter((each) => ruleKey(each) !== ruleKey(rule));
     form.querySelector<HTMLInputElement>("#time-rule-language")!.value = "";
     await saveDailyRules([...others, rule]);

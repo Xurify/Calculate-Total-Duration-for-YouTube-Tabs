@@ -1,4 +1,5 @@
 import type { WatchSummary } from "../../../utils/watchLog";
+import { OTHER_LANGUAGES } from "../../../utils/focusLanguages";
 import { languageFlagHtml } from "../../../utils/languageFlags";
 import { UNKNOWN_LANGUAGE } from "../facets";
 import { FACET_PALETTE } from "../palette";
@@ -91,7 +92,7 @@ export function languageDot(color: string): string {
 /** One colour per language for the whole page, in the order of time spent, so charts and lists agree. */
 export function languageColorMap(watch: WatchSummary): Map<string, string> {
   const colors = new Map<string, string>();
-  watch.byLanguage.forEach((row, index) => colors.set(row.label, row.label === UNKNOWN_LANGUAGE ? "var(--color-border-hover)" : FACET_PALETTE[index % FACET_PALETTE.length]));
+  watch.byLanguage.forEach((row, index) => colors.set(row.label, row.label === UNKNOWN_LANGUAGE || row.label === OTHER_LANGUAGES ? "var(--color-border-hover)" : FACET_PALETTE[index % FACET_PALETTE.length]));
   return colors;
 }
 

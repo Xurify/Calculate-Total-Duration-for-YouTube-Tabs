@@ -61,7 +61,7 @@ export interface PlayerResponseForLanguage {
 }
 
 /** Bump when detection changes so languages cached by older logic are detected again. */
-export const LANGUAGE_DETECTION_VERSION = 4;
+export const LANGUAGE_DETECTION_VERSION = 5;
 
 const NO_LANGUAGE: DetectedLanguage = { language: null, languageName: null };
 
@@ -204,7 +204,9 @@ function languageFromDefaultAudioTrack(
   const captionIndex = audio.defaultCaptionTrackIndex;
   if (typeof captionIndex === "number") {
     const track = captionTracks[captionIndex];
-    if (track?.languageCode) return toDetected(track);
+    // YouTube points this at its own speech-recognition track too, which hears singing in a
+    // language it lacks as some other one (a Croatian song as French).
+    if (track?.languageCode) return track.kind === "asr" ? { ...toDetected(track), weak: true } : toDetected(track);
   }
   return null;
 }
@@ -278,9 +280,11 @@ export function detectLanguageFromPlayerResponse(
   if (fromOriginalAudio) return fromOriginalAudio;
 
   const fromDefaultAudioTrack = languageFromDefaultAudioTrack(playerResponse, captionTracks);
-  if (fromDefaultAudioTrack) return fromDefaultAudioTrack;
+  if (fromDefaultAudioTrack && !fromDefaultAudioTrack.weak) return fromDefaultAudioTrack;
 
-  return languageFromCaptionTracks(captionTracks, extractLanguageHintsFromPlayerResponse(playerResponse));
+  const fromCaptionTracks = languageFromCaptionTracks(captionTracks, extractLanguageHintsFromPlayerResponse(playerResponse));
+  if (fromCaptionTracks.language && !fromCaptionTracks.weak) return fromCaptionTracks;
+  return fromDefaultAudioTrack ?? fromCaptionTracks;
 }
 
 export function languageTextFromPlayerResponse(

@@ -63,6 +63,8 @@ interface AppState {
   sectionHeaderContextTarget: { sectionId: string } | null;
   deskChannelAvatars: ChannelAvatars;
   languageOverrides: LanguageOverrides;
+  /** Language keys picked in Settings; empty means every language gets its own row. */
+  focusLanguages: string[];
   lastFacetRailHtml: string;
   planBudgetMinutes: number | null;
   focusedRowKey: string | null;
@@ -109,6 +111,7 @@ export const app: AppState = {
   sectionHeaderContextTarget: null,
   deskChannelAvatars: {},
   languageOverrides: emptyLanguageOverrides(),
+  focusLanguages: [],
   lastFacetRailHtml: "",
   planBudgetMinutes: 45,
   focusedRowKey: null,

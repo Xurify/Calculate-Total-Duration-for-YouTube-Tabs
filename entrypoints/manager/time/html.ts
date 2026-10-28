@@ -1,4 +1,5 @@
 import type { WatchSummary } from "../../../utils/watchLog";
+import { OTHER_LANGUAGES } from "../../../utils/focusLanguages";
 import { englishLanguageName, languageFlagHtml } from "../../../utils/languageFlags";
 import { UNKNOWN_LANGUAGE } from "../facets";
 import { languageColor as sharedLanguageColor, NO_LANGUAGE_COLOR } from "../../../utils/languageColor";
@@ -95,7 +96,7 @@ export function languageDot(color: string): string {
 
 export function languageColorMap(watch: WatchSummary): Map<string, string> {
   const colors = new Map<string, string>();
-  watch.byLanguage.forEach((row) => colors.set(row.label, row.label === UNKNOWN_LANGUAGE ? NO_LANGUAGE_COLOR : sharedLanguageColor(row.label)));
+  watch.byLanguage.forEach((row) => colors.set(row.label, row.label === UNKNOWN_LANGUAGE || row.label === OTHER_LANGUAGES ? NO_LANGUAGE_COLOR : sharedLanguageColor(row.label)));
   return colors;
 }
 

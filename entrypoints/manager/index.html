@@ -175,6 +175,18 @@
             </button>
             <h3 id="settings-title" class="font-display text-2xl font-medium text-text-primary mb-2">Settings</h3>
 
+            <div class="settings-group-label">Languages</div>
+            <div class="settings-group" id="settings-languages">
+                <div class="py-3">
+                    <div class="flex items-baseline justify-between gap-4">
+                        <div class="text-sm font-medium text-text-primary">Languages you follow</div>
+                        <button type="button" id="focus-languages-clear" class="link-btn text-xs hidden">Show all</button>
+                    </div>
+                    <div id="focus-languages-hint" class="text-xs text-text-muted">Pick the ones you care about. The rest is still counted, as Other.</div>
+                    <div id="focus-language-list" class="focus-language-list mt-3"></div>
+                </div>
+            </div>
+
             <div class="settings-group-label">Display</div>
             <div class="settings-group">
                 <div class="flex items-center justify-between gap-4 py-3">

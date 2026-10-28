@@ -6,6 +6,7 @@ import { refreshPracticeBadge } from "./practice";
 import { CHANNEL_AVATARS_KEY, loadChannelAvatars, type ChannelAvatars } from "../../utils/channelAvatars";
 import { installDialogs, installTooltips } from "../../utils/controls";
 import { loadLanguageOverrides } from "../../utils/languageOverrides";
+import { FOCUS_LANGUAGES_KEY, loadFocusLanguages, parseFocusLanguages } from "../../utils/focusLanguages";
 import { app } from "./state";
 import { channelLetterHtml } from "./avatars";
 import { mountDeskSelects, wireDeskToolbar, wireViewControls } from "./desk-controls";
@@ -18,7 +19,7 @@ import { render } from "./render";
 import { wireSections } from "./sections";
 import { wireSessionContextMenu } from "./session-menu";
 import { refreshSavedSessionsSidebar } from "./sessions-sidebar";
-import { wireSettings } from "./settings";
+import { applyFocusLanguages, wireSettings } from "./settings";
 import { wireSidebarClicks } from "./sidebar";
 import { wireCompactHeader } from "./compact-header";
 import { wireStudyModal } from "./study-session";
@@ -95,6 +96,10 @@ document.addEventListener("DOMContentLoaded", () => {
     app.lastFacetRailHtml = "";
     app.lastTabListFingerprint = "";
     render();
+  });
+  void loadFocusLanguages().then(applyFocusLanguages);
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes[FOCUS_LANGUAGES_KEY]) applyFocusLanguages(parseFocusLanguages(changes[FOCUS_LANGUAGES_KEY].newValue));
   });
   void refreshSavedSessionsSidebar().then(() => fetchTabs());
   void browser.storage.local.get(PLAYBACK_RATE_KEY).then((data) => applyPlaybackRate(data[PLAYBACK_RATE_KEY]));

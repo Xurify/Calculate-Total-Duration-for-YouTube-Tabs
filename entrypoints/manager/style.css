@@ -869,6 +869,29 @@ body {
   background-color: var(--color-surface);
 }
 
+.focus-language-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.125rem 0.75rem;
+  max-height: 15rem;
+  overflow-y: auto;
+}
+
+.focus-language-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.3125rem 0;
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.focus-language-option .ui-check {
+  flex-shrink: 0;
+}
+
 .settings-details-summary {
   display: flex;
   align-items: center;

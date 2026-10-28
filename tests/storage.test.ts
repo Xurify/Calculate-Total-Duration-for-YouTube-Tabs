@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { applyMetadataBatchToCache, applyStorePatch, type StoreState } from "../utils/store";
+import { LANGUAGE_DETECTION_VERSION } from "../utils/captionLanguage";
 import {
   lookupCachedMetadata,
   mandalaStatusFor,
@@ -21,7 +22,7 @@ function cachedEntry(overrides: Partial<CachedMetadata> = {}): CachedMetadata {
     videoId: "abc123",
     language: "sk",
     languageName: "Slovak",
-    languageVersion: 4,
+    languageVersion: LANGUAGE_DETECTION_VERSION,
     chapters: [{ title: "Intro", startSeconds: 0 }],
     timestamp: 1,
     ...overrides,

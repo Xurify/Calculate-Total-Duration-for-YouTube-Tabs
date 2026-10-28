@@ -228,7 +228,7 @@ export function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs)
     watchStatTile("Ads", formatMinutesWords(total.adSeconds), "", "ads"),
   ].join("");
 
-  const longestLanguage = watch.byLanguage[0]?.seconds ?? 1;
+  const longestLanguage = Math.max(1, ...watch.byLanguage.map((row) => row.seconds));
   const languagesHtml = watch.byLanguage
     .map(
       (row) => `<li class="grid grid-cols-[minmax(0,12rem)_minmax(0,1fr)_auto] items-center gap-3 text-sm">
@@ -254,7 +254,7 @@ export function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs)
     <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">${tilesHtml}</div>
     ${dayBarsHtml(watch, colors)}
     <section class="flex flex-col gap-3">
-      ${timeSectionHeading("Languages", "", "languages")}
+      ${timeSectionHeading("Languages", `<button type="button" id="time-choose-languages" class="link-btn text-xs">${app.focusLanguages.length > 0 ? "Change languages" : "Choose languages"}</button>`, "languages")}
       ${languageShareHtml}
       <ul class="m-0 p-0 list-none flex flex-col gap-2">${languagesHtml}</ul>
     </section>

@@ -1,11 +1,113 @@
 import { savePrefs, clearCache, exportSessionsJson, importSessionsJson } from "../../utils/storage";
+import { focusKeyOf, saveFocusLanguages } from "../../utils/focusLanguages";
+import { languageCodeOf, languageFlagHtml } from "../../utils/languageFlags";
+import { formatMinutesWords, type TimeSummaryResponse } from "../../utils/timeUi";
 import { app } from "./state";
 import { showConfirm } from "./dialogs";
+import { DETECTING_LANGUAGE, UNKNOWN_LANGUAGE } from "./facets";
 import { render } from "./render";
 import { refreshSavedSessionsSidebar } from "./sessions-sidebar";
 import { fetchTabs, storeState } from "./tabs";
+import { renderTimePanel } from "./time/panel";
 import { showToast } from "./toast";
 import { escapeHtml } from "./util";
+
+/** How far back the language list looks for languages you have watched. */
+const FOCUS_CANDIDATE_DAYS = 90;
+let watchedLanguages: { label: string; seconds: number }[] = [];
+let displayNames: Intl.DisplayNames | null = null;
+
+function languageDisplayName(label: string): string {
+  const code = languageCodeOf(label);
+  let name = label;
+  if (code) {
+    try {
+      displayNames ??= new Intl.DisplayNames([navigator.language, "en"], { type: "language" });
+      name = displayNames.of(code) ?? label;
+    } catch {}
+  }
+  return name.charAt(0).toLocaleUpperCase() + name.slice(1);
+}
+
+function focusCandidates(): { key: string; label: string; seconds: number }[] {
+  const byKey = new Map<string, { key: string; label: string; seconds: number }>();
+  const add = (label: string, seconds: number) => {
+    if (!label || label === UNKNOWN_LANGUAGE || label === DETECTING_LANGUAGE) return;
+    const key = focusKeyOf(label);
+    const row = byKey.get(key) ?? { key, label, seconds: 0 };
+    row.seconds += seconds;
+    byKey.set(key, row);
+  };
+  for (const row of watchedLanguages) add(row.label, row.seconds);
+  for (const video of app.allVideos) {
+    const label = video.languageName ? video.languageName.split("(")[0].trim() : video.language ? video.language.toUpperCase() : "";
+    add(label, 0);
+  }
+  for (const key of app.focusLanguages) add(key, 0);
+  return [...byKey.values()].sort((first, second) => second.seconds - first.seconds || languageDisplayName(first.label).localeCompare(languageDisplayName(second.label)));
+}
+
+function renderFocusLanguageList(): void {
+  const list = document.getElementById("focus-language-list");
+  if (!list) return;
+  const chosen = new Set(app.focusLanguages);
+  const candidates = focusCandidates();
+  const keys = candidates.map((row) => row.key).join("|");
+  // Ticking a box only flips checks, so focus stays on the box and the list doesn't jump.
+  if (list.dataset.keys === keys && list.childElementCount > 0) {
+    for (const box of list.querySelectorAll<HTMLInputElement>("input[data-focus-key]")) box.checked = chosen.has(box.dataset.focusKey ?? "");
+  } else {
+    list.dataset.keys = keys;
+    list.innerHTML = candidates.length
+    ? candidates
+        .map((row) => {
+          const name = languageDisplayName(row.label);
+          return `<label class="focus-language-option" title="${escapeHtml(row.seconds >= 60 ? `${name}: ${formatMinutesWords(row.seconds)} in the last ${FOCUS_CANDIDATE_DAYS} days` : name)}">
+            <input type="checkbox" class="ui-check" data-focus-key="${escapeHtml(row.key)}"${chosen.has(row.key) ? " checked" : ""} />
+            ${languageFlagHtml(row.label, "lang-flag lang-flag--sm shrink-0")}<span class="truncate">${escapeHtml(name)}</span>
+          </label>`;
+        })
+        .join("")
+    : `<p class="text-xs text-text-muted m-0">Languages show up here once you watch something.</p>`;
+  }
+  document.getElementById("focus-languages-clear")?.classList.toggle("hidden", chosen.size === 0);
+  const hint = document.getElementById("focus-languages-hint");
+  if (hint) {
+    hint.textContent =
+      chosen.size === 0
+        ? "Pick the ones you care about. The rest is still counted, as Other."
+        : "Only these get their own rows and colours on the Time page, the desk and the popup. The rest is counted as Other.";
+  }
+}
+
+async function loadWatchedLanguages(): Promise<void> {
+  try {
+    const data = (await browser.runtime.sendMessage({ action: "get-time-summary", days: FOCUS_CANDIDATE_DAYS })) as TimeSummaryResponse | undefined;
+    watchedLanguages = data?.watch?.byLanguage.map((row) => ({ label: row.label, seconds: row.seconds })) ?? [];
+  } catch {
+    watchedLanguages = [];
+  }
+  renderFocusLanguageList();
+}
+
+export function applyFocusLanguages(keys: string[]): void {
+  app.focusLanguages = keys;
+  app.lastFacetRailHtml = "";
+  app.lastTabListFingerprint = "";
+  app.lastSavedSessionsFingerprint = "";
+  render();
+  void refreshSavedSessionsSidebar();
+  if (app.isTimeView) void renderTimePanel();
+  renderFocusLanguageList();
+}
+
+export function openSettings(scrollToId?: string): void {
+  app.isSettingsOpen = true;
+  render();
+  renderFocusLanguageList();
+  void loadWatchedLanguages();
+  if (scrollToId) document.getElementById(scrollToId)?.scrollIntoView({ block: "nearest" });
+}
 
 export function saveSettings(): void {
   void savePrefs({
@@ -19,9 +121,19 @@ export function saveSettings(): void {
 }
 
 export function wireSettings() {
-  document.getElementById("btn-settings")?.addEventListener("click", () => {
-    app.isSettingsOpen = true;
-    render();
+  document.getElementById("btn-settings")?.addEventListener("click", () => openSettings());
+
+  document.getElementById("focus-language-list")?.addEventListener("change", (event) => {
+    const box = event.target;
+    if (!(box instanceof HTMLInputElement) || !box.dataset.focusKey) return;
+    const key = box.dataset.focusKey;
+    const next = box.checked ? [...app.focusLanguages, key] : app.focusLanguages.filter((each) => each !== key);
+    applyFocusLanguages(next);
+    void saveFocusLanguages(next);
+  });
+  document.getElementById("focus-languages-clear")?.addEventListener("click", () => {
+    applyFocusLanguages([]);
+    void saveFocusLanguages([]);
   });
   const closeSettings = () => {
     if (!app.isSettingsOpen) return;

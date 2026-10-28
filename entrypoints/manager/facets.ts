@@ -1,6 +1,7 @@
 import { VideoData, type SavedSessionTab, type SessionSection } from "../../utils/storage";
 import { formatDurationWords, formatShortDuration, getVideoIdFromUrl } from "../../utils/format";
 import { languageFlagHtml } from "../../utils/languageFlags";
+import { focusLabelOf, OTHER_LANGUAGES } from "../../utils/focusLanguages";
 import { languageOverrideFor } from "../../utils/languageOverrides";
 import { app } from "./state";
 import { deskAvatarHtml } from "./avatars";
@@ -49,19 +50,28 @@ function languageLabelOf(languageName: string | null | undefined, code: string |
 
 function videoLanguageLabel(video: VideoData): string {
   const override = languageOverrideFor(app.languageOverrides, getVideoIdFromUrl(video.url), video.channelName);
-  if (override) return override.name;
+  if (override) return focusLabelOf(app.focusLanguages, override.name);
   if (video.language === undefined && !video.suspended) return DETECTING_LANGUAGE;
-  return languageLabelOf(video.languageName, video.language);
+  return focusLabelOf(app.focusLanguages, languageLabelOf(video.languageName, video.language));
+}
+
+/** The tab's own language, before languages outside Settings' list fold into "Other". */
+export function sessionTabSpokenLanguage(tab: SavedSessionTab): string {
+  const override = languageOverrideFor(app.languageOverrides, getVideoIdFromUrl(tab.url), tab.channelName);
+  return override ? override.name : languageLabelOf(tab.languageName, tab.language);
 }
 
 export function sessionTabLanguageLabel(tab: SavedSessionTab): string {
-  const override = languageOverrideFor(app.languageOverrides, getVideoIdFromUrl(tab.url), tab.channelName);
-  if (override) return override.name;
-  return languageLabelOf(tab.languageName, tab.language);
+  return focusLabelOf(app.focusLanguages, sessionTabSpokenLanguage(tab));
+}
+
+/** Real languages first by time, then the grey catch-alls. */
+function languageRank(label: string): number {
+  return label === DETECTING_LANGUAGE ? 3 : label === UNKNOWN_LANGUAGE ? 2 : label === OTHER_LANGUAGES ? 1 : 0;
 }
 
 export function languageColor(label: string): string {
-  if (label === UNKNOWN_LANGUAGE || label === DETECTING_LANGUAGE) return "var(--color-border-hover)";
+  if (label === UNKNOWN_LANGUAGE || label === DETECTING_LANGUAGE || label === OTHER_LANGUAGES) return "var(--color-border-hover)";
   const slot = languageColorSlots.get(label);
   return slot == null ? "var(--color-border-hover)" : FACET_PALETTE[slot % FACET_PALETTE.length];
 }
@@ -112,7 +122,7 @@ export function tally<T>(items: T[], keyOf: (item: T) => string, secondsOf: (ite
 
 export function assignLanguageColors(languages: Map<string, { count: number; seconds: number }>): void {
   const ordered = Array.from(languages.entries())
-    .filter(([label]) => label !== UNKNOWN_LANGUAGE && label !== DETECTING_LANGUAGE)
+    .filter(([label]) => languageRank(label) === 0)
     .sort((a, b) => b[1].seconds - a[1].seconds || a[0].localeCompare(b[0]));
   const stillPresent = new Set(ordered.map(([label]) => label));
   for (const label of Array.from(languageColorSlots.keys())) {
@@ -131,10 +141,7 @@ export function assignLanguageColors(languages: Map<string, { count: number; sec
 function languageRowsFrom(languages: Map<string, { count: number; seconds: number }>): FacetRow[] {
   assignLanguageColors(languages);
   return Array.from(languages.entries())
-    .sort((a, b) => {
-      const rank = (label: string) => (label === DETECTING_LANGUAGE ? 2 : label === UNKNOWN_LANGUAGE ? 1 : 0);
-      return rank(a[0]) - rank(b[0]) || b[1].seconds - a[1].seconds || a[0].localeCompare(b[0]);
-    })
+    .sort((a, b) => languageRank(a[0]) - languageRank(b[0]) || b[1].seconds - a[1].seconds || a[0].localeCompare(b[0]))
     .map(([label, entry]) => ({
       kind: "language",
       value: label,
@@ -142,7 +149,7 @@ function languageRowsFrom(languages: Map<string, { count: number; seconds: numbe
       count: entry.count,
       seconds: entry.seconds,
       color: languageColor(label),
-      muted: label === UNKNOWN_LANGUAGE || label === DETECTING_LANGUAGE,
+      muted: languageRank(label) > 0,
     }));
 }
 
@@ -373,8 +380,7 @@ export function renderTimeBar(): void {
     assignLanguageColors(languages);
     entries = Array.from(languages.entries()).map(([label, entry]) => ({ label, seconds: entry.seconds, count: entry.count }));
   }
-  const rank = (label: string) => (label === DETECTING_LANGUAGE ? 2 : label === UNKNOWN_LANGUAGE ? 1 : 0);
-  entries = entries.filter((entry) => entry.seconds > 0).sort((a, b) => rank(a.label) - rank(b.label) || b.seconds - a.seconds || a.label.localeCompare(b.label));
+  entries = entries.filter((entry) => entry.seconds > 0).sort((a, b) => languageRank(a.label) - languageRank(b.label) || b.seconds - a.seconds || a.label.localeCompare(b.label));
   const total = entries.reduce((sum, entry) => sum + entry.seconds, 0);
   if (total <= 0) {
     bar.innerHTML = "";

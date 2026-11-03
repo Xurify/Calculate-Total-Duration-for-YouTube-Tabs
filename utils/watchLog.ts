@@ -1,4 +1,5 @@
 import { cleanChannelAvatarUrl, type ChannelAvatars } from "./channelAvatars";
+import { englishLanguageName } from "./languageFlags";
 import { languageOverrideFor, type LanguageOverrides } from "./languageOverrides";
 import { dateKeyOf } from "./timeLog";
 import { newTypeId } from "./typeId";
@@ -134,6 +135,8 @@ export async function saveWatchLog(entries: WatchEntry[]): Promise<void> {
 
 export function languageLabelOf(languageName: string | null | undefined, code: string | null | undefined): string {
   const stripped = languageName ? languageName.split("(")[0].trim() : "";
+  const english = englishLanguageName(code) ?? englishLanguageName(stripped);
+  if (english) return english;
   if (stripped) return stripped;
   if (code) return code.toUpperCase();
   return UNKNOWN_LANGUAGE;

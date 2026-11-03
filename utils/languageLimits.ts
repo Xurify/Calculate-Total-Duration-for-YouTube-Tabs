@@ -1,3 +1,4 @@
+import { languageCodeOf } from "./languageFlags";
 import type { LanguageOverrides } from "./languageOverrides";
 import { dateKeyOf } from "./timeLog";
 import { entryLanguage, UNKNOWN_LANGUAGE, type WatchEntry } from "./watchLog";
@@ -42,8 +43,9 @@ export const MAX_LIMIT_MINUTES = 24 * 60;
 
 const LEVEL_RANK: Record<LimitLevel, number> = { near: 1, over: 2, met: 1 };
 
+/** Keyed by code where one is known, so a "Slovak" goal counts videos YouTube labelled "slovaki" or "sk". */
 export function languageKey(language: string): string {
-  return language.trim().toLowerCase();
+  return languageCodeOf(language) ?? language.trim().toLowerCase();
 }
 
 export function isGoal(rule: Pick<LanguageLimit, "kind">): boolean {

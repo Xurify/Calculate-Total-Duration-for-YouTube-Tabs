@@ -73,3 +73,21 @@ export function languageFlagHtml(language: string | null | undefined, className 
   const url = browser.runtime.getURL(`/flags/${id}.png` as PublicPath);
   return `<img src="${url}" alt="" width="16" height="12" class="${className}" draggable="false">`;
 }
+
+let englishNames: Intl.DisplayNames | null = null;
+
+/**
+ * YouTube names caption tracks in its own UI language ("slovaki", "inglise" on Estonian YouTube) while the
+ * extension speaks English, so every known language is shown by its English name.
+ */
+export function englishLanguageName(language: string | null | undefined): string | null {
+  const code = languageCodeOf(language);
+  if (!code) return null;
+  try {
+    englishNames ??= new Intl.DisplayNames(["en"], { type: "language" });
+    const name = englishNames.of(code);
+    return name && name.toLowerCase() !== code ? name : null;
+  } catch {
+    return null;
+  }
+}

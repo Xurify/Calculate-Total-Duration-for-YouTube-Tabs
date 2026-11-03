@@ -16,6 +16,7 @@ import {
   countItemsByVideoId,
   findSimilarSession,
   sessionsOverlapScore,
+  sessionVideoIds,
   sessionTotalSeconds,
   suggestSessionName,
   summarizeDuplicates,
@@ -24,7 +25,7 @@ import {
 } from "../../utils/sessions";
 import { app } from "./state";
 import { orderedSections, partitionSessionTabsBySection } from "./sections";
-import { refreshSavedSessionsSidebar, sessionDisplayName } from "./sessions-sidebar";
+import { AUTO_SESSION_NAME, refreshSavedSessionsSidebar, sessionDisplayName } from "./sessions-sidebar";
 import { createTabsBatched, filterUrlsMissingOnly, getOpenVideoIds } from "./tab-actions";
 import { plural } from "./time/html";
 import { showToast } from "./toast";
@@ -135,6 +136,7 @@ async function showRestoreSessionModal(session: SavedSession): Promise<RestoreSe
 
 interface SaveSessionModalOptions {
   defaultName: string;
+  tabs: SavedSessionTab[];
   tabCount: number;
   duplicateExtraTabs: number;
   sessions: SavedSession[];
@@ -158,7 +160,13 @@ async function showSaveSessionModal(options: SaveSessionModalOptions): Promise<S
       return;
     }
 
-    input.value = options.defaultName;
+    // An automatic "Session 10/27/26, 12:26 AM" name is shown by what it holds on the Saved sessions page,
+    // so the field offers that name as its placeholder instead of a timestamp nobody will see again.
+    const autoTitle = AUTO_SESSION_NAME.test(options.defaultName)
+      ? sessionDisplayName({ id: "", name: options.defaultName, savedAt: Date.now(), tabs: options.tabs }).title
+      : null;
+    input.value = autoTitle ? "" : options.defaultName;
+    input.placeholder = autoTitle ?? "Session name";
     const summaryParts = [`Saving ${options.tabCount} tab${options.tabCount === 1 ? "" : "s"} from this view`];
     if (options.duplicateExtraTabs > 0) {
       summaryParts.push(
@@ -174,8 +182,41 @@ async function showSaveSessionModal(options: SaveSessionModalOptions): Promise<S
       }))
     );
 
+    const incomingIds = sessionVideoIds(options.tabs);
+    const currentMode = () => [...modeInputs].find((r) => r.checked)?.value ?? "new";
+    /** Says what the chosen action does to the chosen session, so a merge that adds nothing or a replace that drops videos isn't a surprise. */
+    const syncHint = () => {
+      if (!hintEl) return;
+      const mode = currentMode();
+      const target = mode === "new" ? options.similarSession : options.sessions.find((s) => s.id === targetSelect.getValue());
+      if (!target) {
+        hintEl.classList.add("hidden");
+        return;
+      }
+      const name = sessionDisplayName(target).title;
+      const targetIds = sessionVideoIds(target.tabs ?? []);
+      let already = 0;
+      for (const id of incomingIds) if (targetIds.has(id)) already += 1;
+      const fresh = incomingIds.size - already;
+      const dropped = targetIds.size - already;
+      let text: string;
+      if (mode === "replace") {
+        text = dropped > 0
+          ? `"${name}" loses ${plural(dropped, "video")} that aren't on the desk now.`
+          : `"${name}" keeps all its videos and gets ${plural(fresh, "new one")}.`;
+      } else if (mode === "merge") {
+        text = fresh === 0
+          ? `All ${plural(incomingIds.size, "video")} are already in "${name}", so merging changes nothing.`
+          : `${already} of ${incomingIds.size} are already in "${name}". Merging adds ${plural(fresh, "new video")}.`;
+      } else {
+        text = `These videos are mostly saved already, in "${name}".`;
+      }
+      hintEl.textContent = text;
+      hintEl.classList.remove("hidden");
+    };
+
     const syncTargetVisibility = () => {
-      const mode = [...modeInputs].find((r) => r.checked)?.value ?? "new";
+      const mode = currentMode();
       const showTarget = mode === "replace" || mode === "merge";
       confirmBtn.textContent = mode === "replace" ? "Replace session" : mode === "merge" ? "Merge" : "Save";
       targetSelect.setHidden(!showTarget || options.sessions.length === 0);
@@ -184,15 +225,9 @@ async function showSaveSessionModal(options: SaveSessionModalOptions): Promise<S
       } else if (showTarget && options.sessions[0]) {
         targetSelect.setValue(options.sessions[0].id);
       }
+      syncHint();
     };
-
-    if (options.similarSession && hintEl) {
-      const pct = Math.round(options.similarScore * 100);
-      hintEl.textContent = `${pct}% of these videos are already in "${sessionDisplayName(options.similarSession).title}". Merging adds only the new ones.`;
-      hintEl.classList.remove("hidden");
-    } else if (hintEl) {
-      hintEl.classList.add("hidden");
-    }
+    app.onSaveSessionTargetChange = syncHint;
 
     if (options.similarSession) {
       // Merge keeps everything in both lists, so a wrong guess costs nothing.
@@ -209,6 +244,7 @@ async function showSaveSessionModal(options: SaveSessionModalOptions): Promise<S
       modal.classList.add("hidden");
       modal.classList.remove("flex", "items-center", "justify-center");
       modeInputs.forEach((r) => r.removeEventListener("change", syncTargetVisibility));
+      app.onSaveSessionTargetChange = null;
       resolve(result);
       cancelBtn.removeEventListener("click", onCancel);
       confirmBtn.removeEventListener("click", onConfirm);
@@ -266,7 +302,8 @@ async function executeSaveSession(
     return;
   }
   await saveSession(payload.name, tabs, secs);
-  showToast(`Saved "${payload.name}" (${plural(tabs.length, "video")})`);
+  const shownName = sessionDisplayName({ id: "", name: payload.name, savedAt: Date.now(), tabs }).title;
+  showToast(`Saved "${shownName}" (${plural(tabs.length, "video")})`);
 }
 
 export async function saveVideosAsSession(videos: VideoData[], windowLabel?: string): Promise<void> {
@@ -289,6 +326,7 @@ export async function saveVideosAsSession(videos: VideoData[], windowLabel?: str
   const defaultName = suggestSessionName(tabs, windowLabel, sections);
   const payload = await showSaveSessionModal({
     defaultName,
+    tabs,
     tabCount: tabs.length,
     duplicateExtraTabs,
     sessions,

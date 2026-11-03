@@ -59,6 +59,7 @@ export function buildMetadataForCache(
     paused: video.paused,
     volume: video.volume,
     muted: video.muted,
+    ...(video.language !== undefined ? { language: video.language, languageName: video.languageName } : {}),
   };
 }
 
@@ -73,9 +74,16 @@ export function applyProbedMetadataToVideo(
     paused?: boolean;
     volume?: number;
     muted?: boolean;
+    language?: string | null;
+    languageName?: string | null;
   }
 ): void {
   if (metadata.title) video.title = metadata.title;
+  // The content script knows the caption language; without it every row in the popup read "Unknown" until the desk had been opened.
+  if (metadata.language !== undefined) {
+    video.language = metadata.language;
+    video.languageName = metadata.languageName ?? null;
+  }
   if (metadata.channelName !== undefined) video.channelName = metadata.channelName;
   if (metadata.isLive) {
     markVideoAsLive(video);

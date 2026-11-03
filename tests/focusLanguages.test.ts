@@ -30,7 +30,7 @@ describe("focus languages", () => {
   test("folds the rest into one row without losing time", () => {
     const watch = summarizeWatch(entries, 7, NOW);
     const focused = focusWatchSummary(watch, ["sk", "et"]);
-    expect(focused.byLanguage.map((row) => row.label)).toEqual(["Slovak", "eesti", OTHER_LANGUAGES]);
+    expect(focused.byLanguage.map((row) => row.label)).toEqual(["Slovak", "Estonian", OTHER_LANGUAGES]);
     expect(focused.byLanguage.at(-1)).toEqual({ label: OTHER_LANGUAGES, seconds: 1320, videos: 3 });
     expect(focused.byLanguage.reduce((sum, row) => sum + row.seconds, 0)).toBe(focused.total.playedSeconds);
     const today = focused.days.at(-1)!;
@@ -41,6 +41,6 @@ describe("focus languages", () => {
 
   test("shows no Other row when everything watched is followed", () => {
     const watch = summarizeWatch(entries.slice(0, 2), 7, NOW);
-    expect(focusWatchSummary(watch, ["sk", "et"]).byLanguage.map((row) => row.label)).toEqual(["Slovak", "eesti"]);
+    expect(focusWatchSummary(watch, ["sk", "et"]).byLanguage.map((row) => row.label)).toEqual(["Slovak", "Estonian"]);
   });
 });

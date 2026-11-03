@@ -10,10 +10,18 @@ export function updateHeaderStats(
   totalWatched = 0
 ) {
   // Called every second; unchanged text is left alone so the header doesn't relayout on each tick.
-  setText(document.getElementById("stat-remaining"), formatDurationWords(totalRemaining));
+  const empty = popup.videoData.length === 0;
+  setText(document.getElementById("stat-remaining"), empty ? "No videos" : formatDurationWords(totalRemaining));
+  document.getElementById("stat-remaining-suffix")?.classList.toggle("hidden", empty);
+  document.getElementById("stat-watched")?.classList.toggle("invisible", empty);
+  const studyButton = document.getElementById("popup-stage-study") as HTMLButtonElement | null;
+  if (studyButton && studyButton.disabled !== empty) {
+    studyButton.disabled = empty;
+    studyButton.title = empty ? "Open a YouTube video first" : "Start a focused study session from this window's tabs";
+  }
   setText(document.getElementById("stat-total"), formatTime(totalSeconds));
   const countEl = document.getElementById("stat-video-count");
-  const countHtml = `<span class="font-semibold text-text-primary">${videoCount} video${videoCount === 1 ? "" : "s"}</span> · ${formatDurationWords(totalSeconds)} total`;
+  const countHtml = empty ? "" : `<span class="font-semibold text-text-primary">${videoCount} video${videoCount === 1 ? "" : "s"}</span> · ${formatDurationWords(totalSeconds)} total`;
   if (countEl && countEl.dataset.html !== countHtml) {
     countEl.dataset.html = countHtml;
     countEl.innerHTML = countHtml;

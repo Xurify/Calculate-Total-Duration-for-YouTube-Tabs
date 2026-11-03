@@ -171,7 +171,7 @@ function reviewCardHtml(now: number): string {
         ${
           revealed
             ? `<p class="practice-text">${sentenceTextHtml(sentence)}</p>${translation}`
-            : `<button type="button" class="practice-redacted" data-practice-action="reveal" aria-label="Text hidden. Show text (T)" title="Show text (T)">${redactedHtml(sentence.text)}</button>`
+            : `<button type="button" class="practice-redacted" data-practice-action="reveal" tabindex="-1" aria-hidden="true" title="Show text (T)">${redactedHtml(sentence.text)}</button>`
         }
         <p class="practice-status${message ? " text-danger" : ""}" role="status">
           <span>${escapeHtml(status)}</span>

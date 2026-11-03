@@ -10,7 +10,7 @@ import { escapeHtml } from "./util";
 export function duplicateBadgeHtml(url: string): string {
   const count = duplicateCountForUrl(app.scopeVideoIdCounts, url);
   if (count <= 1) return "";
-  return `<span class="text-[10px] bg-warning/15 text-warning border border-warning/30 px-1.5 py-0.5 rounded-full font-bold shrink-0 tabular-nums" title="This video appears ${count} times in this view">×${count}</span>`;
+  return `<span class="text-[10px] bg-warning/15 text-warning border border-warning/30 px-1.5 py-0.5 rounded font-bold shrink-0 tabular-nums" title="This video appears ${count} times in this view">×${count}</span>`;
 }
 
 function shouldShowWindowBadge(): boolean {
@@ -25,7 +25,7 @@ function windowLabelForVideo(video: VideoData): string | null {
 export function windowBadgeHtml(video: VideoData): string {
   const label = windowLabelForVideo(video);
   if (!label) return "";
-  return `<span class="text-[10px] bg-surface-elevated border border-border text-text-secondary px-1.5 py-0.5 rounded-full font-medium shrink-0 tabular-nums" title="Open in ${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+  return `<span class="text-[10px] bg-surface-elevated border border-border text-text-secondary px-1.5 py-0.5 rounded font-medium shrink-0 tabular-nums" title="Open in ${escapeHtml(label)}">${escapeHtml(label)}</span>`;
 }
 
 

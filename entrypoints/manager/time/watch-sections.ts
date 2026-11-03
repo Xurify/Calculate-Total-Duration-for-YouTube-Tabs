@@ -80,7 +80,7 @@ function dayBarsHtml(watch: WatchSummary, colors: Map<string, string>): string {
         .map((row) => `<span class="flex items-center gap-1.5">${languageMarkHtml(row.label, colorOfLanguage(colors, row.label))}${escapeHtml(row.label)}</span>`)
         .join("")
     : `<span class="flex items-center gap-1.5"><span class="legend-swatch bg-accent"></span>On screen</span><span class="flex items-center gap-1.5"><span class="legend-swatch bg-accent/35"></span>Background</span>`;
-  const modeHtml = `<span class="inline-flex gap-0.5 p-0.5 rounded-full border border-border bg-surface" role="group" aria-label="Split days by">
+  const modeHtml = `<span class="inline-flex gap-0.5 p-0.5 rounded-lg border border-border bg-surface" role="group" aria-label="Split days by">
     <button type="button" class="time-day-mode budget-chip" data-mode="language" aria-pressed="${byLanguage}">Language</button>
     <button type="button" class="time-day-mode budget-chip" data-mode="screen" aria-pressed="${!byLanguage}">Screen</button>
   </span>`;

@@ -13,16 +13,16 @@ describe("dayStatusOf", () => {
     { language: "English", minutes: 60 },
   ];
   test("all when every goal is reached and every limit kept", () => {
-    expect(dayStatusOf(rules, new Map([["slovak", 1800], ["estonian", 1200], ["english", 3600]]))).toBe("all");
+    expect(dayStatusOf(rules, new Map([["sk", 1800], ["et", 1200], ["en", 3600]]))).toBe("all");
   });
   test("some when a goal is reached but not everything", () => {
-    expect(dayStatusOf(rules, new Map([["slovak", 1800], ["english", 4000]]))).toBe("some");
+    expect(dayStatusOf(rules, new Map([["sk", 1800], ["en", 4000]]))).toBe("some");
   });
   test("none when no goal is reached", () => {
-    expect(dayStatusOf(rules, new Map([["english", 100]]))).toBe("none");
+    expect(dayStatusOf(rules, new Map([["en", 100]]))).toBe("none");
   });
   test("without rules a watched minute is enough", () => {
-    expect(dayStatusOf([], new Map([["english", 60]]))).toBe("all");
+    expect(dayStatusOf([], new Map([["en", 60]]))).toBe("all");
     expect(dayStatusOf([], undefined)).toBe("none");
   });
 });

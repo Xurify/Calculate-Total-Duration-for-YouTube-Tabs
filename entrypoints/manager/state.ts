@@ -42,6 +42,7 @@ interface AppState {
   sortSelectHandle: CustomSelectHandle | null;
   restoreTargetSelect: CustomSelectHandle | null;
   saveSessionTargetSelect: CustomSelectHandle | null;
+  onSaveSessionTargetChange: (() => void) | null;
   showDuplicatesOnly: boolean;
   /** Video-id counts for the current view scope (all windows, one window, or saved session). */
   scopeVideoIdCounts: Map<string, number>;
@@ -92,6 +93,7 @@ export const app: AppState = {
   sortSelectHandle: null,
   restoreTargetSelect: null,
   saveSessionTargetSelect: null,
+  onSaveSessionTargetChange: null,
   showDuplicatesOnly: false,
   scopeVideoIdCounts: new Map<string, number>(),
   lastTabListFingerprint: "",

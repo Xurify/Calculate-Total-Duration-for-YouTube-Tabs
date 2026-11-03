@@ -1,3 +1,4 @@
+import { englishLanguageName } from "./languageFlags";
 import { isGoal, languageKey, type LanguageLimit } from "./languageLimits";
 import type { LanguageOverrides } from "./languageOverrides";
 import { entryLanguage, languageLabelOf, UNKNOWN_LANGUAGE, type WatchEntry } from "./watchLog";
@@ -42,7 +43,10 @@ function cleanNumbers(raw: unknown, max: number): Record<string, number> {
   const clean: Record<string, number> = {};
   if (!raw || typeof raw !== "object") return clean;
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof value === "number" && Number.isFinite(value) && value > 0) clean[languageKey(key)] = Math.min(value, max);
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) continue;
+    // Older stores keyed by name ("slovak", "slovaki") meet on one code now, so their hours add up.
+    const code = languageKey(key);
+    clean[code] = Math.min((clean[code] ?? 0) + value, max);
   }
   return clean;
 }
@@ -119,7 +123,7 @@ export function languageHoursRows(
   const chosen = new Map<string, string>();
   for (const rule of rules) if (isGoal(rule)) chosen.set(languageKey(rule.language), rule.language);
   for (const key of Object.keys(store.earlier)) {
-    if (!chosen.has(key)) chosen.set(key, totals.get(key)?.label ?? key.charAt(0).toUpperCase() + key.slice(1));
+    if (!chosen.has(key)) chosen.set(key, totals.get(key)?.label ?? englishLanguageName(key) ?? key.charAt(0).toUpperCase() + key.slice(1));
   }
   if (chosen.size === 0) {
     [...totals.entries()]

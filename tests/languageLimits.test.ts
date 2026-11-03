@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { cleanLanguageLimits, languageTodayRows, levelOf, limitUsage, newLimitWarnings } from "../utils/languageLimits";
+import { cleanLanguageLimits, languageKey, languageTodayRows, levelOf, limitUsage, newLimitWarnings } from "../utils/languageLimits";
 import type { WatchEntry } from "../utils/watchLog";
 
 const at = (day: number, hour: number, minute = 0) => new Date(2026, 9, day, hour, minute).getTime();
@@ -121,5 +121,13 @@ describe("newLimitWarnings", () => {
     const after = newLimitWarnings(raised, { day: "2026-10-25", levels: { english: "over" } }, now);
     expect(after.warnings).toEqual([]);
     expect(newLimitWarnings(usage(95), after.shown, now).warnings.map((warning) => warning.level)).toEqual(["over"]);
+  });
+});
+
+describe("languageKey", () => {
+  test("names YouTube gives in other UI languages meet the English name on one code", () => {
+    expect(languageKey("slovaki")).toBe(languageKey("Slovak"));
+    expect(languageKey("sk")).toBe(languageKey("Slovak"));
+    expect(languageKey("Klingon")).toBe("klingon");
   });
 });

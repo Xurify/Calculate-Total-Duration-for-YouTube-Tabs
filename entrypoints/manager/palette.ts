@@ -16,4 +16,3 @@ export function sectionRailVar(colorIndex: number | "unsorted"): string {
   return SECTION_RAIL_VARS[((colorIndex % SECTION_RAIL_VARS.length) + SECTION_RAIL_VARS.length) % SECTION_RAIL_VARS.length];
 }
 
-export const FACET_PALETTE = SECTION_RAIL_VARS;

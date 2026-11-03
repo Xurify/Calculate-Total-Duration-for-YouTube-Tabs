@@ -49,7 +49,7 @@ export function injectImmersionStyles(): void {
       height: 36px;
       padding: 0 14px 0 11px;
       border: 1px solid var(--sh-line);
-      border-radius: 999px;
+      border-radius: 8px;
       background-color: var(--sh-glass);
       backdrop-filter: blur(14px) saturate(140%);
       -webkit-backdrop-filter: blur(14px) saturate(140%);
@@ -231,7 +231,7 @@ export function injectImmersionStyles(): void {
       width: 28px;
       height: 28px;
       flex: none;
-      border-radius: 999px;
+      border-radius: 6px;
       background: transparent;
       border: none;
       color: var(--sh-muted);
@@ -510,7 +510,7 @@ export function injectImmersionStyles(): void {
     #study-harvester-limit-card .sh-limit-btn {
       height: 32px;
       padding: 0 14px;
-      border-radius: 999px;
+      border-radius: 8px;
       border: 1px solid rgba(255, 255, 255, 0.14);
       background: transparent;
       color: #f4efe6;
@@ -585,7 +585,7 @@ export function injectImmersionStyles(): void {
       height: 26px;
       padding: 0 10px;
       border: none;
-      border-radius: 999px;
+      border-radius: 8px;
       background: transparent;
       color: rgba(244, 239, 230, 0.6);
       font: 500 12px "YouTube Sans", Roboto, Arial, sans-serif;
@@ -625,7 +625,7 @@ export function injectImmersionStyles(): void {
       gap: 8px;
       height: 36px;
       padding: 0 8px 0 14px;
-      border-radius: 999px;
+      border-radius: 8px;
       border: 1px solid rgba(255, 255, 255, 0.14);
       background: transparent;
       color: #f4efe6;

@@ -1,6 +1,7 @@
 import { cleanChannelAvatarUrl, type ChannelAvatars } from "./channelAvatars";
 import { englishLanguageName } from "./languageFlags";
 import { languageOverrideFor, type LanguageOverrides } from "./languageOverrides";
+import { shardedLog } from "./shardedLog";
 import { dateKeyOf } from "./timeLog";
 import { newTypeId } from "./typeId";
 
@@ -121,16 +122,16 @@ export function trimWatchLog(entries: WatchEntry[], now: number = Date.now()): W
   return kept.length > WATCH_MAX_ENTRIES ? kept.slice(kept.length - WATCH_MAX_ENTRIES) : kept;
 }
 
+const watchStore = shardedLog<WatchEntry>(WATCH_LOG_KEY);
+
 export async function loadWatchLog(): Promise<WatchEntry[]> {
   if (!browser.storage?.local) return [];
-  const data = await browser.storage.local.get(WATCH_LOG_KEY);
-  const raw = data[WATCH_LOG_KEY];
-  return Array.isArray(raw) ? (raw as WatchEntry[]) : [];
+  return watchStore.load();
 }
 
 export async function saveWatchLog(entries: WatchEntry[]): Promise<void> {
   if (!browser.storage?.local) return;
-  await browser.storage.local.set({ [WATCH_LOG_KEY]: trimWatchLog(entries) });
+  await watchStore.save(trimWatchLog(entries));
 }
 
 export function languageLabelOf(languageName: string | null | undefined, code: string | null | undefined): string {

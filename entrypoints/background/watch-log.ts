@@ -9,6 +9,7 @@ import {
   loadLanguageLimits,
   loadLimitWarningsShown,
   newLimitWarnings,
+  sameLimitWarningsShown,
   saveLimitWarningsShown,
   type LanguageLimitUsage,
   type LimitWarning,
@@ -72,8 +73,10 @@ let limitWarningsQueue: Promise<unknown> = Promise.resolve();
 /** Serialised so two tabs flushing at once don't both show the same warning. */
 function takeLimitWarnings(usage: LanguageLimitUsage[]): Promise<LimitWarning[]> {
   const run = limitWarningsQueue.then(async () => {
-    const { warnings, shown } = newLimitWarnings(usage, await loadLimitWarningsShown());
-    await saveLimitWarningsShown(shown);
+    const previous = await loadLimitWarningsShown();
+    const { warnings, shown } = newLimitWarnings(usage, previous);
+    // Every sample of every playing tab lands here; nearly all of them change nothing.
+    if (!sameLimitWarningsShown(previous, shown)) await saveLimitWarningsShown(shown);
     return warnings;
   });
   limitWarningsQueue = run.catch(() => {});

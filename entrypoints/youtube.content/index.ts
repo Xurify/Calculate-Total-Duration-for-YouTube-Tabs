@@ -101,10 +101,19 @@ export default defineContentScript({
 
     browser.runtime.onMessage.addListener(
       (
-        runtimeMessage: { action: string; reset?: boolean; volume?: number; refreshLanguage?: boolean },
+        runtimeMessage: { action: string; reset?: boolean; volume?: number; refreshLanguage?: boolean; enabled?: boolean },
         _sender: unknown,
         sendResponse: (responseResult: unknown) => void
       ) => {
+        if (runtimeMessage?.action === "listen-first-changed") {
+          const enabled = runtimeMessage.enabled === true;
+          if (enabled === page.listenFirst) return;
+          page.listenFirst = enabled;
+          if (!enabled) closeListenCard?.(false);
+          applyListenFirstClass();
+          updateImmersionHud();
+          return;
+        }
         if (runtimeMessage?.action === "get-metadata") {
           const currentId = getVideoIdFromLocation();
           const needsRead =
@@ -177,14 +186,6 @@ export default defineContentScript({
       applyListenFirstClass();
       updateImmersionHud();
       if (page.listenFirst && isWatchOrShorts()) void prepareListenFirst();
-    });
-    browser.storage.onChanged.addListener((changes, area) => {
-      const change = changes[LISTEN_FIRST_KEY];
-      if (area !== "local" || !change || change.newValue === page.listenFirst) return;
-      page.listenFirst = change.newValue === true;
-      if (!page.listenFirst) closeListenCard?.(false);
-      applyListenFirstClass();
-      updateImmersionHud();
     });
 
     document.addEventListener("click", () => {

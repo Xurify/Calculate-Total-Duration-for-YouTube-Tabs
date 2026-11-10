@@ -1,4 +1,6 @@
+import { dateKeyOf } from "./dateKey";
 import { getVideoIdFromUrl } from "./format";
+import { shardedLog } from "./shardedLog";
 import {
   normalizeYoutubeUrl,
   shelfLinksForVideo,
@@ -236,16 +238,16 @@ export async function saveTimeTrackingPrefs(prefs: TimeTrackingPrefs): Promise<v
   await browser.storage.local.set({ [TIME_TRACKING_PREFS_KEY]: prefs });
 }
 
+const timeStore = shardedLog<TimeEntry>(TIME_LOG_KEY);
+
 export async function loadTimeLog(): Promise<TimeEntry[]> {
   if (!browser.storage?.local) return [];
-  const data = await browser.storage.local.get(TIME_LOG_KEY);
-  const raw = data[TIME_LOG_KEY];
-  return Array.isArray(raw) ? (raw as TimeEntry[]) : [];
+  return timeStore.load();
 }
 
 export async function saveTimeLog(entries: TimeEntry[]): Promise<void> {
   if (!browser.storage?.local) return;
-  await browser.storage.local.set({ [TIME_LOG_KEY]: trimTimeLog(entries) });
+  await timeStore.save(trimTimeLog(entries));
 }
 
 export function trimTimeLog(entries: TimeEntry[], now: number = Date.now()): TimeEntry[] {
@@ -256,7 +258,7 @@ export function trimTimeLog(entries: TimeEntry[], now: number = Date.now()): Tim
 
 export async function clearTimeLog(): Promise<void> {
   if (!browser.storage?.local) return;
-  await browser.storage.local.set({ [TIME_LOG_KEY]: [] });
+  await timeStore.save([]);
 }
 
 export interface Stretch {
@@ -340,13 +342,7 @@ export function pendingForMandala(entries: readonly TimeEntry[]): TimeEntry[] {
   return entries.filter((entry) => !entry.open && entry.sync === "pending" && wholeMinutes(entry) >= 1);
 }
 
-export function dateKeyOf(timestamp: number): string {
-  const date = new Date(timestamp);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
+export { dateKeyOf };
 
 export interface TimeTotals {
   active: number;

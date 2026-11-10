@@ -70,6 +70,7 @@ import {
   visitedClozemasterPairs,
 } from "./clozemaster";
 import { openDesk } from "./desk";
+import { relayListenFirstToTabs } from "./listen-first";
 import {
   handleCheckMandalaStatus,
   handleLogMandalaTime,
@@ -94,6 +95,7 @@ import { fillMissingWatchLanguages, recordWatch, siteTracker, withWatchLog } fro
 
 export default defineBackground(() => {
   siteTracker.start();
+  relayListenFirstToTabs();
 
   browser.commands.onCommand.addListener((command) => {
     if (command === "open-desk") void openDesk();

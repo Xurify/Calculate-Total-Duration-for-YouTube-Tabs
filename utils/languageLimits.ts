@@ -226,6 +226,12 @@ export function newLimitWarnings(
   return { warnings, shown: { day, levels } };
 }
 
+export function sameLimitWarningsShown(first: LimitWarningsShown | null, second: LimitWarningsShown): boolean {
+  if (!first || first.day !== second.day) return false;
+  const keys = Object.keys(second.levels);
+  return keys.length === Object.keys(first.levels).length && keys.every((key) => first.levels[key] === second.levels[key]);
+}
+
 export async function loadLimitWarningsShown(): Promise<LimitWarningsShown | null> {
   if (!browser.storage?.local) return null;
   const data = await browser.storage.local.get(LIMIT_WARNINGS_KEY);

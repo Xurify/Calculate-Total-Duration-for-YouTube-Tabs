@@ -8,6 +8,7 @@ import { injectImmersionStyles } from "./styles";
 
 export function initializeWatchPageFeatures(context: {
   setTimeout: (handler: () => void, timeoutMilliseconds: number) => unknown;
+  setInterval: (handler: () => void, timeoutMilliseconds: number) => unknown;
 }): void {
   const videoId = getVideoIdFromLocation();
   if (page.currentWatchVideoId !== videoId) {
@@ -34,7 +35,8 @@ export function initializeWatchPageFeatures(context: {
 
   if (!page.watchedTimerInterval) {
     page.lastWatchTickTimestamp = Date.now();
-    page.watchedTimerInterval = setInterval(() => {
+    // The context's timer stops when the extension reloads; a bare setInterval ticks on in the orphaned script.
+    page.watchedTimerInterval = context.setInterval(() => {
       const videoElement = document.querySelector("video");
       const currentTimestamp = Date.now();
       const elapsedMilliseconds = currentTimestamp - page.lastWatchTickTimestamp;
@@ -63,7 +65,7 @@ export function initializeWatchPageFeatures(context: {
       } else {
         page.lastWatchMediaTime = null;
       }
-    }, 100);
+    }, 100) as ReturnType<typeof setInterval>;
   }
 
   updateImmersionHud();

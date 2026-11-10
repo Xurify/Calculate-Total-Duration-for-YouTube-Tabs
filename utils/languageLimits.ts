@@ -1,6 +1,6 @@
 import { languageCodeOf } from "./languageFlags";
 import type { LanguageOverrides } from "./languageOverrides";
-import { dateKeyOf } from "./timeLog";
+import { dateKeyOf } from "./dateKey";
 import { entryLanguage, UNKNOWN_LANGUAGE, type WatchEntry } from "./watchLog";
 
 /**

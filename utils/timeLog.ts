@@ -342,8 +342,6 @@ export function pendingForMandala(entries: readonly TimeEntry[]): TimeEntry[] {
   return entries.filter((entry) => !entry.open && entry.sync === "pending" && wholeMinutes(entry) >= 1);
 }
 
-export { dateKeyOf };
-
 export interface TimeTotals {
   active: number;
   passive: number;

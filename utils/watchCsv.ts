@@ -1,5 +1,5 @@
 import type { LanguageOverrides } from "./languageOverrides";
-import { dateKeyOf } from "./timeLog";
+import { dateKeyOf } from "./dateKey";
 import { entryLanguage, type WatchEntry } from "./watchLog";
 
 export const CSV_COLUMNS = [

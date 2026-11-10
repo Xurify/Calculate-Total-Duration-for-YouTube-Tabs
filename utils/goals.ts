@@ -1,6 +1,6 @@
 import { isGoal, languageKey, type LanguageLimit } from "./languageLimits";
 import type { LanguageOverrides } from "./languageOverrides";
-import { dateKeyOf } from "./timeLog";
+import { dateKeyOf } from "./dateKey";
 import { entryLanguage, type WatchEntry } from "./watchLog";
 
 /**

@@ -1,4 +1,4 @@
-import { dateKeyOf } from "../../../utils/timeLog";
+import { dateKeyOf } from "../../../utils/dateKey";
 import { formatMinutesWords } from "../../../utils/timeUi";
 import type { WatchSummary } from "../../../utils/watchLog";
 import { isGoal, languageKey } from "../../../utils/languageLimits";

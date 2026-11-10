@@ -2,7 +2,7 @@ import { cleanChannelAvatarUrl, type ChannelAvatars } from "./channelAvatars";
 import { englishLanguageName } from "./languageFlags";
 import { languageOverrideFor, type LanguageOverrides } from "./languageOverrides";
 import { shardedLog } from "./shardedLog";
-import { dateKeyOf } from "./timeLog";
+import { dateKeyOf } from "./dateKey";
 import { newTypeId } from "./typeId";
 
 /**

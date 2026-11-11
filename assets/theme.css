@@ -101,6 +101,34 @@
   font-variant-numeric: lining-nums tabular-nums;
 }
 
+.theme-option {
+  border-radius: 0.375rem;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.theme-option--small {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.7rem;
+}
+
+.theme-option:hover {
+  color: var(--color-text-primary);
+}
+
+.theme-option[aria-pressed="true"] {
+  background-color: var(--color-surface-hover);
+  color: var(--color-text-primary);
+}
+
 /* Paper-like grain so large flat areas read as a desk, not a void. Barely visible on purpose. */
 .paper-grain {
   background-image: radial-gradient(

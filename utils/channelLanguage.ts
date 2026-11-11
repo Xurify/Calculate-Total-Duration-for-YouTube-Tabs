@@ -1,4 +1,5 @@
 import { normalizeLanguageCode, type DetectedLanguage } from "./captionLanguage";
+import { loadFocusLanguages } from "./focusLanguages";
 import { languageDisplayName, refineLanguageWithText } from "./textLanguage";
 
 const STORAGE_KEY = "channelLanguages";
@@ -19,15 +20,21 @@ async function readMemory(): Promise<ChannelLanguageMemory> {
   return (stored[STORAGE_KEY] as ChannelLanguageMemory | undefined) ?? {};
 }
 
-async function recordChannelLanguage(channelName: string, videoId: string, language: string) {
+/** A null language forgets the video, so a guess made by older, surer-sounding logic stops counting. */
+async function recordChannelLanguage(channelName: string, videoId: string, language: string | null) {
   const memory = await readMemory();
-  const code = normalizeLanguageCode(language);
+  const code = language ? normalizeLanguageCode(language) : null;
   const videos = (memory[channelName] ??= {});
-  if (videos[videoId] === code) return;
-  delete videos[videoId];
-  videos[videoId] = code;
-  const ids = Object.keys(videos);
-  for (const id of ids.slice(0, Math.max(0, ids.length - MAX_VIDEOS_PER_CHANNEL))) delete videos[id];
+  if (code === null) {
+    if (!(videoId in videos)) return;
+    delete videos[videoId];
+  } else {
+    if (videos[videoId] === code) return;
+    delete videos[videoId];
+    videos[videoId] = code;
+    const ids = Object.keys(videos);
+    for (const id of ids.slice(0, Math.max(0, ids.length - MAX_VIDEOS_PER_CHANNEL))) delete videos[id];
+  }
   await browser.storage.local.set({ [STORAGE_KEY]: memory });
 }
 
@@ -42,9 +49,10 @@ async function channelMajorityLanguage(channelName: string): Promise<string | nu
 
 /**
  * Text refinement plus a per-channel memory. Only trusted results (uploader metadata or a
- * reliable text detection, i.e. not `weak`) are remembered. The channel's language is a last
- * resort when neither names any language, and only once 3+ remembered videos exist and 80%
- * of them agree, so multilingual channels (Talks at Google) stay unlabelled instead of forced.
+ * clear text detection, i.e. not `weak`) are remembered. The channel's language settles text
+ * that is a close call, and is the last resort when nothing names any language, but only once
+ * 3+ remembered videos exist and 80% of them agree, so multilingual channels (Talks at Google)
+ * stay unlabelled instead of forced.
  */
 export async function resolveVideoLanguage(
   detected: DetectedLanguage,
@@ -52,19 +60,20 @@ export async function resolveVideoLanguage(
   source: VideoChannel,
   displayLocale?: string | null
 ): Promise<DetectedLanguage> {
-  const refined = await refineLanguageWithText(detected, text, displayLocale);
   const channel = source.channelName?.trim();
+  const [channelCode, followed] = await Promise.all([
+    channel ? channelMajorityLanguage(channel).catch(() => null) : null,
+    loadFocusLanguages().catch(() => []),
+  ]);
+  const refined = await refineLanguageWithText(detected, text, displayLocale, { channel: channelCode, followed });
   if (!channel) return refined;
   try {
     if (refined.language) {
-      if (!refined.weak && source.videoId) {
-        await recordChannelLanguage(channel, source.videoId, refined.language);
-      }
+      if (source.videoId) await recordChannelLanguage(channel, source.videoId, refined.weak ? null : refined.language);
       return refined;
     }
-    const code = await channelMajorityLanguage(channel);
-    if (!code) return refined;
-    return { language: code, languageName: languageDisplayName(code, displayLocale) };
+    if (!channelCode) return refined;
+    return { language: channelCode, languageName: languageDisplayName(channelCode, displayLocale) };
   } catch {
     return refined;
   }

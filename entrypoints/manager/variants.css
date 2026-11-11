@@ -1,0 +1,124 @@
+/* Variants of the desk top: how the time-left, the language bar and the planner are grouped. */
+
+/* Split cards: the default. Time left on one card, the planner on another. */
+
+/* One band: a single card, planner set off by a rule. */
+html[data-variant="band"] .desk-head-grid,
+html[data-variant="band"] .desk-head-grid:has(#planner:not(.hidden)) {
+  grid-template-columns: minmax(0, 1fr) 17rem;
+  gap: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background-color: var(--color-surface-elevated);
+}
+
+html[data-variant="band"] .desk-head-grid:not(:has(#planner:not(.hidden))) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+html[data-variant="band"] main:has(#facet-rail:not(.hidden)) .desk-hero,
+html[data-variant="band"] .planner-card {
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+html[data-variant="band"] .planner-card {
+  border-left: 1px solid var(--color-border);
+}
+
+/* Headline: no cards. The time is a large headline, the planner a single row under the bar. */
+html[data-variant="headline"] .desk-head-grid,
+html[data-variant="headline"] .desk-head-grid:has(#planner:not(.hidden)) {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.25rem;
+}
+
+html[data-variant="headline"] main:has(#facet-rail:not(.hidden)) .desk-hero {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+html[data-variant="headline"] #desk-time {
+  font-size: 64px;
+}
+
+html[data-variant="headline"] .planner-card {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  padding: 0.75rem 0 0;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+  border-radius: 0;
+  background: transparent;
+}
+
+html[data-variant="headline"] .planner-title {
+  margin-right: auto;
+}
+
+html[data-variant="headline"] .planner-budgets {
+  width: 17rem;
+}
+
+html[data-variant="headline"] .planner-card #plan-summary {
+  flex-basis: 100%;
+  order: 5;
+}
+
+/* Picker: kept outside the design system on purpose. */
+.variant-picker {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  z-index: 2147483000;
+  width: 188px;
+  padding: 8px 6px 6px;
+  border-radius: 8px;
+  background: #1c1c1c;
+  color: #e6e6e6;
+  font: 12px/1.3 system-ui, sans-serif;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
+}
+
+.variant-picker[hidden] {
+  display: none;
+}
+
+.variant-picker-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 6px;
+  color: #8a8a8a;
+}
+
+.variant-picker button {
+  display: block;
+  width: 100%;
+  padding: 6px 8px 6px 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.variant-picker button:hover {
+  background: #2a2a2a;
+}
+
+.variant-picker button[aria-pressed="true"] {
+  background: #333;
+  font-weight: 600;
+}
+
+.variant-picker button:focus-visible {
+  outline: 2px solid #8ab4ff;
+  outline-offset: -2px;
+}

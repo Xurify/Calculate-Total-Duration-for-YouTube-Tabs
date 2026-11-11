@@ -1,4 +1,5 @@
 import "./style.css";
+import { mountVariantPicker } from "./variants";
 import { initTheme, mountThemeControl, THEME_CONTROL_HTML } from "../../utils/theme";
 import { PLAYBACK_RATE_KEY } from "../../utils/playbackRate";
 import { isStoreUpdatedMessage } from "../../utils/store";
@@ -27,6 +28,7 @@ import { wireTabList } from "./tab-list-events";
 import { fetchTabs, handleStoreUpdated, scheduleFetchTabsFromEvents, scheduleProbeResultsToUi } from "./tabs";
 
 initTheme();
+mountVariantPicker();
 
 const VISIBILITY_REFETCH_MS = 2000;
 let lastVisibilityFetch = 0;

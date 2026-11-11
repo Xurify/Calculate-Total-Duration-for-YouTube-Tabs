@@ -13,7 +13,7 @@
 
 @layer components {
   .popup-icon {
-    @apply w-8 h-8 flex items-center justify-center rounded-full border-0 bg-transparent text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer active:scale-95;
+    @apply w-8 h-8 flex items-center justify-center rounded-md border-0 bg-transparent text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer active:scale-95;
   }
 
   .np-card {

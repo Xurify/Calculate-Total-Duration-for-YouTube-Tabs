@@ -8,7 +8,7 @@
   </head>
   <body class="font-sans bg-surface text-text-primary m-0 p-0 overflow-hidden flex flex-col h-full">
 
-    <header class="shrink-0 h-16 pl-5 pr-6 flex items-center gap-4 border-b border-border bg-surface z-20">
+    <header class="shrink-0 h-14 pl-5 pr-6 flex items-center gap-6 border-b border-border bg-surface z-20">
       <button type="button" id="brand" class="brand sidebar-item" data-sidebar-type="all" title="Back to the desk">
         <img src="/icon/icon.svg" alt="" width="28" height="28" class="w-7 h-7 rounded-[7px]" />
         <h1 class="font-display text-[21px] font-medium tracking-tight m-0 leading-none translate-y-[2px] whitespace-nowrap max-xl:sr-only">Study Harvester</h1>
@@ -29,12 +29,12 @@
         <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-text-muted group-focus-within:text-accent transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
         </div>
-        <input type="search" id="search-input" class="block w-full h-10 pl-10 pr-8 border border-border rounded-full bg-transparent text-sm text-text-primary placeholder:text-text-muted focus:outline-none" placeholder="Search titles, channels…" />
+        <input type="search" id="search-input" class="block w-full h-9 pl-10 pr-8 border border-border rounded-md bg-surface-elevated text-sm text-text-primary placeholder:text-text-muted focus:outline-none" placeholder="Search titles, channels…" />
         <button type="button" id="search-clear-btn" class="absolute inset-y-0 right-0 pr-2.5 flex items-center text-text-muted hover:text-text-primary transition-colors hidden cursor-pointer" aria-label="Clear search">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M6 18 18 6M6 6l12 12"/></svg>
         </button>
       </div>
-      <div class="flex items-center gap-1 h-10 pl-3 pr-1 rounded-full border border-border">
+      <div class="flex items-center gap-1">
         <span class="hidden lg:inline-flex items-center gap-1.5 mr-2 text-[11px] font-medium text-text-muted" title="WebMCP tools are live on YouTube, Mandala and Clozemaster pages">
           <span class="w-1.5 h-1.5 rounded-full bg-success"></span>
           WebMCP
@@ -154,7 +154,7 @@
 
         <section id="sessions-panel" class="hidden flex-col gap-5 px-8 py-6 overflow-y-auto custom-scrollbar min-h-0">
           <div class="flex items-center gap-3">
-            <input type="search" id="session-sidebar-search" class="w-80 max-w-full h-10 px-4 text-sm border border-border rounded-full bg-transparent text-text-primary placeholder:text-text-muted focus:outline-none" placeholder="Filter sessions…" />
+            <input type="search" id="session-sidebar-search" class="w-80 max-w-full h-9 px-3 text-sm border border-border rounded-md bg-surface-elevated text-text-primary placeholder:text-text-muted focus:outline-none" placeholder="Filter sessions…" />
             <span class="flex-1"></span>
             <span id="global-stats-count" class="text-xs text-text-muted tabular-nums whitespace-nowrap"></span>
           </div>
@@ -171,11 +171,11 @@
             <aside class="settings-nav">
                 <h3 id="settings-title" class="settings-page-title">Settings</h3>
                 <nav class="flex flex-col gap-0.5" aria-label="Settings sections">
-                    <button type="button" class="settings-nav-item" data-settings-target="settings-sec-languages" aria-current="false"><span class="settings-tile settings-tile--green"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>Languages</button>
-                    <button type="button" class="settings-nav-item" data-settings-target="settings-sec-display" aria-current="false"><span class="settings-tile settings-tile--violet"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3v18" /><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg></span>Appearance</button>
-                    <button type="button" class="settings-nav-item" data-settings-target="settings-sec-keyboard" aria-current="false"><span class="settings-tile settings-tile--slate"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg></span>Keyboard</button>
-                    <button type="button" class="settings-nav-item" data-settings-target="settings-sec-sessions" aria-current="false"><span class="settings-tile settings-tile--blue"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></span>Saved sessions</button>
-                    <button type="button" class="settings-nav-item" data-settings-target="settings-sec-data" aria-current="false"><span class="settings-tile settings-tile--amber"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg></span>Data &amp; storage</button>
+                    <button type="button" class="settings-nav-item" data-settings-target="settings-sec-languages" aria-current="false">Languages</button>
+                    <button type="button" class="settings-nav-item" data-settings-target="settings-sec-display" aria-current="false">Appearance</button>
+                    <button type="button" class="settings-nav-item" data-settings-target="settings-sec-keyboard" aria-current="false">Keyboard</button>
+                    <button type="button" class="settings-nav-item" data-settings-target="settings-sec-sessions" aria-current="false">Saved sessions</button>
+                    <button type="button" class="settings-nav-item" data-settings-target="settings-sec-data" aria-current="false">Data &amp; storage</button>
                 </nav>
             </aside>
             <div class="settings-body custom-scrollbar">
@@ -184,7 +184,7 @@
                 </button>
 
                 <section id="settings-sec-languages" class="settings-section" data-settings-section>
-                    <header class="settings-sec-head"><span class="settings-tile settings-tile--lg settings-tile--green"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span><div><h4 class="settings-sec-title">Languages</h4><p class="settings-sec-desc">Which languages get their own rows and colours.</p></div></header>
+                    <header class="settings-sec-head"><div><h4 class="settings-sec-title">Languages</h4><p class="settings-sec-desc">Which languages get their own rows and colours.</p></div></header>
                     <div class="settings-group" id="settings-languages">
                         <div class="py-3.5">
                             <div class="flex items-baseline justify-between gap-4">
@@ -198,7 +198,7 @@
                 </section>
 
                 <section id="settings-sec-display" class="settings-section" data-settings-section hidden>
-                    <header class="settings-sec-head"><span class="settings-tile settings-tile--lg settings-tile--violet"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3v18" /><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg></span><div><h4 class="settings-sec-title">Appearance</h4><p class="settings-sec-desc">Theme and how sharp thumbnails are.</p></div></header>
+                    <header class="settings-sec-head"><div><h4 class="settings-sec-title">Appearance</h4><p class="settings-sec-desc">Theme and how sharp thumbnails are.</p></div></header>
                     <div class="settings-group">
                         <div class="settings-row">
                             <div>
@@ -221,7 +221,7 @@
                 </section>
 
                 <section id="settings-sec-keyboard" class="settings-section" data-settings-section hidden>
-                    <header class="settings-sec-head"><span class="settings-tile settings-tile--lg settings-tile--slate"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg></span><div><h4 class="settings-sec-title">Keyboard</h4><p class="settings-sec-desc">Shortcuts work when you are not typing in a field.</p></div></header>
+                    <header class="settings-sec-head"><div><h4 class="settings-sec-title">Keyboard</h4><p class="settings-sec-desc">Shortcuts work when you are not typing in a field.</p></div></header>
                     <div class="settings-group">
                         <div class="settings-row">
                             <div>
@@ -234,7 +234,7 @@
                 </section>
 
                 <section id="settings-sec-sessions" class="settings-section" data-settings-section hidden>
-                    <header class="settings-sec-head"><span class="settings-tile settings-tile--lg settings-tile--blue"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></span><div><h4 class="settings-sec-title">Saved sessions</h4><p class="settings-sec-desc">Back up your sessions or move them to another computer.</p></div></header>
+                    <header class="settings-sec-head"><div><h4 class="settings-sec-title">Saved sessions</h4><p class="settings-sec-desc">Back up your sessions or move them to another computer.</p></div></header>
                     <div class="settings-group">
                         <div class="settings-row">
                             <div>
@@ -257,7 +257,7 @@
                 </section>
 
                 <section id="settings-sec-data" class="settings-section" data-settings-section hidden>
-                    <header class="settings-sec-head"><span class="settings-tile settings-tile--lg settings-tile--amber"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg></span><div><h4 class="settings-sec-title">Data &amp; storage</h4><p class="settings-sec-desc">What the extension keeps on this computer.</p></div></header>
+                    <header class="settings-sec-head"><div><h4 class="settings-sec-title">Data &amp; storage</h4><p class="settings-sec-desc">What the extension keeps on this computer.</p></div></header>
                     <div class="settings-group">
                         <div class="settings-row">
                             <div>

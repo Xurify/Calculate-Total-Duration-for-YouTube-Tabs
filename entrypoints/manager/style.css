@@ -33,15 +33,15 @@ body {
 
 @layer components {
   .nav-tabs {
-    @apply flex items-center gap-0.5 h-10 p-1 rounded-full border border-border bg-transparent;
+    @apply flex items-stretch gap-1 self-stretch;
   }
 
   .nav-pill {
-    @apply h-8 px-3.5 rounded-full text-[13px] font-medium leading-none text-text-secondary border-0 bg-transparent cursor-pointer transition-colors hover:text-text-primary inline-flex items-center gap-1.5 whitespace-nowrap;
+    @apply px-3 rounded-none text-[13px] font-medium leading-none text-text-secondary border-0 border-b-2 border-transparent bg-transparent cursor-pointer transition-colors hover:text-text-primary inline-flex items-center gap-1.5 whitespace-nowrap -mb-px;
   }
 
   .nav-badge {
-    @apply inline-flex items-center justify-center min-w-[1.125rem] h-[1.125rem] px-1.5 rounded-full bg-surface-hover text-[11px] font-semibold leading-none tabular-nums text-text-muted;
+    @apply inline-flex items-center justify-center min-w-[1.125rem] h-[1.125rem] px-1.5 rounded bg-surface-hover text-[11px] font-semibold leading-none tabular-nums text-text-muted;
   }
 
   .brand {
@@ -49,15 +49,15 @@ body {
   }
 
   .nav-pill.bg-surface-hover {
-    @apply bg-surface-hover text-text-primary font-semibold;
+    @apply text-text-primary font-semibold border-accent;
   }
 
   .icon-btn {
-    @apply w-8 h-8 flex items-center justify-center rounded-full border border-transparent bg-transparent text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer active:scale-[0.96];
+    @apply w-8 h-8 flex items-center justify-center rounded-md border border-transparent bg-transparent text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer active:scale-[0.96];
   }
 
   .btn-primary {
-    @apply h-10 px-5 rounded-lg border-0 bg-primary text-on-primary text-sm font-semibold inline-flex items-center gap-2 whitespace-nowrap cursor-pointer transition-colors hover:bg-primary-hover active:scale-[0.98];
+    @apply h-10 px-5 rounded-md border-0 bg-primary text-on-primary text-sm font-semibold inline-flex items-center gap-2 whitespace-nowrap cursor-pointer transition-colors hover:bg-primary-hover active:scale-[0.98];
   }
 
   .queue-card {
@@ -78,7 +78,7 @@ body {
   }
 
   .queue-offset {
-    @apply font-display italic text-[15px] text-text-muted pl-[18px] self-center tabular-nums select-none;
+    @apply font-display text-[15px] text-text-muted pl-[18px] self-center tabular-nums select-none;
   }
 
   .queue-row--now .queue-offset {
@@ -807,7 +807,7 @@ body {
   gap: 0.5rem;
   padding: 0.4rem 0.5rem 0.4rem 0.4rem;
   border: 1px solid var(--color-border);
-  border-radius: 999px;
+  border-radius: 10px;
   background-color: color-mix(in srgb, var(--color-surface-overlay) 96%, transparent);
   box-shadow: 0 12px 32px -8px rgb(0 0 0 / 0.35);
   backdrop-filter: blur(16px);
@@ -1626,20 +1626,6 @@ kbd {
   display: none;
 }
 
-/* Hero line: the number is plain sans, the unit after it is the quiet serif italic. */
-#desk-time-value {
-  font-family: var(--font-sans);
-  font-weight: 500;
-  letter-spacing: -0.025em;
-}
-
-#desk-time-suffix {
-  font-family: var(--font-display);
-  font-style: italic;
-  font-weight: 400;
-  letter-spacing: 0;
-}
-
 .desk-kicker-line {
   text-transform: none;
   letter-spacing: 0;
@@ -1662,13 +1648,13 @@ kbd {
   padding-left: 0.25rem;
 }
 
-/* Settings: a left list of sections and one section at a time on the right. */
+/* Settings: section tabs along the top and one section at a time below. */
 .settings-shell {
   position: relative;
-  display: grid;
-  grid-template-columns: 13.5rem minmax(0, 1fr);
-  width: min(52rem, calc(100vw - 2rem));
-  height: min(36rem, calc(100vh - 4rem));
+  display: flex;
+  flex-direction: column;
+  width: min(44rem, calc(100vw - 2rem));
+  height: min(34rem, calc(100vh - 4rem));
   margin: 0 auto;
   overflow: hidden;
   border: 1px solid var(--color-border);
@@ -1677,78 +1663,53 @@ kbd {
 .settings-nav {
   display: flex;
   flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.25rem 2rem 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.settings-nav nav {
+  display: flex;
+  flex-direction: row;
   gap: 1.25rem;
-  padding: 1.5rem 0.75rem 1rem;
-  border-right: 1px solid var(--color-border);
+  overflow-x: auto;
 }
 
 .settings-page-title {
   margin: 0;
-  padding: 0 0.5rem;
   font-family: var(--font-display);
-  font-size: 1.75rem;
-  font-style: italic;
-  font-weight: 400;
+  font-size: 1.5rem;
+  font-weight: 500;
   line-height: 1.1;
   color: var(--color-text-primary);
 }
 
 .settings-nav-item {
-  display: flex;
-  align-items: center;
-  gap: 0.625rem;
-  width: 100%;
-  padding: 0.4rem 0.5rem;
+  padding: 0.5rem 0 0.7rem;
   border: 0;
-  border-radius: 999px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
   background: transparent;
   color: var(--color-text-secondary);
   font: 500 13px/1.2 var(--font-sans);
-  text-align: left;
+  white-space: nowrap;
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: color 0.15s ease, border-color 0.15s ease;
 }
 
 .settings-nav-item:hover {
   color: var(--color-text-primary);
-  background-color: color-mix(in srgb, var(--color-surface-hover) 60%, transparent);
 }
 
 .settings-nav-item[aria-current="true"] {
-  background-color: var(--color-surface-hover);
   color: var(--color-text-primary);
+  border-bottom-color: var(--color-accent);
 }
-
-.settings-tile {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  color: #fff;
-}
-
-.settings-tile--lg {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-}
-
-.settings-tile--lg svg {
-  width: 20px;
-  height: 20px;
-}
-
-.settings-tile--green { background-color: light-dark(#2f8a52, #2b8a4f); }
-.settings-tile--violet { background-color: light-dark(#7a52c4, #7650c0); }
-.settings-tile--slate { background-color: light-dark(#6b7280, #5a606b); }
-.settings-tile--blue { background-color: light-dark(#3a64d4, #3a62cf); }
-.settings-tile--amber { background-color: light-dark(#b8741a, #b4701b); }
 
 .settings-body {
   position: relative;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 1.5rem 2rem 2rem;
 }
@@ -1758,20 +1719,16 @@ kbd {
 }
 
 .settings-sec-head {
-  display: flex;
-  align-items: center;
-  gap: 0.875rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.25rem;
   padding-right: 2rem;
 }
 
 .settings-sec-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 1.75rem;
-  font-style: italic;
-  font-weight: 400;
-  line-height: 1.1;
+  font-size: 1.25rem;
+  font-weight: 500;
+  line-height: 1.2;
   color: var(--color-text-primary);
 }
 
@@ -1810,26 +1767,6 @@ kbd {
   padding: 0 1.25rem;
 }
 
-@media (max-width: 640px) {
-  .settings-shell {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-  .settings-nav {
-    flex-direction: row;
-    align-items: center;
-    overflow-x: auto;
-    border-right: 0;
-    border-bottom: 1px solid var(--color-border);
-    padding: 0.75rem;
-  }
-  .settings-nav nav {
-    flex-direction: row;
-  }
-  .settings-page-title {
-    display: none;
-  }
-}
 
 /*
  * Page layout. Content sits in a centred column instead of stretching to the window edges:
@@ -1934,7 +1871,7 @@ main:has(#facet-rail:not(.hidden)) .desk-hero {
   gap: 2px;
   padding: 2px;
   border: 1px solid var(--color-border);
-  border-radius: 999px;
+  border-radius: 8px;
 }
 
 .planner-budgets .budget-chip {
@@ -2030,4 +1967,8 @@ main:has(#practice-panel.flex) #desk-head {
 
 .session-card-actions .chip {
   white-space: nowrap;
+}
+
+.nav-pill.bg-surface-hover {
+  background-color: transparent;
 }

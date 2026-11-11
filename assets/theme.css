@@ -2,28 +2,28 @@
   --font-sans: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Newsreader Variable", ui-serif, Georgia, "Times New Roman", serif;
 
-  --color-surface: light-dark(#f6f6f4, #0f0f0f);
-  --color-surface-elevated: light-dark(#ffffff, #171717);
-  --color-surface-overlay: light-dark(#ffffff, #212121);
-  --color-surface-hover: light-dark(#ececea, #232323);
-  --color-border: light-dark(#e3e3df, #272727);
-  --color-border-hover: light-dark(#cdcdc8, #3b3b3b);
-  --color-text-primary: light-dark(#171716, #ededec);
-  --color-text-secondary: light-dark(#4b4b48, #b3b3b0);
-  --color-text-muted: light-dark(#6a6a66, #8c8c88);
-  --color-accent: light-dark(#3a52d4, #8ea0ff);
-  --color-accent-hover: light-dark(#2c40b3, #aab7ff);
-  --color-on-accent: light-dark(#ffffff, #0f0f0f);
-  --color-primary: light-dark(#171716, #f2f2f0);
-  --color-primary-hover: light-dark(#34342f, #ffffff);
-  --color-on-primary: light-dark(#f6f6f4, #0f0f0f);
+  --color-surface: light-dark(#f3f5f4, #0e1011);
+  --color-surface-elevated: light-dark(#ffffff, #151819);
+  --color-surface-overlay: light-dark(#ffffff, #1c2021);
+  --color-surface-hover: light-dark(#e7ebe9, #212627);
+  --color-border: light-dark(#dce1df, #272d2e);
+  --color-border-hover: light-dark(#c5ccc9, #394241);
+  --color-text-primary: light-dark(#141817, #e8ecea);
+  --color-text-secondary: light-dark(#454d4a, #aab4b0);
+  --color-text-muted: light-dark(#66706c, #838d89);
+  --color-accent: light-dark(#1b7561, #62c3a8);
+  --color-accent-hover: light-dark(#145c4c, #84d4bd);
+  --color-on-accent: light-dark(#ffffff, #08130f);
+  --color-primary: light-dark(#1b7561, #62c3a8);
+  --color-primary-hover: light-dark(#145c4c, #7dd0b8);
+  --color-on-primary: light-dark(#ffffff, #08130f);
   --color-danger: light-dark(#b3392e, #ef8a7f);
   --color-danger-hover: light-dark(#962c21, #f5a198);
   --color-warning: light-dark(#8a6508, #d9b94a);
   --color-warning-hover: light-dark(#735306, #e4c868);
   --color-success: light-dark(#2f7a45, #8fcf9f);
   --color-youtube: light-dark(#cf2a22, #ff5a52);
-  --color-scrim: light-dark(rgba(20, 20, 18, 0.4), rgba(0, 0, 0, 0.62));
+  --color-scrim: light-dark(rgba(14, 18, 17, 0.4), rgba(0, 0, 0, 0.62));
 
   --section-coral: light-dark(#c25b49, #cf715f);
   --section-amber: light-dark(#a8861f, #c4a64a);
@@ -96,57 +96,9 @@
   }
 }
 
-.font-numeric,
-.font-display.tabular-nums {
-  font-family: var(--font-sans);
-  font-weight: 500;
-  letter-spacing: -0.02em;
+.font-numeric {
+  font-family: var(--font-display);
   font-variant-numeric: lining-nums tabular-nums;
-}
-
-/* Page and section headings are quiet italic serif; modal titles stay plain sans. */
-h1.font-display,
-h2.font-display,
-h3.font-display,
-.font-display.heading-italic {
-  font-style: italic;
-  font-weight: 400;
-}
-
-[role="dialog"] h3.font-display {
-  font-family: var(--font-sans);
-  font-style: normal;
-  font-weight: 600;
-  font-size: 1.0625rem;
-  letter-spacing: -0.01em;
-}
-
-.theme-option {
-  border-radius: 999px;
-  padding: 0.3rem 0.65rem;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--color-text-muted);
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  transition:
-    background-color 0.15s ease,
-    color 0.15s ease;
-}
-
-.theme-option--small {
-  padding: 0.2rem 0.5rem;
-  font-size: 0.7rem;
-}
-
-.theme-option:hover {
-  color: var(--color-text-primary);
-}
-
-.theme-option[aria-pressed="true"] {
-  background-color: var(--color-surface-hover);
-  color: var(--color-text-primary);
 }
 
 /* Paper-like grain so large flat areas read as a desk, not a void. Barely visible on purpose. */

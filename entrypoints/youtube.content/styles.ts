@@ -12,7 +12,7 @@ export function injectImmersionStyles(): void {
       --sh-glass: rgba(12, 12, 12, 0.62);
       --sh-glass-strong: rgba(12, 12, 12, 0.86);
       --sh-line: rgba(255, 255, 255, 0.1);
-      --sh-accent: #9aaaff;
+      --sh-accent: #62c3a8;
       position: absolute;
       top: 12px;
       right: 12px;
@@ -76,13 +76,13 @@ export function injectImmersionStyles(): void {
     }
     .study-harvester-hud-btn.is-accent {
       border-color: transparent;
-      background-color: #f2f2f0;
-      color: #111111;
+      background-color: #62c3a8;
+      color: #08130f;
       font-weight: 600;
       box-shadow: 0 6px 20px -10px rgba(0, 0, 0, 0.8);
     }
     .study-harvester-hud-btn.is-accent:hover:not(:disabled) {
-      background-color: #f2f2f0;
+      background-color: #62c3a8;
       filter: brightness(1.06);
     }
     .study-harvester-shelf-popover {
@@ -90,7 +90,7 @@ export function injectImmersionStyles(): void {
       --sh-muted: rgba(241, 241, 239, 0.62);
       --sh-glass-strong: rgba(12, 12, 12, 0.86);
       --sh-line: rgba(255, 255, 255, 0.1);
-      --sh-accent: #9aaaff;
+      --sh-accent: #62c3a8;
       position: fixed;
       z-index: 2147483644;
       min-width: 230px;
@@ -166,7 +166,7 @@ export function injectImmersionStyles(): void {
       --sh-ink: #f1f1ef;
       --sh-muted: rgba(241, 241, 239, 0.58);
       --sh-line: rgba(255, 255, 255, 0.1);
-      --sh-accent: #9aaaff;
+      --sh-accent: #62c3a8;
       position: absolute;
       inset: 0;
       background: linear-gradient(180deg, rgba(8, 8, 8, 0.2) 0%, rgba(8, 8, 8, 0.55) 55%, rgba(8, 8, 8, 0.85) 100%);
@@ -339,8 +339,8 @@ export function injectImmersionStyles(): void {
       padding: 0 12px;
       line-height: 36px;
       border-radius: 12px;
-      border: 1px solid rgba(154, 170, 255, 0.3);
-      background: rgba(154, 170, 255, 0.08);
+      border: 1px solid rgba(98, 195, 168, 0.3);
+      background: rgba(98, 195, 168, 0.08);
       font-size: 13px;
       color: var(--sh-muted);
     }
@@ -372,8 +372,8 @@ export function injectImmersionStyles(): void {
       color: rgba(241, 241, 239, 0.4);
     }
     .study-harvester-cloze-translation:focus {
-      border-color: rgba(154, 170, 255, 0.7);
-      box-shadow: 0 0 0 3px rgba(154, 170, 255, 0.15);
+      border-color: rgba(98, 195, 168, 0.7);
+      box-shadow: 0 0 0 3px rgba(98, 195, 168, 0.15);
     }
     .study-harvester-btn-save {
       flex: none;
@@ -382,8 +382,8 @@ export function injectImmersionStyles(): void {
       padding: 0 18px;
       border-radius: 12px;
       border: none;
-      background: #f2f2f0;
-      color: #111111;
+      background: #62c3a8;
+      color: #08130f;
       font: 600 13px "YouTube Sans", Roboto, system-ui, sans-serif;
       cursor: pointer;
       box-shadow: 0 6px 20px -10px rgba(0, 0, 0, 0.8);
@@ -497,7 +497,7 @@ export function injectImmersionStyles(): void {
       text-overflow: ellipsis;
     }
     #study-harvester-limit-card .sh-limit-goal {
-      color: #9aaaff;
+      color: #62c3a8;
       font-size: 11px;
       font-weight: 500;
     }
@@ -522,12 +522,12 @@ export function injectImmersionStyles(): void {
     }
     #study-harvester-limit-card .sh-limit-btn.is-accent {
       border-color: transparent;
-      background-color: #f2f2f0;
-      color: #111111;
+      background-color: #62c3a8;
+      color: #08130f;
       font-weight: 600;
     }
     .study-harvester-hud-btn.is-on {
-      border-color: rgba(154, 170, 255, 0.55);
+      border-color: rgba(98, 195, 168, 0.55);
       color: var(--sh-accent);
     }
     .sh-listen-first .ytp-caption-window-container {
@@ -571,7 +571,7 @@ export function injectImmersionStyles(): void {
       font-weight: 600;
       letter-spacing: 0.08em;
       text-transform: none;
-      color: #9aaaff;
+      color: #62c3a8;
     }
     #study-harvester-listen-card .sh-listen-meta {
       flex: 1;
@@ -643,8 +643,8 @@ export function injectImmersionStyles(): void {
     }
     #study-harvester-listen-card .sh-listen-btn.is-accent {
       border-color: transparent;
-      background-color: #f2f2f0;
-      color: #111111;
+      background-color: #62c3a8;
+      color: #08130f;
       font-weight: 600;
       box-shadow: 0 6px 20px -10px rgba(0, 0, 0, 0.8);
     }
@@ -653,7 +653,7 @@ export function injectImmersionStyles(): void {
     }
     #study-harvester-listen-card .sh-listen-btn:focus-visible,
     #study-harvester-listen-card .sh-listen-off:focus-visible {
-      outline: 2px solid #9aaaff;
+      outline: 2px solid #62c3a8;
       outline-offset: 2px;
     }
     #study-harvester-listen-card .sh-listen-kbd {

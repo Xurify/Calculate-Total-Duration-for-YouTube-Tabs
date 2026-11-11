@@ -22,6 +22,7 @@
 
   .budget-chip[aria-pressed="true"] {
     @apply bg-surface-hover text-text-primary font-semibold;
+    box-shadow: inset 0 0 0 1px var(--color-border-hover);
   }
 
   .menu-panel {

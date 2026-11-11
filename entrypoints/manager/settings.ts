@@ -105,7 +105,9 @@ function showSettingsSection(sectionId: string): void {
   const sections = document.querySelectorAll<HTMLElement>("[data-settings-section]");
   for (const section of sections) section.hidden = section.id !== sectionId;
   for (const item of document.querySelectorAll<HTMLElement>("[data-settings-target]")) {
-    item.setAttribute("aria-current", String(item.dataset.settingsTarget === sectionId));
+    const selected = item.dataset.settingsTarget === sectionId;
+    item.setAttribute("aria-selected", String(selected));
+    item.tabIndex = selected ? 0 : -1;
   }
   document.querySelector(".settings-body")?.scrollTo({ top: 0 });
 }
@@ -133,8 +135,24 @@ export function saveSettings(): void {
 
 export function wireSettings() {
   document.getElementById("btn-settings")?.addEventListener("click", () => openSettings());
-  for (const item of document.querySelectorAll<HTMLElement>("[data-settings-target]")) {
-    item.addEventListener("click", () => showSettingsSection(item.dataset.settingsTarget ?? ""));
+  const tabs = [...document.querySelectorAll<HTMLElement>("[data-settings-target]")];
+  for (const tab of tabs) {
+    const sectionId = tab.dataset.settingsTarget ?? "";
+    tab.id = `settings-tab-${sectionId}`;
+    tab.setAttribute("aria-controls", sectionId);
+    const panel = document.getElementById(sectionId);
+    panel?.setAttribute("role", "tabpanel");
+    panel?.setAttribute("aria-labelledby", tab.id);
+    tab.addEventListener("click", () => showSettingsSection(sectionId));
+    tab.addEventListener("keydown", (event) => {
+      const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+      const jump = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : -1;
+      if (!step && jump < 0) return;
+      const next = tabs[jump >= 0 ? jump : (tabs.indexOf(tab) + step + tabs.length) % tabs.length];
+      showSettingsSection(next.dataset.settingsTarget ?? "");
+      next.focus();
+      event.preventDefault();
+    });
   }
 
   document.getElementById("focus-language-list")?.addEventListener("change", (event) => {

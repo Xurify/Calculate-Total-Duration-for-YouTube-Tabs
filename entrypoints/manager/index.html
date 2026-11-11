@@ -170,12 +170,12 @@
         <div class="settings-shell animate-in zoom-in-95 duration-200">
             <aside class="settings-nav">
                 <h3 id="settings-title" class="settings-page-title">Settings</h3>
-                <nav class="flex flex-col gap-0.5" aria-label="Settings sections">
-                    <button type="button" class="settings-nav-item" data-settings-target="settings-sec-languages" aria-current="false">Languages</button>
-                    <button type="button" class="settings-nav-item" data-settings-target="settings-sec-display" aria-current="false">Appearance</button>
-                    <button type="button" class="settings-nav-item" data-settings-target="settings-sec-keyboard" aria-current="false">Keyboard</button>
-                    <button type="button" class="settings-nav-item" data-settings-target="settings-sec-sessions" aria-current="false">Saved sessions</button>
-                    <button type="button" class="settings-nav-item" data-settings-target="settings-sec-data" aria-current="false">Data &amp; storage</button>
+                <nav class="settings-tabs" role="tablist" aria-label="Settings sections">
+                    <button type="button" class="settings-nav-item" role="tab" data-settings-target="settings-sec-languages" aria-selected="false">Languages</button>
+                    <button type="button" class="settings-nav-item" role="tab" data-settings-target="settings-sec-display" aria-selected="false">Appearance</button>
+                    <button type="button" class="settings-nav-item" role="tab" data-settings-target="settings-sec-keyboard" aria-selected="false">Keyboard</button>
+                    <button type="button" class="settings-nav-item" role="tab" data-settings-target="settings-sec-sessions" aria-selected="false">Saved sessions</button>
+                    <button type="button" class="settings-nav-item" role="tab" data-settings-target="settings-sec-data" aria-selected="false">Data &amp; storage</button>
                 </nav>
             </aside>
             <div class="settings-body custom-scrollbar">

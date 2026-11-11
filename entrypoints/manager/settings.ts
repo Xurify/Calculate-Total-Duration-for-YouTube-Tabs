@@ -101,11 +101,22 @@ export function applyFocusLanguages(keys: string[]): void {
   renderFocusLanguageList();
 }
 
+function showSettingsSection(sectionId: string): void {
+  const sections = document.querySelectorAll<HTMLElement>("[data-settings-section]");
+  for (const section of sections) section.hidden = section.id !== sectionId;
+  for (const item of document.querySelectorAll<HTMLElement>("[data-settings-target]")) {
+    item.setAttribute("aria-current", String(item.dataset.settingsTarget === sectionId));
+  }
+  document.querySelector(".settings-body")?.scrollTo({ top: 0 });
+}
+
 export function openSettings(scrollToId?: string): void {
   app.isSettingsOpen = true;
   render();
   renderFocusLanguageList();
   void loadWatchedLanguages();
+  const owner = scrollToId ? document.getElementById(scrollToId)?.closest<HTMLElement>("[data-settings-section]") : null;
+  showSettingsSection(owner?.id ?? "settings-sec-languages");
   if (scrollToId) document.getElementById(scrollToId)?.scrollIntoView({ block: "nearest" });
 }
 
@@ -122,6 +133,9 @@ export function saveSettings(): void {
 
 export function wireSettings() {
   document.getElementById("btn-settings")?.addEventListener("click", () => openSettings());
+  for (const item of document.querySelectorAll<HTMLElement>("[data-settings-target]")) {
+    item.addEventListener("click", () => showSettingsSection(item.dataset.settingsTarget ?? ""));
+  }
 
   document.getElementById("focus-language-list")?.addEventListener("change", (event) => {
     const box = event.target;

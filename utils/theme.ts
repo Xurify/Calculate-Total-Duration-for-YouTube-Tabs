@@ -1,4 +1,5 @@
 import "@fontsource-variable/newsreader/wght.css";
+import "@fontsource-variable/newsreader/wght-italic.css";
 import "@fontsource-variable/instrument-sans/wght.css";
 
 export type ThemePreference = "system" | "light" | "dark";

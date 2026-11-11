@@ -14,13 +14,13 @@ export function setupApp() {
     <div class="flex flex-col h-popup max-h-popup w-full bg-surface overflow-hidden">
       <header data-v-header class="shrink-0 px-4 pt-2.5 pb-0.5">
         <div class="flex items-center gap-1">
-          <span class="font-display text-[18px] font-medium text-text-primary leading-none flex-1 min-w-0 truncate">Study Harvester</span>
+          <span class="font-display italic text-[21px] font-normal text-text-primary leading-none flex-1 min-w-0 truncate">Study Harvester</span>
           <button id="refresh-tabs" type="button" class="popup-icon group/refresh" title="Refresh tabs" aria-label="Refresh tabs"><span class="group-active/refresh:rotate-180 transition-transform duration-500 flex"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg></span></button>
           <button id="go-to-settings" type="button" class="popup-icon" title="Settings" aria-label="Settings"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
         </div>
         <div class="mt-2 flex flex-col gap-1.5">
           <div class="flex items-baseline justify-between gap-3">
-            <div class="font-display text-[32px] leading-none tracking-[-0.02em] text-text-primary"><span id="stat-remaining">0 min</span> <span id="stat-remaining-suffix" class="text-text-muted">left</span></div>
+            <div class="text-[30px] font-medium leading-none tracking-[-0.025em] text-text-primary"><span id="stat-remaining">0 min</span> <span id="stat-remaining-suffix" class="font-display italic text-[22px] font-normal tracking-normal text-text-muted">left</span></div>
             <span id="stat-watched" class="text-[12px] text-text-secondary tabular-nums whitespace-nowrap"><span id="stat-watched-pct" class="font-semibold text-text-primary">0 %</span> watched</span>
           </div>
           <div class="popup-langs" role="table" aria-label="Time by language">
@@ -53,7 +53,7 @@ export function setupApp() {
             </div>
           </div>
           <div class="mt-2 flex items-center gap-2">
-            <button type="button" class="np-play-pause w-8 h-8 shrink-0 flex items-center justify-center rounded-full bg-accent text-on-accent border-0 cursor-pointer hover:bg-accent-hover active:scale-95 transition-colors" title="Play or pause" aria-label="Play or pause"></button>
+            <button type="button" class="np-play-pause w-8 h-8 shrink-0 flex items-center justify-center rounded-full bg-primary text-on-primary border-0 cursor-pointer hover:bg-primary-hover active:scale-95 transition-colors" title="Play or pause" aria-label="Play or pause"></button>
             <button type="button" class="np-next w-7 h-7 shrink-0 flex items-center justify-center rounded-full border border-border bg-surface text-text-primary cursor-pointer hover:bg-surface-hover active:scale-95 transition-colors" title="Play the next video" aria-label="Play the next video"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5 4 15 12 5 20 5 4"/><rect x="16" y="4" width="3" height="16" rx="1"/></svg></button>
             <span class="np-time text-[12px] text-text-secondary tabular-nums min-w-0 truncate"></span>
             <div class="ml-auto flex items-center gap-1.5 shrink-0">
@@ -69,8 +69,8 @@ export function setupApp() {
       </section>
 
       <div id="up-next-divider" class="flex items-center gap-3 px-4 pt-2.5 pb-0.5 shrink-0">
-        <span class="font-display text-[17px] font-medium text-text-primary flex-1">Up next <span id="up-next-count" class="font-sans text-[11px] font-normal text-text-muted ml-1"></span></span>
-        <span class="inline-flex gap-0.5 rounded-lg border border-border bg-surface p-0.5" role="group" aria-label="Order">
+        <span class="font-display italic text-[18px] font-normal text-text-primary flex-1">Up next <span id="up-next-count" class="font-sans text-[11px] font-normal text-text-muted ml-1"></span></span>
+        <span class="inline-flex gap-0.5 rounded-full border border-border p-0.5" role="group" aria-label="Order">
           <button id="sort-order" type="button" class="theme-option theme-option--small" aria-pressed="true">Tab order</button>
           <button id="sort-duration" type="button" class="theme-option theme-option--small" aria-pressed="false">Longest first</button>
         </span>
@@ -79,12 +79,12 @@ export function setupApp() {
       <div id="video-list" class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-2 pb-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent"></div>
 
       <footer class="shrink-0 px-3 py-2.5 border-t border-border bg-surface flex items-center gap-2">
-        <button id="popup-stage-study" type="button" class="flex-1 h-[38px] rounded-[10px] border-0 bg-accent text-on-accent text-[13px] font-semibold flex items-center justify-center gap-2 cursor-pointer hover:bg-accent-hover transition-colors active:scale-[0.98] disabled:opacity-45 disabled:cursor-default disabled:hover:bg-accent disabled:active:scale-100" title="Start a focused study session from this window's tabs">
+        <button id="popup-stage-study" type="button" class="flex-1 h-[38px] rounded-lg border-0 bg-primary text-on-primary text-[13px] font-semibold flex items-center justify-center gap-2 cursor-pointer hover:bg-primary-hover transition-colors active:scale-[0.98] disabled:opacity-45 disabled:cursor-default disabled:hover:bg-primary disabled:active:scale-100" title="Start a focused study session from this window's tabs">
           <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           Start study session
         </button>
-        <button id="open-manager" type="button" class="h-[38px] px-3.5 rounded-[10px] border border-border bg-surface-elevated text-text-primary text-[13px] font-medium cursor-pointer hover:bg-surface-hover transition-colors" title="Open the full desk">Open desk</button>
-        <button id="popup-reading-list" type="button" class="h-[38px] px-3 rounded-[10px] border border-border bg-surface-elevated text-text-secondary text-[12px] font-medium cursor-pointer hover:bg-surface-hover transition-colors flex items-center gap-1.5" title="Open reading list on the desk" aria-label="Reading list">
+        <button id="open-manager" type="button" class="h-[38px] px-4 rounded-full border border-border bg-transparent text-text-primary text-[13px] font-medium cursor-pointer hover:bg-surface-hover transition-colors" title="Open the full desk">Open desk</button>
+        <button id="popup-reading-list" type="button" class="h-[38px] px-3.5 rounded-full border border-border bg-transparent text-text-secondary text-[12px] font-medium cursor-pointer hover:bg-surface-hover transition-colors flex items-center gap-1.5" title="Open reading list on the desk" aria-label="Reading list">
           Reading <span id="popup-reading-count" class="tabular-nums">0</span>
         </button>
       </footer>

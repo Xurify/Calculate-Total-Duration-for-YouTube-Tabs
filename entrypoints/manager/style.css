@@ -33,15 +33,15 @@ body {
 
 @layer components {
   .nav-tabs {
-    @apply flex items-center gap-0.5 h-9 p-0.5 rounded-lg border border-border bg-surface-elevated;
+    @apply flex items-center gap-0.5 h-10 p-1 rounded-full border border-border bg-transparent;
   }
 
   .nav-pill {
-    @apply h-8 px-3 rounded-md text-[13px] font-medium leading-none text-text-secondary border-0 bg-transparent cursor-pointer transition-colors hover:text-text-primary inline-flex items-center gap-1.5 whitespace-nowrap;
+    @apply h-8 px-3.5 rounded-full text-[13px] font-medium leading-none text-text-secondary border-0 bg-transparent cursor-pointer transition-colors hover:text-text-primary inline-flex items-center gap-1.5 whitespace-nowrap;
   }
 
   .nav-badge {
-    @apply inline-flex items-center justify-center min-w-[1.125rem] h-[1.125rem] px-1 rounded bg-surface text-[11px] font-semibold leading-none tabular-nums text-text-muted;
+    @apply inline-flex items-center justify-center min-w-[1.125rem] h-[1.125rem] px-1.5 rounded-full bg-surface-hover text-[11px] font-semibold leading-none tabular-nums text-text-muted;
   }
 
   .brand {
@@ -53,16 +53,15 @@ body {
   }
 
   .icon-btn {
-    @apply w-9 h-9 flex items-center justify-center rounded-[10px] border border-border bg-surface-elevated text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer active:scale-[0.96];
+    @apply w-8 h-8 flex items-center justify-center rounded-full border border-transparent bg-transparent text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer active:scale-[0.96];
   }
 
   .btn-primary {
-    @apply h-10 px-4 rounded-[10px] border-0 bg-accent text-on-accent text-sm font-semibold inline-flex items-center gap-2 whitespace-nowrap cursor-pointer transition-colors hover:bg-accent-hover active:scale-[0.98];
+    @apply h-10 px-5 rounded-lg border-0 bg-primary text-on-primary text-sm font-semibold inline-flex items-center gap-2 whitespace-nowrap cursor-pointer transition-colors hover:bg-primary-hover active:scale-[0.98];
   }
 
   .queue-card {
-    @apply rounded-2xl border border-border bg-surface-elevated overflow-hidden;
-    box-shadow: 0 14px 36px -28px var(--shadow-ink);
+    @apply rounded-xl border border-border bg-surface-elevated overflow-hidden;
   }
 
   .queue-row {
@@ -79,7 +78,7 @@ body {
   }
 
   .queue-offset {
-    @apply font-display text-[15px] text-text-muted pl-[18px] self-center tabular-nums select-none;
+    @apply font-display italic text-[15px] text-text-muted pl-[18px] self-center tabular-nums select-none;
   }
 
   .queue-row--now .queue-offset {
@@ -355,7 +354,7 @@ body {
   }
 
   .queue-row--focused {
-    box-shadow: inset 3px 0 0 0 var(--color-accent);
+    box-shadow: inset 0 0 0 1px var(--color-border-hover);
     background: color-mix(in srgb, var(--color-surface-hover) 55%, transparent);
   }
 
@@ -369,8 +368,7 @@ body {
   }
 
   .session-card {
-    @apply flex flex-col gap-2.5 p-5 rounded-2xl border border-border bg-surface-elevated cursor-pointer transition-[border-color,box-shadow] text-left;
-    box-shadow: 0 10px 30px -26px var(--shadow-ink);
+    @apply flex flex-col gap-2.5 p-5 rounded-xl border border-border bg-surface-elevated cursor-pointer transition-[border-color,box-shadow] text-left;
   }
 
   .session-card:hover,
@@ -387,7 +385,7 @@ body {
   }
 
   .session-thumbs {
-    @apply grid grid-cols-4 gap-1 -mx-1 -mt-1 mb-1 rounded-xl overflow-hidden;
+    @apply grid grid-cols-4 gap-1 -mx-1 -mt-1 mb-1 rounded-lg overflow-hidden;
   }
 
   .session-thumb {
@@ -713,7 +711,7 @@ body {
   display: grid;
   gap: 1.5rem;
   padding: 1.25rem 1.5rem;
-  border-radius: 14px;
+  border-radius: 12px;
   border: 1px solid var(--color-border);
   background-color: var(--color-surface-elevated);
 }
@@ -776,7 +774,7 @@ body {
   width: 100%;
   padding: 0.6rem 0.5rem;
   border: 0;
-  border-radius: 10px;
+  border-radius: 8px;
   background: transparent;
   color: inherit;
   text-align: left;
@@ -809,9 +807,9 @@ body {
   gap: 0.5rem;
   padding: 0.4rem 0.5rem 0.4rem 0.4rem;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
-  background-color: color-mix(in srgb, var(--color-surface-elevated) 96%, transparent);
-  box-shadow: 0 12px 32px -8px rgb(0 0 0 / 0.28), 0 2px 6px rgb(0 0 0 / 0.08);
+  border-radius: 999px;
+  background-color: color-mix(in srgb, var(--color-surface-overlay) 96%, transparent);
+  box-shadow: 0 12px 32px -8px rgb(0 0 0 / 0.35);
   backdrop-filter: blur(16px);
   transform: translateX(-50%);
   animation: selection-bar-in 0.18s ease-out;
@@ -865,8 +863,8 @@ body {
 .settings-group {
   padding: 0 1rem;
   border: 1px solid var(--color-border);
-  border-radius: 14px;
-  background-color: var(--color-surface);
+  border-radius: 12px;
+  background-color: color-mix(in srgb, var(--color-text-primary) 3%, transparent);
 }
 
 .focus-language-list {
@@ -897,11 +895,9 @@ body {
   align-items: center;
   gap: 0.375rem;
   list-style: none;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
   cursor: pointer;
 }
 
@@ -955,8 +951,8 @@ body:has(.selection-bar:not(.hidden)) #toast {
   margin: 0;
   padding: 0 1rem;
   border: 1px solid var(--color-border);
-  border-radius: 14px;
-  background-color: var(--color-surface);
+  border-radius: 12px;
+  background-color: color-mix(in srgb, var(--color-text-primary) 3%, transparent);
 }
 
 .shortcut-row {
@@ -1013,7 +1009,7 @@ kbd {
   gap: 0.75rem;
   min-width: 0;
   padding: 1.1rem 1.25rem 1rem;
-  border-radius: 14px;
+  border-radius: 12px;
   border: 1px solid var(--color-border);
   background-color: var(--color-surface-elevated);
 }
@@ -1111,10 +1107,9 @@ kbd {
   flex-direction: column;
   gap: 1.25rem;
   padding: 1.25rem 1.5rem;
-  border-radius: 18px;
+  border-radius: 12px;
   border: 1px solid var(--color-border);
   background-color: var(--color-surface-elevated);
-  box-shadow: 0 18px 44px -32px var(--shadow-ink);
 }
 
 .practice-card--empty {
@@ -1123,8 +1118,6 @@ kbd {
 
 .practice-kicker {
   font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
   color: var(--color-accent);
 }
 
@@ -1157,8 +1150,8 @@ kbd {
   height: 60px;
   border: 0;
   border-radius: 999px;
-  background-color: var(--color-accent);
-  color: var(--color-on-accent);
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
   cursor: pointer;
   transition: background-color 0.15s ease, transform 0.15s ease;
 }
@@ -1170,7 +1163,7 @@ kbd {
 }
 
 .practice-play:hover {
-  background-color: var(--color-accent-hover);
+  background-color: var(--color-primary-hover);
 }
 
 .practice-play:active {
@@ -1312,8 +1305,8 @@ kbd {
   height: 2.5rem;
   padding: 0 0.625rem 0 1rem;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
-  background-color: var(--color-surface-elevated);
+  border-radius: 8px;
+  background-color: transparent;
   color: var(--color-text-primary);
   font: 600 14px/1 var(--font-sans);
   cursor: pointer;
@@ -1336,19 +1329,19 @@ kbd {
 
 .practice-grade--good {
   border-color: transparent;
-  background-color: var(--color-accent);
-  color: var(--color-on-accent);
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
 }
 
 .practice-grade--good:hover {
   border-color: transparent;
-  background-color: var(--color-accent-hover);
+  background-color: var(--color-primary-hover);
 }
 
 .practice-card .practice-grade--good kbd {
   border-color: transparent;
-  background-color: color-mix(in srgb, var(--color-on-accent) 22%, transparent);
-  color: var(--color-on-accent);
+  background-color: color-mix(in srgb, var(--color-on-primary) 18%, transparent);
+  color: var(--color-on-primary);
 }
 
 .practice-actions {
@@ -1468,7 +1461,7 @@ kbd {
   flex-wrap: wrap;
   padding: 0.875rem 1rem 0.875rem 1.125rem;
   border: 1px solid var(--color-border);
-  border-radius: 14px;
+  border-radius: 12px;
   background-color: var(--color-surface-elevated);
 }
 
@@ -1478,8 +1471,8 @@ kbd {
   justify-content: center;
   width: 2.25rem;
   height: 2.25rem;
-  border-radius: 10px;
-  background-color: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border-radius: 8px;
+  background-color: color-mix(in srgb, var(--color-accent) 14%, transparent);
   color: var(--color-accent);
 }
 
@@ -1631,4 +1624,244 @@ kbd {
 #desk-head.desk-head--compact #desk-time ~ *,
 #desk-head.desk-head--compact .desk-kicker-line {
   display: none;
+}
+
+/* Hero line: the number is plain sans, the unit after it is the quiet serif italic. */
+#desk-time-value {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  letter-spacing: -0.025em;
+}
+
+#desk-time-suffix {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.desk-kicker-line {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+[role="dialog"] > div {
+  background-color: var(--color-surface-overlay);
+  border-radius: 16px;
+  box-shadow: 0 24px 60px -20px rgb(0 0 0 / 0.5);
+}
+
+.settings-group-label {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  padding-left: 0.25rem;
+}
+
+/* Settings: a left list of sections and one section at a time on the right. */
+.settings-shell {
+  position: relative;
+  display: grid;
+  grid-template-columns: 13.5rem minmax(0, 1fr);
+  width: min(52rem, calc(100vw - 2rem));
+  height: min(36rem, calc(100vh - 4rem));
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+}
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 1.5rem 0.75rem 1rem;
+  border-right: 1px solid var(--color-border);
+}
+
+.settings-page-title {
+  margin: 0;
+  padding: 0 0.5rem;
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  font-style: italic;
+  font-weight: 400;
+  line-height: 1.1;
+  color: var(--color-text-primary);
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: 500 13px/1.2 var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.settings-nav-item:hover {
+  color: var(--color-text-primary);
+  background-color: color-mix(in srgb, var(--color-surface-hover) 60%, transparent);
+}
+
+.settings-nav-item[aria-current="true"] {
+  background-color: var(--color-surface-hover);
+  color: var(--color-text-primary);
+}
+
+.settings-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: #fff;
+}
+
+.settings-tile--lg {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+}
+
+.settings-tile--lg svg {
+  width: 20px;
+  height: 20px;
+}
+
+.settings-tile--green { background-color: light-dark(#2f8a52, #2b8a4f); }
+.settings-tile--violet { background-color: light-dark(#7a52c4, #7650c0); }
+.settings-tile--slate { background-color: light-dark(#6b7280, #5a606b); }
+.settings-tile--blue { background-color: light-dark(#3a64d4, #3a62cf); }
+.settings-tile--amber { background-color: light-dark(#b8741a, #b4701b); }
+
+.settings-body {
+  position: relative;
+  overflow-y: auto;
+  padding: 1.5rem 2rem 2rem;
+}
+
+.settings-section[hidden] {
+  display: none;
+}
+
+.settings-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  margin-bottom: 1.5rem;
+  padding-right: 2rem;
+}
+
+.settings-sec-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  font-style: italic;
+  font-weight: 400;
+  line-height: 1.1;
+  color: var(--color-text-primary);
+}
+
+.settings-sec-desc {
+  margin: 0.2rem 0 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 0.875rem 0;
+}
+
+.settings-row + .settings-row {
+  border-top: 1px solid var(--color-border);
+}
+
+.settings-row-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.settings-row-desc {
+  margin-top: 0.125rem;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
+.settings-group {
+  padding: 0 1.25rem;
+}
+
+@media (max-width: 640px) {
+  .settings-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .settings-nav {
+    flex-direction: row;
+    align-items: center;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+    padding: 0.75rem;
+  }
+  .settings-nav nav {
+    flex-direction: row;
+  }
+  .settings-page-title {
+    display: none;
+  }
+}
+
+/* On wide windows the content stays a readable width instead of stretching edge to edge. */
+#desk-head,
+#view-toolbar,
+#tab-list,
+#time-panel,
+#practice-panel,
+#sessions-panel {
+  padding-inline: max(2rem, calc((100% - 72rem) / 2));
+}
+
+.time-bar {
+  height: 2rem;
+  border-radius: 8px;
+}
+
+/* Time and Practice read as a stack of quiet cards, one per topic. */
+:is(#time-panel, #practice-panel) section.flex.flex-col.gap-3 {
+  gap: 1rem;
+  padding: 1.25rem 1.5rem 1.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background-color: var(--color-surface-elevated);
+}
+
+:is(#time-panel, #practice-panel) section .bg-surface-elevated,
+:is(#time-panel, #practice-panel) section .streak-card,
+:is(#time-panel, #practice-panel) section .hours-card {
+  background-color: color-mix(in srgb, var(--color-text-primary) 3%, transparent);
+}
+
+:is(#time-panel, #practice-panel) section .channel-row:hover,
+:is(#time-panel, #practice-panel) section .channel-row--open {
+  background-color: var(--color-surface-hover);
 }

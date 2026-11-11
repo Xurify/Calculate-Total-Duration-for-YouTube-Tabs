@@ -46,7 +46,7 @@ export function dailyRulesHtml(rules: LanguageLimitUsage[], watch: WatchSummary,
       </li>`;
     })
     .join("");
-  return `<section class="flex flex-col gap-3">
+  return `<section class="flex flex-col gap-3 time-card">
     ${timeSectionHeading("Daily goals and limits", "", "goal")}
     <p class="text-xs text-text-muted m-0">A goal is the least you want in a language each day, a limit the most. The player shows a note when a goal is reached and when a limit is close or passed. Time is real time, so 2× speed counts half.${prefs.watchHistory ? "" : " Goals and limits need YouTube history, which is off."}</p>
     ${rowsHtml ? `<ul class="m-0 p-0 list-none flex flex-col gap-2.5">${rowsHtml}</ul>` : ""}
@@ -55,7 +55,7 @@ export function dailyRulesHtml(rules: LanguageLimitUsage[], watch: WatchSummary,
 
 /** Painted once per visit, apart from the live rows above it, so a refresh never touches what is being typed. */
 export function addRuleFormHtml(): string {
-  return `<form id="time-rule-add" class="flex flex-wrap items-center gap-2 -mt-3">
+  return `<form id="time-rule-add" class="time-card flex flex-wrap items-center gap-2 -mt-2">
       <span class="ui-segmented" role="group" aria-label="Kind">
         <button type="button" class="time-rule-kind budget-chip text-xs" data-kind="goal" aria-pressed="${newRuleKind === "goal"}">At least</button>
         <button type="button" class="time-rule-kind budget-chip text-xs" data-kind="limit" aria-pressed="${newRuleKind === "limit"}">At most</button>

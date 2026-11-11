@@ -86,7 +86,7 @@ function dayBarsHtml(watch: WatchSummary, colors: Map<string, string>): string {
   </span>`;
   const busiest = watch.days.reduce((best, day) => (day.seconds > best.seconds ? day : best), watch.days[0]);
   const busiestHtml = busiest && busiest.seconds >= 60 ? `<span class="text-xs text-text-muted">Most on ${escapeHtml(longDate(busiest.key))}</span>` : "";
-  return `<section class="flex flex-col gap-3">
+  return `<section class="flex flex-col gap-3 time-card">
     ${timeSectionHeading("By day", `${busiestHtml}${modeHtml}`, "day")}
     <div class="grid ${dense ? "gap-px" : "gap-2"}" style="grid-template-columns: repeat(${watch.days.length}, minmax(0, 1fr))">${bars}</div>
     <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-secondary">${legend}</div>
@@ -120,7 +120,7 @@ function heatmapHtml(watch: WatchSummary): string {
     )
     .join("");
   const legend = Array.from({ length: HEAT_LEVELS }, (_unused, level) => `<span class="heat-cell legend-swatch" data-level="${level}"></span>`).join("");
-  return `<section class="flex flex-col gap-3">
+  return `<section class="flex flex-col gap-3 time-card">
     ${timeSectionHeading("When you watch", `<span class="text-xs text-text-muted">Most on ${WEEKDAY_NAMES[peakDay]} around ${escapeHtml(hourWords(peakHour))}</span>`, "clock")}
     <div class="grid gap-[3px]" style="grid-template-columns: 2.5rem repeat(24, minmax(0, 1fr))"><span></span>${hourLabels}${rows}</div>
     <div class="flex items-center justify-end gap-1.5 text-[11px] text-text-muted">Less ${legend} More</div>
@@ -135,7 +135,7 @@ function speedSectionHtml(watch: WatchSummary): string {
   const longest = Math.max(...rows.map((row) => row.playedSeconds));
   const rowsHtml = rows
     .map(
-      (row) => `<li class="grid grid-cols-[4rem_minmax(0,1fr)_6rem_9rem] items-center gap-3 text-sm">
+      (row) => `<li class="grid grid-cols-[3.5rem_minmax(0,1fr)_5rem_auto] items-center gap-3 text-sm">
         <span class="speed-chip justify-self-start${row.rate === 1 ? " speed-chip--plain" : ""}">${speedWords(row.rate)}</span>
         <span class="h-2 rounded-full bg-surface-elevated overflow-hidden flex"><span class="h-full rounded-full bg-accent" style="width:${Math.max(2, (row.playedSeconds / longest) * 100)}%;opacity:${(0.45 + Math.min(1, (row.rate - 0.75) / 1.25) * 0.55).toFixed(2)}"></span></span>
         <span class="text-right text-text-secondary tabular-nums whitespace-nowrap">${formatMinutesWords(row.playedSeconds)}</span>
@@ -144,7 +144,7 @@ function speedSectionHtml(watch: WatchSummary): string {
     )
     .join("");
   const saved = videoTime - realTime;
-  return `<section class="flex flex-col gap-3">
+  return `<section class="flex flex-col gap-3 time-card time-card--half">
     ${timeSectionHeading("Playback speed", "", "speed")}
     <p class="text-xs text-text-muted m-0">${formatMinutesWords(videoTime)} of video took ${formatMinutesWords(realTime)} of real time${saved >= 60 ? `, ${formatMinutesWords(saved)} saved by watching faster` : ""}. Goals, limits and every total here use real time.</p>
     <ul class="m-0 p-0 list-none flex flex-col gap-2">${rowsHtml}</ul>
@@ -201,7 +201,7 @@ function channelsSectionHtml(watch: WatchSummary, colors: Map<string, string>): 
   const hidden = filtered.length - CHANNEL_ROWS;
   const toggleHtml =
     hidden > 0 ? `<button type="button" id="time-channels-toggle" class="chip h-8 text-xs self-start">${showAllChannels ? `Show top ${CHANNEL_ROWS}` : `Show all ${filtered.length} channels`}</button>` : "";
-  return `<section class="flex flex-col gap-3">
+  return `<section class="flex flex-col gap-3 time-card">
     ${timeSectionHeading("Channels", `<span class="text-xs text-text-muted tabular-nums">${watch.byChannel.length}</span>`, "channels")}
     ${filterHtml}
     <ul class="m-0 p-0 list-none flex flex-col">${rowsHtml}</ul>
@@ -250,18 +250,20 @@ export function watchSectionsHtml(watch: WatchSummary, prefs: TimeTrackingPrefs)
   const moreVideos = Math.min(VIDEO_ROWS_PAGE * 2, watch.videos.length - shownVideos);
   const videosMoreHtml = moreVideos > 0 ? `<button type="button" id="time-videos-more" class="chip h-8 text-xs self-start" data-shown="${shownVideos}">Show ${moreVideos} more</button>` : "";
 
+  const speedHtml = speedSectionHtml(watch);
+
   return `
-    <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">${tilesHtml}</div>
+    <div class="time-card time-tiles grid grid-cols-2 md:grid-cols-3 gap-3">${tilesHtml}</div>
     ${dayBarsHtml(watch, colors)}
-    <section class="flex flex-col gap-3">
+    ${heatmapHtml(watch)}
+    <section class="flex flex-col gap-3 time-card${speedHtml ? " time-card--half" : ""}">
       ${timeSectionHeading("Languages", `<button type="button" id="time-choose-languages" class="link-btn text-xs">${app.focusLanguages.length > 0 ? "Change languages" : "Choose languages"}</button>`, "languages")}
       ${languageShareHtml}
       <ul class="m-0 p-0 list-none flex flex-col gap-2">${languagesHtml}</ul>
     </section>
-    ${heatmapHtml(watch)}
-    ${speedSectionHtml(watch)}
+    ${speedHtml}
     ${channelsSectionHtml(watch, colors)}
-    <section class="flex flex-col gap-3">
+    <section class="flex flex-col gap-3 time-card">
       ${timeSectionHeading("Videos", `<span class="text-xs text-text-muted tabular-nums">${shownVideos < watch.videos.length ? `${shownVideos} of ${watch.videos.length}` : watch.videos.length}</span>`, "list")}
       <div class="grid grid-cols-[4rem_minmax(0,1fr)_3.5rem_3rem_5.5rem] gap-3 text-[11px] uppercase tracking-[0.1em] text-text-muted" aria-hidden="true"><span></span><span>Video</span><span>Speed</span><span class="text-right">Seen</span><span class="text-right">Time</span></div>
       <ul class="m-0 p-0 list-none flex flex-col gap-2.5">${videosHtml}</ul>

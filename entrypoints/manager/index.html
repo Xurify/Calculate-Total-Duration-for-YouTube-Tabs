@@ -61,55 +61,54 @@
 
       <section class="flex-1 min-w-0 flex flex-col overflow-hidden">
 
-        <div id="desk-head" class="shrink-0 px-8 pt-6 pb-4 border-b border-border flex flex-col gap-4">
-          <div class="flex flex-wrap items-end gap-x-6 gap-y-3">
-            <div class="min-w-0 flex flex-col gap-1">
-              <div class="desk-kicker-line text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted truncate">
-                <span id="desk-kicker">On the desk</span> · <span id="current-view-title">All windows</span>
+        <div id="desk-head" class="shrink-0 pt-8 pb-4">
+          <div class="desk-head-grid">
+            <div class="desk-hero">
+              <div class="min-w-0 flex flex-col gap-1">
+                <div class="desk-kicker-line text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted truncate">
+                  <span id="desk-kicker">On the desk</span> · <span id="current-view-title">All windows</span>
+                </div>
+                <div id="desk-time" role="heading" aria-level="2" class="font-display text-[40px] leading-none tracking-[-0.02em] text-text-primary whitespace-nowrap">
+                  <span id="desk-time-value">Reading your tabs</span><span class="text-text-muted ml-[0.25em]" id="desk-time-suffix">…</span>
+                </div>
+                <div id="current-view-stats" class="text-sm text-text-secondary truncate min-h-5">&nbsp;</div>
               </div>
-              <div id="desk-time" role="heading" aria-level="2" class="font-display text-[40px] leading-none tracking-[-0.02em] text-text-primary whitespace-nowrap">
-                <span id="desk-time-value">Reading your tabs</span><span class="text-text-muted ml-[0.25em]" id="desk-time-suffix">…</span>
-              </div>
-              <div id="current-view-stats" class="text-sm text-text-secondary truncate min-h-5">&nbsp;</div>
+              <div id="time-bar" class="time-bar hidden" role="img" aria-label="Where the time goes, by language"></div>
+              <div id="time-bar-skeleton" class="time-bar time-bar--skeleton" aria-hidden="true"></div>
+              <div id="time-bar-rest" class="time-bar-rest hidden"></div>
             </div>
-            <div class="flex-1"></div>
-            <div id="selection-actions" class="selection-bar hidden" role="toolbar" aria-label="Selected videos">
-              <button type="button" id="btn-clear-selection" class="selection-bar-clear" title="Clear selection">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            <div id="planner" class="planner-card hidden flex-col">
+              <div class="planner-title">Plan a session</div>
+              <span class="planner-budgets" role="group" aria-label="Time budget">
+                <button type="button" class="budget-chip" data-budget="20">20 min</button>
+                <button type="button" class="budget-chip" data-budget="45">45 min</button>
+                <button type="button" class="budget-chip" data-budget="90">1 h 30</button>
+                <button type="button" class="budget-chip" data-budget="all">All</button>
+              </span>
+              <button type="button" id="btn-start-plan" class="btn-primary justify-center" title="Start a study session with the planned videos (P)" aria-keyshortcuts="p">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                <span id="btn-start-plan-label">Start</span>
               </button>
-              <span id="selection-count" class="text-[13px] font-semibold text-text-primary whitespace-nowrap tabular-nums pr-1">0 selected</span>
-              <span class="w-px h-5 bg-border" aria-hidden="true"></span>
-              <button type="button" id="btn-stage-study-selected" class="chip chip--accent whitespace-nowrap" title="Start a study session with the selected tabs">
-                <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                Study selected
-              </button>
-              <div id="move-to-section-wrap" class="relative hidden">
-                <button type="button" id="btn-move-to-section" class="chip whitespace-nowrap">Move to pile…</button>
-                <div id="move-to-section-popover" role="menu" aria-label="Move to pile" class="menu-panel menu-panel-animate custom-scrollbar hidden absolute left-1/2 -translate-x-1/2 bottom-full z-50 mb-2 max-h-64 min-w-[220px] overflow-y-auto"></div>
-              </div>
-              <button type="button" id="btn-close-selected" class="chip chip--danger whitespace-nowrap">Close selected</button>
-            </div>
-            <div id="planner" class="hidden flex-col items-end gap-1.5 shrink-0">
-              <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-muted">Plan a session from this list</div>
-              <div class="flex items-center gap-2.5">
-                <span class="inline-flex gap-0.5 p-0.5 rounded-lg border border-border bg-surface" role="group" aria-label="Time budget">
-                  <button type="button" class="budget-chip" data-budget="20">20 min</button>
-                  <button type="button" class="budget-chip" data-budget="45">45 min</button>
-                  <button type="button" class="budget-chip" data-budget="90">1 h 30</button>
-                  <button type="button" class="budget-chip" data-budget="all">All</button>
-                </span>
-                <button type="button" id="btn-start-plan" class="btn-primary" title="Start a study session with the planned videos (P)" aria-keyshortcuts="p">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                  <span id="btn-start-plan-label">Start</span>
-                </button>
-              </div>
               <span id="plan-summary" class="text-xs text-text-muted"></span>
             </div>
-            <button type="button" id="btn-stage-study-header" class="hidden" aria-hidden="true"></button>
           </div>
-          <div id="time-bar" class="time-bar hidden" role="img" aria-label="Where the time goes, by language"></div>
-          <div id="time-bar-skeleton" class="time-bar time-bar--skeleton" aria-hidden="true"></div>
-          <div id="time-bar-rest" class="time-bar-rest hidden"></div>
+        <div id="selection-actions" class="selection-bar hidden" role="toolbar" aria-label="Selected videos">
+          <button type="button" id="btn-clear-selection" class="selection-bar-clear" title="Clear selection">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+          <span id="selection-count" class="text-[13px] font-semibold text-text-primary whitespace-nowrap tabular-nums pr-1">0 selected</span>
+          <span class="w-px h-5 bg-border" aria-hidden="true"></span>
+          <button type="button" id="btn-stage-study-selected" class="chip chip--accent whitespace-nowrap" title="Start a study session with the selected tabs">
+            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Study selected
+          </button>
+          <div id="move-to-section-wrap" class="relative hidden">
+            <button type="button" id="btn-move-to-section" class="chip whitespace-nowrap">Move to pile…</button>
+            <div id="move-to-section-popover" role="menu" aria-label="Move to pile" class="menu-panel menu-panel-animate custom-scrollbar hidden absolute left-1/2 -translate-x-1/2 bottom-full z-50 mb-2 max-h-64 min-w-[220px] overflow-y-auto"></div>
+          </div>
+          <button type="button" id="btn-close-selected" class="chip chip--danger whitespace-nowrap">Close selected</button>
+        </div>
+          <button type="button" id="btn-stage-study-header" class="hidden" aria-hidden="true"></button>
         </div>
 
         <div id="view-toolbar" class="shrink-0 px-8 py-2.5 flex items-center gap-2 flex-wrap border-b border-border/60">

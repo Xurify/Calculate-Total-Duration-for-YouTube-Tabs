@@ -130,7 +130,7 @@ function mandalaSectionHtml(data: TimeSummaryResponse): string {
   const inUse = rules.length > 0 || counted > 0 || summary.pendingMinutes > 0;
 
   return `
-    <details class="group flex flex-col gap-4"${inUse ? " open" : ""}>
+    <details class="time-card group flex flex-col gap-4"${inUse ? " open" : ""}>
       <summary class="flex items-center gap-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
         <h2 class="font-display text-[22px] font-medium m-0 flex items-center gap-2">Mandala<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-text-muted transition-transform group-open:rotate-90" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></h2>
         ${counted > 0 ? `<span class="text-sm text-text-muted tabular-nums">${formatMinutesWords(counted)}</span>` : ""}
@@ -286,7 +286,7 @@ function timeSlotHtml(slot: TimeSlot, data: TimeSummaryResponse): string {
     case "hours":
       return languageHoursSectionHtml(data.hours ?? [], watch);
     case "range":
-      return `<div class="flex items-center justify-between gap-3 pt-2 border-t border-border"><span class="text-sm text-text-secondary">Everything below covers the last</span><span class="ui-segmented" role="group" aria-label="Range">
+      return `<div class="time-card flex items-center justify-between gap-3 pt-2"><span class="text-sm text-text-secondary">Everything below covers the last</span><span class="ui-segmented" role="group" aria-label="Range">
         ${TIME_RANGES.map((days) => `<button type="button" class="time-range budget-chip" data-days="${days}" aria-pressed="${timeRange === days}">${days} days</button>`).join("")}
       </span></div>`;
     case "watch":
@@ -294,7 +294,7 @@ function timeSlotHtml(slot: TimeSlot, data: TimeSummaryResponse): string {
     case "mandala":
       return mandalaSectionHtml(data);
     case "tracking":
-      return `<section class="flex flex-col gap-3 pb-6">
+      return `<section class="time-card flex flex-col gap-3">
       <h2 class="font-display text-[22px] font-medium m-0">Tracking</h2>
       <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
         <label class="flex items-center gap-2.5 text-sm text-text-primary cursor-pointer"><input type="checkbox" role="switch" id="time-watch-history" class="ui-switch"${prefs.watchHistory ? " checked" : ""} /> YouTube history</label>

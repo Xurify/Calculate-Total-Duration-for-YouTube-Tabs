@@ -61,7 +61,7 @@ body {
   }
 
   .queue-card {
-    @apply rounded-xl border border-border bg-surface-elevated overflow-hidden;
+    @apply rounded-lg border border-border bg-surface-elevated overflow-hidden;
   }
 
   .queue-row {
@@ -368,7 +368,7 @@ body {
   }
 
   .session-card {
-    @apply flex flex-col gap-2.5 p-5 rounded-xl border border-border bg-surface-elevated cursor-pointer transition-[border-color,box-shadow] text-left;
+    @apply flex flex-col gap-2.5 p-5 rounded-lg border border-border bg-surface-elevated cursor-pointer transition-[border-color,box-shadow] text-left;
   }
 
   .session-card:hover,
@@ -711,7 +711,7 @@ body {
   display: grid;
   gap: 1.5rem;
   padding: 1.25rem 1.5rem;
-  border-radius: 12px;
+  border-radius: 8px;
   border: 1px solid var(--color-border);
   background-color: var(--color-surface-elevated);
 }
@@ -863,7 +863,7 @@ body {
 .settings-group {
   padding: 0 1rem;
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: 8px;
   background-color: color-mix(in srgb, var(--color-text-primary) 3%, transparent);
 }
 
@@ -951,7 +951,7 @@ body:has(.selection-bar:not(.hidden)) #toast {
   margin: 0;
   padding: 0 1rem;
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: 8px;
   background-color: color-mix(in srgb, var(--color-text-primary) 3%, transparent);
 }
 
@@ -1009,7 +1009,7 @@ kbd {
   gap: 0.75rem;
   min-width: 0;
   padding: 1.1rem 1.25rem 1rem;
-  border-radius: 12px;
+  border-radius: 8px;
   border: 1px solid var(--color-border);
   background-color: var(--color-surface-elevated);
 }
@@ -1107,7 +1107,7 @@ kbd {
   flex-direction: column;
   gap: 1.25rem;
   padding: 1.25rem 1.5rem;
-  border-radius: 12px;
+  border-radius: 8px;
   border: 1px solid var(--color-border);
   background-color: var(--color-surface-elevated);
 }
@@ -1461,7 +1461,7 @@ kbd {
   flex-wrap: wrap;
   padding: 0.875rem 1rem 0.875rem 1.125rem;
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: 8px;
   background-color: var(--color-surface-elevated);
 }
 
@@ -1649,7 +1649,7 @@ kbd {
 
 [role="dialog"] > div {
   background-color: var(--color-surface-overlay);
-  border-radius: 16px;
+  border-radius: 12px;
   box-shadow: 0 24px 60px -20px rgb(0 0 0 / 0.5);
 }
 
@@ -1831,28 +1831,174 @@ kbd {
   }
 }
 
-/* On wide windows the content stays a readable width instead of stretching edge to edge. */
+/*
+ * Page layout. Content sits in a centred column instead of stretching to the window edges:
+ * the desk is a narrow rail plus one list, the other pages are a single readable column.
+ */
+:root {
+  --shell: 70rem;
+  --page: 58rem;
+  --rail: 12.5rem;
+  --gutter: 1.5rem;
+}
+
+main {
+  position: relative;
+}
+
+#facet-rail {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  bottom: 0;
+  left: max(var(--gutter), calc((100% - var(--shell)) / 2));
+  width: var(--rail);
+  border-right: 0;
+  padding: 2rem 0 1.5rem;
+}
+
 #desk-head,
 #view-toolbar,
 #tab-list,
 #time-panel,
 #practice-panel,
 #sessions-panel {
-  padding-inline: max(2rem, calc((100% - 72rem) / 2));
+  padding-inline: max(var(--gutter), calc((100% - var(--page)) / 2));
 }
 
-.time-bar {
-  height: 2rem;
+main:has(#facet-rail:not(.hidden)) :is(#desk-head, #view-toolbar, #tab-list) {
+  padding-left: calc(max(var(--gutter), (100% - var(--shell)) / 2) + var(--rail) + 2rem);
+  padding-right: max(var(--gutter), calc((100% - var(--shell)) / 2));
+}
+
+#practice-panel {
+  padding-inline: max(var(--gutter), calc((100% - 46rem) / 2));
+}
+
+#desk-head,
+#view-toolbar {
+  border-bottom: 0;
+}
+
+#view-toolbar {
+  padding-block: 0.5rem;
+}
+
+/* Top of every page: the big number on a card, with the session planner beside it on the desk. */
+.desk-head-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.desk-head-grid:has(#planner:not(.hidden)) {
+  grid-template-columns: minmax(0, 1fr) 17rem;
+}
+
+main:has(#facet-rail:not(.hidden)) .desk-hero {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 1.25rem;
+  padding: 1.25rem 1.5rem 1.5rem;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
+  background-color: var(--color-surface-elevated);
 }
 
-/* Time and Practice read as a stack of quiet cards, one per topic. */
-:is(#time-panel, #practice-panel) section.flex.flex-col.gap-3 {
+.desk-hero:not(:has(#time-bar:not(.hidden))) {
+  gap: 0;
+}
+
+#time-bar-skeleton {
+  margin-top: 0.25rem;
+}
+
+.planner-card {
+  gap: 0.75rem;
+  padding: 1.25rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background-color: var(--color-surface-elevated);
+}
+
+.planner-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.planner-budgets {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+}
+
+.planner-budgets .budget-chip {
+  padding-inline: 0.25rem;
+  text-align: center;
+}
+
+.planner-card #plan-summary {
+  line-height: 1.45;
+}
+
+@media (max-width: 52rem) {
+  .desk-head-grid:has(#planner:not(.hidden)) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #facet-rail {
+    position: static;
+    width: auto;
+    max-height: 9rem;
+  }
+  main:has(#facet-rail:not(.hidden)) {
+    flex-direction: column;
+  }
+  main:has(#facet-rail:not(.hidden)) :is(#desk-head, #view-toolbar, #tab-list) {
+    padding-inline: var(--gutter);
+  }
+}
+
+/* Time: a two-column grid of cards; most cards take the full row. */
+#time-panel.flex {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 1rem;
+}
+
+#time-panel .time-card {
+  grid-column: 1 / -1;
+}
+
+#time-panel .time-card--half {
+  grid-column: auto;
+}
+
+#time-panel .time-card--half .streak-card {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#time-panel section.time-card,
+#time-panel details.time-card,
+#practice-panel section.flex.flex-col.gap-3 {
   gap: 1rem;
   padding: 1.25rem 1.5rem 1.5rem;
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: 8px;
   background-color: var(--color-surface-elevated);
+}
+
+#time-panel .time-tiles {
+  gap: 0.75rem;
+}
+
+#time-panel form.time-card {
+  margin-top: -0.25rem;
 }
 
 :is(#time-panel, #practice-panel) section .bg-surface-elevated,
@@ -1864,4 +2010,24 @@ kbd {
 :is(#time-panel, #practice-panel) section .channel-row:hover,
 :is(#time-panel, #practice-panel) section .channel-row--open {
   background-color: var(--color-surface-hover);
+}
+
+@media (max-width: 52rem) {
+  #time-panel.flex {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Saved sessions: a grid that fills the column. */
+.session-grid {
+  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+  gap: 1rem;
+}
+
+main:has(#practice-panel.flex) #desk-head {
+  padding-inline: max(var(--gutter), calc((100% - 46rem) / 2));
+}
+
+.session-card-actions .chip {
+  white-space: nowrap;
 }

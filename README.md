@@ -25,4 +25,4 @@ bun run dev
 
 ## Design
 
-One shared theme lives in `assets/theme.css`: warm neutral surfaces, an amber accent, Newsreader for headings and numbers, Instrument Sans for text. Light, dark and system modes are switched from Settings. The icon in `public/icon/icon.svg` is the source for the PNG sizes.
+One shared theme lives in `assets/theme.css`: cool near-black and soft grey surfaces with thin borders, a teal accent that also fills the main buttons, an upright serif for page headings and large numbers, and a sans for everything else. Pages use centred columns; the desk shows the time left and the session planner as one band. Light, dark and system modes are switched from Settings. The icon in `public/icon/icon.svg` is the source for the PNG sizes.

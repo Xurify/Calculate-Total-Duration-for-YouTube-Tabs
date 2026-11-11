@@ -65,12 +65,11 @@ export function showConfirm(options: ConfirmOptions): Promise<boolean> {
     messageEl.textContent = options.message;
     okBtn.textContent = options.confirmLabel ?? "OK";
     cancelBtn.textContent = options.cancelLabel ?? "Cancel";
-    okBtn.classList.remove("bg-accent", "hover:bg-accent-hover", "bg-danger", "hover:bg-danger-hover");
-    okBtn.classList.add("text-on-accent");
+    okBtn.classList.remove("bg-primary", "hover:bg-primary-hover", "text-on-primary", "bg-danger", "hover:bg-danger-hover", "text-on-accent");
     if (options.confirmDanger) {
-      okBtn.classList.add("bg-danger", "hover:bg-danger-hover");
+      okBtn.classList.add("bg-danger", "hover:bg-danger-hover", "text-on-accent");
     } else {
-      okBtn.classList.add("bg-accent", "hover:bg-accent-hover");
+      okBtn.classList.add("bg-primary", "hover:bg-primary-hover", "text-on-primary");
     }
     const close = (result: boolean) => {
       modal.classList.add("hidden");

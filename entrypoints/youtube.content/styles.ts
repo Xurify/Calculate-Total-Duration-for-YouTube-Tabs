@@ -7,12 +7,12 @@ export function injectImmersionStyles(): void {
   styleElement.id = "study-harvester-immersion-styles";
   styleElement.textContent = `
     #study-harvester-player-hud {
-      --sh-ink: #f4efe6;
-      --sh-muted: rgba(244, 239, 230, 0.62);
-      --sh-glass: rgba(14, 12, 11, 0.62);
-      --sh-glass-strong: rgba(14, 12, 11, 0.86);
+      --sh-ink: #f1f1ef;
+      --sh-muted: rgba(241, 241, 239, 0.62);
+      --sh-glass: rgba(12, 12, 12, 0.62);
+      --sh-glass-strong: rgba(12, 12, 12, 0.86);
       --sh-line: rgba(255, 255, 255, 0.1);
-      --sh-accent: #f0b65a;
+      --sh-accent: #62c3a8;
       position: absolute;
       top: 12px;
       right: 12px;
@@ -61,7 +61,7 @@ export function injectImmersionStyles(): void {
       transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
     }
     .study-harvester-hud-btn:hover:not(:disabled) {
-      background-color: rgba(40, 36, 32, 0.8);
+      background-color: rgba(38, 38, 38, 0.8);
       border-color: rgba(255, 255, 255, 0.22);
       transform: translateY(-1px);
     }
@@ -76,21 +76,21 @@ export function injectImmersionStyles(): void {
     }
     .study-harvester-hud-btn.is-accent {
       border-color: transparent;
-      background-color: var(--sh-accent);
-      color: #1a1410;
+      background-color: #62c3a8;
+      color: #08130f;
       font-weight: 600;
-      box-shadow: 0 8px 24px -8px rgba(240, 182, 90, 0.7);
+      box-shadow: 0 6px 20px -10px rgba(0, 0, 0, 0.8);
     }
     .study-harvester-hud-btn.is-accent:hover:not(:disabled) {
-      background-color: var(--sh-accent);
+      background-color: #62c3a8;
       filter: brightness(1.06);
     }
     .study-harvester-shelf-popover {
-      --sh-ink: #f4efe6;
-      --sh-muted: rgba(244, 239, 230, 0.62);
-      --sh-glass-strong: rgba(14, 12, 11, 0.86);
+      --sh-ink: #f1f1ef;
+      --sh-muted: rgba(241, 241, 239, 0.62);
+      --sh-glass-strong: rgba(12, 12, 12, 0.86);
       --sh-line: rgba(255, 255, 255, 0.1);
-      --sh-accent: #f0b65a;
+      --sh-accent: #62c3a8;
       position: fixed;
       z-index: 2147483644;
       min-width: 230px;
@@ -110,7 +110,7 @@ export function injectImmersionStyles(): void {
       padding: 6px 10px 8px;
       font: 600 11px Roboto, Arial, sans-serif;
       letter-spacing: 0.08em;
-      text-transform: uppercase;
+      text-transform: none;
       color: var(--sh-muted);
     }
     .study-harvester-shelf-hint {
@@ -163,13 +163,13 @@ export function injectImmersionStyles(): void {
       to { opacity: 1; transform: translateY(0) scale(1); }
     }
     #study-harvester-cloze-modal {
-      --sh-ink: #f4efe6;
-      --sh-muted: rgba(244, 239, 230, 0.58);
+      --sh-ink: #f1f1ef;
+      --sh-muted: rgba(241, 241, 239, 0.58);
       --sh-line: rgba(255, 255, 255, 0.1);
-      --sh-accent: #f0b65a;
+      --sh-accent: #62c3a8;
       position: absolute;
       inset: 0;
-      background: linear-gradient(180deg, rgba(10, 9, 8, 0.2) 0%, rgba(10, 9, 8, 0.55) 55%, rgba(10, 9, 8, 0.85) 100%);
+      background: linear-gradient(180deg, rgba(8, 8, 8, 0.2) 0%, rgba(8, 8, 8, 0.55) 55%, rgba(8, 8, 8, 0.85) 100%);
       z-index: 2147483645;
       display: flex;
       align-items: flex-end;
@@ -185,7 +185,7 @@ export function injectImmersionStyles(): void {
       padding: 14px 20px 16px;
       border-radius: 18px;
       border: 1px solid rgba(255, 255, 255, 0.1);
-      background-color: rgba(16, 14, 13, 0.82);
+      background-color: rgba(14, 14, 14, 0.82);
       backdrop-filter: blur(18px) saturate(140%);
       -webkit-backdrop-filter: blur(18px) saturate(140%);
       box-shadow: 0 24px 60px -24px rgba(0, 0, 0, 1), inset 0 1px 0 rgba(255, 255, 255, 0.06);
@@ -210,7 +210,7 @@ export function injectImmersionStyles(): void {
       flex: none;
       font-weight: 600;
       letter-spacing: 0.08em;
-      text-transform: uppercase;
+      text-transform: none;
       color: var(--sh-accent);
     }
     .study-harvester-cloze-source {
@@ -339,8 +339,8 @@ export function injectImmersionStyles(): void {
       padding: 0 12px;
       line-height: 36px;
       border-radius: 12px;
-      border: 1px solid rgba(240, 182, 90, 0.3);
-      background: rgba(240, 182, 90, 0.08);
+      border: 1px solid rgba(98, 195, 168, 0.3);
+      background: rgba(98, 195, 168, 0.08);
       font-size: 13px;
       color: var(--sh-muted);
     }
@@ -348,7 +348,7 @@ export function injectImmersionStyles(): void {
       font-size: 11px;
       font-weight: 600;
       letter-spacing: 0.08em;
-      text-transform: uppercase;
+      text-transform: none;
     }
     .study-harvester-cloze-pick-word {
       color: var(--sh-accent);
@@ -369,11 +369,11 @@ export function injectImmersionStyles(): void {
       transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
     .study-harvester-cloze-translation::placeholder {
-      color: rgba(244, 239, 230, 0.4);
+      color: rgba(241, 241, 239, 0.4);
     }
     .study-harvester-cloze-translation:focus {
-      border-color: rgba(240, 182, 90, 0.7);
-      box-shadow: 0 0 0 3px rgba(240, 182, 90, 0.15);
+      border-color: rgba(98, 195, 168, 0.7);
+      box-shadow: 0 0 0 3px rgba(98, 195, 168, 0.15);
     }
     .study-harvester-btn-save {
       flex: none;
@@ -382,11 +382,11 @@ export function injectImmersionStyles(): void {
       padding: 0 18px;
       border-radius: 12px;
       border: none;
-      background: var(--sh-accent);
-      color: #1a1410;
+      background: #62c3a8;
+      color: #08130f;
       font: 600 13px "YouTube Sans", Roboto, system-ui, sans-serif;
       cursor: pointer;
-      box-shadow: 0 10px 28px -12px rgba(240, 182, 90, 0.9);
+      box-shadow: 0 6px 20px -10px rgba(0, 0, 0, 0.8);
       transition: filter 0.15s ease, transform 0.15s ease;
     }
     .study-harvester-btn-save:hover {
@@ -401,10 +401,10 @@ export function injectImmersionStyles(): void {
       padding: 10px 14px;
       border-radius: 12px;
       border: 1px solid rgba(255, 255, 255, 0.1);
-      background-color: rgba(14, 12, 11, 0.82);
+      background-color: rgba(12, 12, 12, 0.82);
       backdrop-filter: blur(14px);
       -webkit-backdrop-filter: blur(14px);
-      color: #f4efe6;
+      color: #f1f1ef;
       font: 400 14px/20px Roboto, Arial, sans-serif;
       z-index: 61;
       transition: opacity 0.2s ease, transform 0.2s ease;
@@ -423,11 +423,11 @@ export function injectImmersionStyles(): void {
       padding: 14px;
       border-radius: 16px;
       border: 1px solid rgba(255, 255, 255, 0.1);
-      background-color: rgba(14, 12, 11, 0.88);
+      background-color: rgba(12, 12, 12, 0.88);
       backdrop-filter: blur(18px) saturate(140%);
       -webkit-backdrop-filter: blur(18px) saturate(140%);
       box-shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.9);
-      color: #f4efe6;
+      color: #f1f1ef;
       font: 400 13px/18px Roboto, Arial, sans-serif;
       z-index: 62;
       opacity: 0;
@@ -449,12 +449,12 @@ export function injectImmersionStyles(): void {
     }
     #study-harvester-limit-card .sh-limit-used,
     #study-harvester-limit-card .sh-limit-meta {
-      color: rgba(244, 239, 230, 0.62);
+      color: rgba(241, 241, 239, 0.62);
       font-size: 12px;
     }
     #study-harvester-limit-card .sh-limit-note {
       margin: 2px 0 10px;
-      color: rgba(244, 239, 230, 0.78);
+      color: rgba(241, 241, 239, 0.78);
     }
     #study-harvester-limit-card .sh-limit-list {
       display: flex;
@@ -497,7 +497,7 @@ export function injectImmersionStyles(): void {
       text-overflow: ellipsis;
     }
     #study-harvester-limit-card .sh-limit-goal {
-      color: #f0b65a;
+      color: #62c3a8;
       font-size: 11px;
       font-weight: 500;
     }
@@ -513,7 +513,7 @@ export function injectImmersionStyles(): void {
       border-radius: 8px;
       border: 1px solid rgba(255, 255, 255, 0.14);
       background: transparent;
-      color: #f4efe6;
+      color: #f1f1ef;
       font: 500 13px/1 "YouTube Sans", Roboto, Arial, sans-serif;
       cursor: pointer;
     }
@@ -522,12 +522,12 @@ export function injectImmersionStyles(): void {
     }
     #study-harvester-limit-card .sh-limit-btn.is-accent {
       border-color: transparent;
-      background-color: #f0b65a;
-      color: #1a1410;
+      background-color: #62c3a8;
+      color: #08130f;
       font-weight: 600;
     }
     .study-harvester-hud-btn.is-on {
-      border-color: rgba(240, 182, 90, 0.55);
+      border-color: rgba(98, 195, 168, 0.55);
       color: var(--sh-accent);
     }
     .sh-listen-first .ytp-caption-window-container {
@@ -542,11 +542,11 @@ export function injectImmersionStyles(): void {
       padding: 14px 16px;
       border-radius: 18px;
       border: 1px solid rgba(255, 255, 255, 0.1);
-      background-color: rgba(16, 14, 13, 0.86);
+      background-color: rgba(14, 14, 14, 0.86);
       backdrop-filter: blur(18px) saturate(140%);
       -webkit-backdrop-filter: blur(18px) saturate(140%);
       box-shadow: 0 24px 60px -24px rgba(0, 0, 0, 1), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-      color: #f4efe6;
+      color: #f1f1ef;
       font: 400 13px/18px "YouTube Sans", Roboto, Arial, sans-serif;
       z-index: 62;
       display: flex;
@@ -565,13 +565,13 @@ export function injectImmersionStyles(): void {
       align-items: center;
       gap: 10px;
       font-size: 12px;
-      color: rgba(244, 239, 230, 0.6);
+      color: rgba(241, 241, 239, 0.6);
     }
     #study-harvester-listen-card .sh-listen-kicker {
       font-weight: 600;
       letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: #f0b65a;
+      text-transform: none;
+      color: #62c3a8;
     }
     #study-harvester-listen-card .sh-listen-meta {
       flex: 1;
@@ -587,19 +587,19 @@ export function injectImmersionStyles(): void {
       border: none;
       border-radius: 8px;
       background: transparent;
-      color: rgba(244, 239, 230, 0.6);
+      color: rgba(241, 241, 239, 0.6);
       font: 500 12px "YouTube Sans", Roboto, Arial, sans-serif;
       cursor: pointer;
     }
     #study-harvester-listen-card .sh-listen-off:hover {
       background-color: rgba(255, 255, 255, 0.08);
-      color: #f4efe6;
+      color: #f1f1ef;
     }
     #study-harvester-listen-card .sh-listen-prompt,
     #study-harvester-listen-card .sh-listen-text {
       margin: 0;
       font: 400 22px/1.45 Georgia, "Times New Roman", serif;
-      color: #f4efe6;
+      color: #f1f1ef;
     }
     #study-harvester-listen-card .sh-listen-text {
       max-height: 140px;
@@ -608,7 +608,7 @@ export function injectImmersionStyles(): void {
     #study-harvester-listen-card .sh-listen-hint {
       margin: 2px 0 0;
       font-size: 12px;
-      color: rgba(244, 239, 230, 0.6);
+      color: rgba(241, 241, 239, 0.6);
     }
     #study-harvester-listen-card .sh-listen-actions {
       display: flex;
@@ -628,7 +628,7 @@ export function injectImmersionStyles(): void {
       border-radius: 8px;
       border: 1px solid rgba(255, 255, 255, 0.14);
       background: transparent;
-      color: #f4efe6;
+      color: #f1f1ef;
       font: 500 13px/1 "YouTube Sans", Roboto, Arial, sans-serif;
       cursor: pointer;
       transition: background-color 0.15s ease, filter 0.15s ease;
@@ -643,17 +643,17 @@ export function injectImmersionStyles(): void {
     }
     #study-harvester-listen-card .sh-listen-btn.is-accent {
       border-color: transparent;
-      background-color: #f0b65a;
-      color: #1a1410;
+      background-color: #62c3a8;
+      color: #08130f;
       font-weight: 600;
-      box-shadow: 0 10px 28px -12px rgba(240, 182, 90, 0.9);
+      box-shadow: 0 6px 20px -10px rgba(0, 0, 0, 0.8);
     }
     #study-harvester-listen-card .sh-listen-btn.is-accent:hover {
       filter: brightness(1.06);
     }
     #study-harvester-listen-card .sh-listen-btn:focus-visible,
     #study-harvester-listen-card .sh-listen-off:focus-visible {
-      outline: 2px solid #f0b65a;
+      outline: 2px solid #62c3a8;
       outline-offset: 2px;
     }
     #study-harvester-listen-card .sh-listen-kbd {
@@ -671,7 +671,7 @@ export function injectImmersionStyles(): void {
       opacity: 0.8;
     }
     #study-harvester-listen-card .sh-listen-btn.is-accent .sh-listen-kbd {
-      background-color: rgba(26, 20, 16, 0.14);
+      background-color: rgba(20, 20, 20, 0.14);
     }
   `;
   document.head.appendChild(styleElement);

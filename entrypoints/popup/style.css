@@ -13,12 +13,11 @@
 
 @layer components {
   .popup-icon {
-    @apply w-8 h-8 flex items-center justify-center rounded-lg border-0 bg-transparent text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer active:scale-95;
+    @apply w-8 h-8 flex items-center justify-center rounded-md border-0 bg-transparent text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer active:scale-95;
   }
 
   .np-card {
-    @apply rounded-[14px] border border-border bg-surface-elevated p-3 transition-[border-color,box-shadow] duration-300;
-    box-shadow: 0 10px 30px -24px var(--shadow-ink);
+    @apply rounded-xl border border-border bg-surface-elevated p-3 transition-[border-color,box-shadow] duration-300;
   }
 
   .np-card--playing {

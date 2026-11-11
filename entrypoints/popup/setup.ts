@@ -53,7 +53,7 @@ export function setupApp() {
             </div>
           </div>
           <div class="mt-2 flex items-center gap-2">
-            <button type="button" class="np-play-pause w-8 h-8 shrink-0 flex items-center justify-center rounded-full bg-accent text-on-accent border-0 cursor-pointer hover:bg-accent-hover active:scale-95 transition-colors" title="Play or pause" aria-label="Play or pause"></button>
+            <button type="button" class="np-play-pause w-8 h-8 shrink-0 flex items-center justify-center rounded-full bg-primary text-on-primary border-0 cursor-pointer hover:bg-primary-hover active:scale-95 transition-colors" title="Play or pause" aria-label="Play or pause"></button>
             <button type="button" class="np-next w-7 h-7 shrink-0 flex items-center justify-center rounded-full border border-border bg-surface text-text-primary cursor-pointer hover:bg-surface-hover active:scale-95 transition-colors" title="Play the next video" aria-label="Play the next video"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5 4 15 12 5 20 5 4"/><rect x="16" y="4" width="3" height="16" rx="1"/></svg></button>
             <span class="np-time text-[12px] text-text-secondary tabular-nums min-w-0 truncate"></span>
             <div class="ml-auto flex items-center gap-1.5 shrink-0">
@@ -79,12 +79,12 @@ export function setupApp() {
       <div id="video-list" class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-2 pb-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent"></div>
 
       <footer class="shrink-0 px-3 py-2.5 border-t border-border bg-surface flex items-center gap-2">
-        <button id="popup-stage-study" type="button" class="flex-1 h-[38px] rounded-[10px] border-0 bg-accent text-on-accent text-[13px] font-semibold flex items-center justify-center gap-2 cursor-pointer hover:bg-accent-hover transition-colors active:scale-[0.98] disabled:opacity-45 disabled:cursor-default disabled:hover:bg-accent disabled:active:scale-100" title="Start a focused study session from this window's tabs">
+        <button id="popup-stage-study" type="button" class="flex-1 h-[38px] rounded-md border-0 bg-primary text-on-primary text-[13px] font-semibold flex items-center justify-center gap-2 cursor-pointer hover:bg-primary-hover transition-colors active:scale-[0.98] disabled:opacity-45 disabled:cursor-default disabled:hover:bg-primary disabled:active:scale-100" title="Start a focused study session from this window's tabs">
           <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           Start study session
         </button>
-        <button id="open-manager" type="button" class="h-[38px] px-3.5 rounded-[10px] border border-border bg-surface-elevated text-text-primary text-[13px] font-medium cursor-pointer hover:bg-surface-hover transition-colors" title="Open the full desk">Open desk</button>
-        <button id="popup-reading-list" type="button" class="h-[38px] px-3 rounded-[10px] border border-border bg-surface-elevated text-text-secondary text-[12px] font-medium cursor-pointer hover:bg-surface-hover transition-colors flex items-center gap-1.5" title="Open reading list on the desk" aria-label="Reading list">
+        <button id="open-manager" type="button" class="h-[38px] px-4 rounded-md border border-border bg-transparent text-text-primary text-[13px] font-medium cursor-pointer hover:bg-surface-hover transition-colors" title="Open the full desk">Open desk</button>
+        <button id="popup-reading-list" type="button" class="h-[38px] px-3.5 rounded-md border border-border bg-transparent text-text-secondary text-[12px] font-medium cursor-pointer hover:bg-surface-hover transition-colors flex items-center gap-1.5" title="Open reading list on the desk" aria-label="Reading list">
           Reading <span id="popup-reading-count" class="tabular-nums">0</span>
         </button>
       </footer>

@@ -77,7 +77,7 @@ function renderSiteBlock(): void {
                 <span>Scope</span><div id="site-scope"></div>
               </div>
               <div class="flex items-center gap-2 pt-0.5">
-                <button type="button" id="site-save" class="h-7 px-3 rounded-md border-0 bg-accent text-on-accent text-[11px] font-semibold cursor-pointer hover:bg-accent-hover transition-colors">Count it</button>
+                <button type="button" id="site-save" class="h-7 px-3 rounded-md border-0 bg-primary text-on-primary text-[11px] font-semibold cursor-pointer hover:bg-primary-hover transition-colors">Count it</button>
                 ${canRemove ? `<button type="button" id="site-remove" class="h-7 px-2.5 rounded-md border border-border bg-surface text-[11px] font-medium text-text-secondary hover:text-danger hover:border-danger/40 cursor-pointer transition-colors">Stop counting</button>` : ""}
                 <span class="flex-1"></span>
                 <button type="button" id="site-cancel" class="h-7 px-2 rounded-md border-0 bg-transparent text-[11px] text-text-muted hover:text-text-primary cursor-pointer">Cancel</button>

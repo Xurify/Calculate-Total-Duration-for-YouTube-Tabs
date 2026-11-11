@@ -55,7 +55,7 @@ export function streakSectionHtml(streaks: GoalStreaks, watch: WatchSummary): st
   const legend = (byRules ? (["all", "some", "none"] as const) : (["all", "none"] as const))
     .map((status) => `<span class="flex items-center gap-1.5"><span class="streak-day streak-day--${status} legend-swatch"></span>${statusWords[status]}</span>`)
     .join("");
-  return `<section class="flex flex-col gap-3">
+  return `<section class="flex flex-col gap-3 time-card">
     ${timeSectionHeading("Streak", "", "streak")}
     <div class="streak-card">
       <div class="flex flex-col gap-4 min-w-0">
@@ -137,7 +137,7 @@ export function languageHoursSectionHtml(rows: LanguageHoursRow[], watch: WatchS
       </article>`;
     })
     .join("");
-  return `<section class="flex flex-col gap-3">
+  return `<section class="flex flex-col gap-3 time-card">
     ${timeSectionHeading("Hours of listening", `<span class="text-xs text-text-muted">All time</span>`, "clock")}
     <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">${cards}</div>
     <p class="text-xs text-text-muted m-0">Milestones at ${MILESTONE_HOURS.join(", ")} h are rough markers that comprehensible-input learners count by, not levels. Languages with a daily goal show here.</p>

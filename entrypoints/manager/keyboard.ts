@@ -186,6 +186,13 @@ export function handleDeskKeydown(event: KeyboardEvent): void {
       (row?.querySelector(".jump-btn, .session-open-new-tab") as HTMLElement | null)?.click();
       return;
     }
+    case "l": {
+      const row = focusedRow();
+      if (!row) return;
+      event.preventDefault();
+      (row.querySelector(".lang-tag--edit") as HTMLElement | null)?.click();
+      return;
+    }
     case "x": {
       const row = focusedRow();
       if (!row) return;

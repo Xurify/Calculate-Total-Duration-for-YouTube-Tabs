@@ -49,11 +49,16 @@ function languageLabelOf(languageName: string | null | undefined, code: string |
   return UNKNOWN_LANGUAGE;
 }
 
+/** Unlabelled videos keep their own row instead of hiding in "Other", so they are easy to find and label. */
+function focusedLanguageLabel(label: string): string {
+  return label === UNKNOWN_LANGUAGE ? label : focusLabelOf(app.focusLanguages, label);
+}
+
 function videoLanguageLabel(video: VideoData): string {
   const override = languageOverrideFor(app.languageOverrides, getVideoIdFromUrl(video.url), video.channelName);
-  if (override) return focusLabelOf(app.focusLanguages, override.name);
+  if (override) return focusedLanguageLabel(override.name);
   if (video.language === undefined && !video.suspended) return DETECTING_LANGUAGE;
-  return focusLabelOf(app.focusLanguages, languageLabelOf(video.languageName, video.language));
+  return focusedLanguageLabel(languageLabelOf(video.languageName, video.language));
 }
 
 /** The tab's own language, before languages outside Settings' list fold into "Other". */
@@ -63,7 +68,7 @@ export function sessionTabSpokenLanguage(tab: SavedSessionTab): string {
 }
 
 export function sessionTabLanguageLabel(tab: SavedSessionTab): string {
-  return focusLabelOf(app.focusLanguages, sessionTabSpokenLanguage(tab));
+  return focusedLanguageLabel(sessionTabSpokenLanguage(tab));
 }
 
 /** Real languages first by time, then the grey catch-alls. */
@@ -339,6 +344,32 @@ export function renderFacetCrumb(): void {
 
 // ───────────────────────── Time bar: where the hours go ─────────────────────────
 
+/** A segment too narrow for "Estonian 1 h 16 min" keeps just the name; the time stays in its tooltip. */
+function fitTimeBarLabels(bar: HTMLElement): void {
+  for (const label of bar.querySelectorAll<HTMLElement>(".time-bar-label")) {
+    label.classList.remove("time-bar-label--compact");
+    const name = label.querySelector<HTMLElement>(".time-bar-name");
+    if (label.scrollWidth > label.clientWidth || (name && name.scrollWidth > name.clientWidth)) {
+      label.classList.add("time-bar-label--compact");
+    }
+  }
+}
+
+let timeBarObserver: ResizeObserver | null = null;
+let lastTimeBarHtml = "";
+
+function watchTimeBarWidth(bar: HTMLElement): void {
+  if (timeBarObserver || typeof ResizeObserver === "undefined") return;
+  let lastWidth = 0;
+  timeBarObserver = new ResizeObserver(([entry]) => {
+    const width = Math.round(entry.contentRect.width);
+    if (width === lastWidth) return;
+    lastWidth = width;
+    fitTimeBarLabels(bar);
+  });
+  timeBarObserver.observe(bar);
+}
+
 export function renderTimeBar(): void {
   const bar = document.getElementById("time-bar");
   const rest = document.getElementById("time-bar-rest");
@@ -363,12 +394,13 @@ export function renderTimeBar(): void {
   const total = entries.reduce((sum, entry) => sum + entry.seconds, 0);
   if (total <= 0) {
     bar.innerHTML = "";
+    lastTimeBarHtml = "";
     bar.classList.add("hidden");
     if (rest) rest.classList.add("hidden");
     return;
   }
   const small: string[] = [];
-  bar.innerHTML = entries
+  const html = entries
     .map((entry) => {
       const share = (entry.seconds / total) * 100;
       const active = facets.language === entry.label;
@@ -376,10 +408,16 @@ export function renderTimeBar(): void {
       const detecting = entry.label === DETECTING_LANGUAGE;
       const labelled = share >= 9;
       if (!labelled) small.push(`<button type="button" class="time-bar-rest-item" data-facet-kind="language" data-facet-value="${escapeHtml(entry.label)}"><span class="facet-dot" style="background: ${languageColor(entry.label)}"></span>${escapeHtml(entry.label)} <span class="tabular-nums">${formatDurationWords(entry.seconds)}</span></button>`);
-      const label = labelled ? `<span class="time-bar-label">${escapeHtml(entry.label)} <span class="time-bar-time">${formatDurationWords(entry.seconds)}</span></span>` : "";
+      const label = labelled ? `<span class="time-bar-label"><span class="time-bar-name">${escapeHtml(entry.label)}</span><span class="time-bar-time">${formatDurationWords(entry.seconds)}</span></span>` : "";
       return `<button type="button" class="time-bar-seg${active ? " time-bar-seg--active" : ""}${dimmed ? " time-bar-seg--dim" : ""}${detecting ? " time-bar-seg--detecting" : ""}" style="flex: ${Math.max(1, Math.round(entry.seconds))} 1 0px; background: ${languageColor(entry.label)}" data-facet-kind="language" data-facet-value="${escapeHtml(entry.label)}" title="${escapeHtml(entry.label)}: ${entry.count} ${entry.count === 1 ? "video" : "videos"}, ${formatDurationWords(entry.seconds)} ${live ? "left" : "in total"}">${label}</button>`;
     })
     .join("");
+  if (lastTimeBarHtml !== html) {
+    lastTimeBarHtml = html;
+    bar.innerHTML = html;
+    fitTimeBarLabels(bar);
+  }
+  watchTimeBarWidth(bar);
   if (rest) {
     rest.innerHTML = small.length > 0 ? `<span class="text-text-muted">Also</span> ${small.join("")}` : "";
     rest.classList.toggle("hidden", small.length === 0);

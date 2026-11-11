@@ -5,7 +5,7 @@ import { renderPracticePanel } from "./practice";
 import { summarizeDuplicates } from "../../utils/sessions";
 import { app } from "./state";
 import { deskAvatarHtml } from "./avatars";
-import { renderSessionGrid, renderSessionList, renderVideoGrid, renderVideoList } from "./cards";
+import { cardLanguageLabel, updateLanguageTag, renderSessionGrid, renderSessionList, renderVideoGrid, renderVideoList } from "./cards";
 import { saveDeskSnapshot } from "./desk-snapshot";
 import { facetCrumbText, pruneStaleFacets, renderFacetCrumb, renderFacetRail, renderTimeBar } from "./facets";
 import { tabListStructureFingerprint } from "./fingerprint";
@@ -16,7 +16,7 @@ import { orderedSections, partitionLiveVideosBySection } from "./sections";
 import { applyTabListCheckboxIndeterminateFromAttr, updateSelectionUI } from "./selection";
 import { liveHeroTime, renderSidebar, setDeskHero, syncTopNavState } from "./sidebar";
 import { sortSessionTabsForDisplay, sortVideosForDisplay, videoGroupKey } from "./sorting";
-import { languageTagInnerHtml, plural } from "./time/html";
+import { plural } from "./time/html";
 import { syncCompactHeader } from "./compact-header";
 import { renderTimePanel, scheduleTimeRefresh } from "./time/panel";
 import { showToast } from "./toast";
@@ -150,15 +150,9 @@ export function updateLiveTabListCardsFromState() {
     }
     if (listBar) listBar.style.width = `${watchedPercent}%`;
 
-    const languageLabel = video.languageName ? video.languageName.split("(")[0].trim() : "";
+    const languageLabel = cardLanguageLabel(video.url, video.channelName, video.languageName);
     const langEl = card.querySelector(".manager-card-language") as HTMLElement | null;
-    if (langEl) {
-      if (langEl.dataset.label !== languageLabel) {
-        langEl.dataset.label = languageLabel;
-        langEl.innerHTML = languageTagInnerHtml(languageLabel);
-      }
-      langEl.classList.toggle("hidden", !languageLabel);
-    }
+    if (langEl) updateLanguageTag(langEl, languageLabel);
   });
 }
 
@@ -372,8 +366,8 @@ function renderMain() {
     updateDuplicatesFilterButton(duplicateSummary);
     const totalSec = tabsToShow.reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
     headerTitle.innerText = session.name;
-    headerStats.innerText = formatViewStats(tabsToShow.length, totalSec, duplicateSummary);
-    setDeskHero({ kicker: "Saved session", title: "", value: formatDurationWords(totalSec), suffix: "in total" });
+    headerStats.innerText = formatViewStats(tabsToShow.length, totalSec, duplicateSummary, false);
+    setDeskHero({ kicker: facetCrumbText() || "Saved session", title: "", value: formatDurationWords(totalSec), suffix: "in total" });
 
     const fpSession = tabListStructureFingerprint();
     if (fpSession === app.lastTabListFingerprint) return;

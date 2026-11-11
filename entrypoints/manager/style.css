@@ -117,6 +117,14 @@ body {
     @apply inline-flex items-center gap-1 whitespace-nowrap shrink-0 text-text-secondary;
   }
 
+  .lang-tag--unset {
+    @apply text-text-muted opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100;
+  }
+
+  .lang-tag--edit {
+    @apply border-0 bg-transparent py-0 px-1 -mx-1 rounded font-[inherit] text-[length:inherit] leading-[inherit] cursor-pointer hover:text-text-primary hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-accent transition-colors;
+  }
+
   .queue-actions {
     @apply flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity;
   }
@@ -254,8 +262,16 @@ body {
     background: rgba(26, 23, 20, 0.58);
   }
 
+  .time-bar-name {
+    @apply min-w-0 truncate;
+  }
+
   .time-bar-time {
     @apply font-normal opacity-80 tabular-nums;
+  }
+
+  .time-bar-label--compact .time-bar-time {
+    @apply hidden;
   }
 
   .queue-row--planned .queue-offset::before {
@@ -1776,7 +1792,7 @@ kbd {
 :root {
   --shell: 70rem;
   --page: 58rem;
-  --rail: 12.5rem;
+  --rail: 14rem;
   --gutter: 1.5rem;
 }
 

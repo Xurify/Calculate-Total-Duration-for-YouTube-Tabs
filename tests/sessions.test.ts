@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   dedupeTabsByVideoId,
+  findOpenTabFor,
   findSimilarSession,
   formatSavedAgo,
+  linkStartSeconds,
   sessionTotalSeconds,
   sessionsOverlapScore,
   suggestSessionName,
@@ -72,5 +74,42 @@ describe("formatSavedAgo", () => {
     expect(formatSavedAgo(now - 5 * 60_000, now)).toBe("5m ago");
     expect(formatSavedAgo(now - 3 * 3_600_000, now)).toBe("3h ago");
     expect(formatSavedAgo(now - 2 * 86_400_000, now)).toBe("2d ago");
+  });
+});
+
+describe("findOpenTabFor", () => {
+  const tabs = [
+    { id: 1, windowId: 10, url: "https://www.youtube.com/watch?v=abc123&t=42s", active: false },
+    { id: 2, windowId: 20, url: "https://www.youtube.com/watch?v=abc123&list=PL1", active: true },
+    { id: 3, windowId: 10, url: "https://example.com/article" },
+  ];
+
+  test("matches the same video whatever the link looks like", () => {
+    expect(findOpenTabFor(tabs, "https://youtu.be/abc123", 10)?.id).toBe(1);
+    expect(findOpenTabFor(tabs, "https://www.youtube.com/watch?v=abc123&t=90", 10)?.id).toBe(1);
+  });
+
+  test("prefers the current window, then the tab already in front", () => {
+    expect(findOpenTabFor(tabs, "https://youtu.be/abc123", 20)?.id).toBe(2);
+    expect(findOpenTabFor(tabs, "https://youtu.be/abc123", 99)?.id).toBe(2);
+  });
+
+  test("matches other pages by address and finds nothing for unopened videos", () => {
+    expect(findOpenTabFor(tabs, "https://example.com/article", 10)?.id).toBe(3);
+    expect(findOpenTabFor(tabs, "https://youtu.be/zzz999", 10)).toBeNull();
+  });
+});
+
+describe("linkStartSeconds", () => {
+  test("reads every form YouTube uses", () => {
+    expect(linkStartSeconds("https://www.youtube.com/watch?v=a&t=90")).toBe(90);
+    expect(linkStartSeconds("https://www.youtube.com/watch?v=a&t=90s")).toBe(90);
+    expect(linkStartSeconds("https://youtu.be/a?t=1m30s")).toBe(90);
+    expect(linkStartSeconds("https://www.youtube.com/watch?v=a&t=1h2m3s")).toBe(3723);
+  });
+
+  test("is null without a usable time", () => {
+    expect(linkStartSeconds("https://www.youtube.com/watch?v=a")).toBeNull();
+    expect(linkStartSeconds("https://www.youtube.com/watch?v=a&t=soon")).toBeNull();
   });
 });

@@ -24,6 +24,7 @@ import { wireSidebarClicks } from "./sidebar";
 import { wireCompactHeader } from "./compact-header";
 import { wireStudyModal } from "./study-session";
 import { wireTabList } from "./tab-list-events";
+import { wireOpenLinksInExistingTabs } from "./tab-actions";
 import { fetchTabs, handleStoreUpdated, scheduleFetchTabsFromEvents, scheduleProbeResultsToUi } from "./tabs";
 
 initTheme();
@@ -40,6 +41,7 @@ function setupListeners() {
   wireSidebarClicks();
   wireCompactHeader();
   wireTabList();
+  wireOpenLinksInExistingTabs();
   wireViewControls();
   wireSessionContextMenu();
   wireSections();

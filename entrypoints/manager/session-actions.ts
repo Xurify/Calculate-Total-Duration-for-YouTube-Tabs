@@ -359,29 +359,6 @@ export async function loadSessionInNewWindow(sessionId: string) {
   }
 }
 
-export function openSessionVideoInNewTab(url: string) {
-  return browser.tabs.create({ url });
-}
-
-export async function openOrFocusSessionVideo(url: string) {
-  const normalizedTargetUrl = normalizeYoutubeUrl(url);
-  const allTabs = await browser.tabs.query({});
-  const existingTab = allTabs.find((tab) => {
-    if (!tab.url) return false;
-    return normalizeYoutubeUrl(tab.url) === normalizedTargetUrl;
-  });
-
-  if (existingTab?.id != null) {
-    await browser.tabs.update(existingTab.id, { active: true });
-    if (existingTab.windowId != null) {
-      await browser.windows.update(existingTab.windowId, { focused: true });
-    }
-    return;
-  }
-
-  return browser.tabs.create({ url });
-}
-
 export async function focusLiveVideoTab(video: VideoData) {
   await browser.tabs.update(video.id, { active: true });
   if (video.windowId != null) {

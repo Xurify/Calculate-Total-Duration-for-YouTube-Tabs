@@ -30,22 +30,28 @@ export function guessFromScores(scores: Record<string, number>): TextLanguageGue
 }
 
 /**
- * Settles a close call. Words shared across languages (vlog, Halloween, place and brand names) score as English
- * because eld learned them mostly from English text, so "Vlog #23 - Miami, Halloween ja Shoppamine" comes out
- * English 0.63, Estonian 0.58. English edging ahead on such a title says little,
- * so a near tie goes to what speech recognition heard, then to the channel's usual language, then to a followed
- * language over English. `sure` is false unless the text was clear or the speech agrees with it.
+ * Weighs the title's language against what speech recognition heard.
+ *
+ * Titles are often English while the speech is not: creators write for a wider audience, and lessons announce
+ * "(English subtitles)". Speech recognition rarely hears English where none is spoken, so a title read as English
+ * never overrules a non-English language it heard, the Estonian captions under "Vlog #23 - Miami, Halloween ja
+ * Shoppamine" included. A title clearly in another language still wins: recognition files languages it lacks
+ * under one it has, as a Croatian song under French.
+ *
+ * Words shared across languages (vlog, Halloween, place and brand names) score as English because eld learned
+ * them mostly from English text, so a near tie goes to what was heard, then to the channel's usual language,
+ * then to a followed language over English. `sure` is false unless the text was clear or the speech agrees with it.
  */
 export function settleTextGuess(guess: TextLanguageGuess, priors: LanguagePriors): { code: string; sure: boolean } {
-  if (guess.rivals.length === 0) return { code: guess.code, sure: true };
   const candidates = [guess.code, ...guess.rivals];
   const heard = priors.heard ? normalizeLanguageCode(priors.heard) : null;
   if (heard && candidates.includes(heard)) return { code: heard, sure: true };
+  const followedOverEnglish = guess.code === "en" ? guess.rivals.find((rival) => priors.followed?.includes(rival)) : undefined;
+  // Non-English speech under an English-looking title: a followed language in the near tie is likelier than
+  // the one heard (Estonian filed under Finnish), otherwise trust the speech.
+  if (heard && heard !== "en" && guess.code === "en") return { code: followedOverEnglish ?? heard, sure: false };
+  if (guess.rivals.length === 0) return { code: guess.code, sure: true };
   const channel = priors.channel ? normalizeLanguageCode(priors.channel) : null;
   if (channel && candidates.includes(channel)) return { code: channel, sure: false };
-  if (guess.code === "en") {
-    const followed = guess.rivals.find((rival) => priors.followed?.includes(rival));
-    if (followed) return { code: followed, sure: false };
-  }
-  return { code: guess.code, sure: false };
+  return { code: followedOverEnglish ?? guess.code, sure: false };
 }

@@ -33,6 +33,20 @@ describe("settleTextGuess", () => {
     expect(settle("Vlog - Miami, Halloween ja Shoppamine", { ...LEARNER, heard: "fi" })).toBe("et");
   });
 
+  test("an English-looking title never overrules non-English speech", () => {
+    // Russian speech, English title: common for lessons.
+    expect(settle("Episode 4 - Cheburashka Goes To School (English subtitles)", { heard: "ru" })).toBe("ru");
+    expect(settle("Halloween shopping haul", { ...LEARNER, heard: "et" })).toBe("et");
+  });
+
+  test("a title clearly in another language still beats a guess from speech recognition", () => {
+    expect(settle("Ako sa naučiť po slovensky za 30 dní", { heard: "cs" })).toBe("sk");
+  });
+
+  test("English speech under an English title stays English", () => {
+    expect(settle("How To Reprogram Your Mind & Build Your Life", { ...LEARNER, heard: "en" })).toBe("en");
+  });
+
   test("the channel's usual language decides before followed languages", () => {
     expect(settle("Vlog - Miami, Halloween ja Shoppamine", { ...LEARNER, channel: "en" })).toBe("en");
   });

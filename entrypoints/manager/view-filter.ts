@@ -42,13 +42,14 @@ function formatDuplicateStatsSuffix(summary: DuplicateSummary): string {
   return ` · ${summary.duplicateVideoCount} ${videosLabel} (${summary.extraTabCount} ${tabsLabel})`;
 }
 
-export function formatViewStats(count: number, durationSec: number, summary: DuplicateSummary): string {
+/** `includeDuration` is off where the hero above already shows the same total. */
+export function formatViewStats(count: number, durationSec: number, summary: DuplicateSummary, includeDuration = true): string {
   if (count === 0) return "";
   const dupSuffix = formatDuplicateStatsSuffix(summary);
   if (app.showDuplicatesOnly && summary.duplicateVideoCount > 0) {
-    return `${count} duplicate tab${count === 1 ? "" : "s"} · ${formatTime(durationSec)} total duration`;
+    return `${count} duplicate tab${count === 1 ? "" : "s"}${includeDuration ? ` · ${formatTime(durationSec)} total duration` : ""}`;
   }
-  return `${count} video${count === 1 ? "" : "s"}${dupSuffix} · ${formatDurationWords(durationSec)} in total`;
+  return `${count} video${count === 1 ? "" : "s"}${dupSuffix}${includeDuration ? ` · ${formatDurationWords(durationSec)} in total` : ""}`;
 }
 
 function refreshScopeVideoIdCountsFromVideos(videos: VideoData[]): void {

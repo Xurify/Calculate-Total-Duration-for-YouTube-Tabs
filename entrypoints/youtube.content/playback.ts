@@ -39,3 +39,10 @@ export function setPlaybackVolume(volume: number) {
   }
   return getPlaybackState();
 }
+
+export function seekTo(seconds: number): boolean {
+  const videoElement = document.querySelector("video");
+  if (!videoElement || !Number.isFinite(seconds)) return false;
+  videoElement.currentTime = Math.max(0, seconds);
+  return true;
+}

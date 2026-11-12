@@ -65,7 +65,7 @@ export function renderReadingListCard(item: ReadingListItem): string {
         <div class="text-[11px] text-text-muted truncate mt-0.5 tabular-nums opacity-60">${escapeHtml(item.url)}</div>
       </div>
       <div class="flex items-center gap-2 shrink-0">
-        <button type="button" class="reading-list-open-btn px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-surface-elevated text-text-secondary hover:text-text-primary text-xs font-semibold border border-border flex items-center gap-1.5 transition-colors cursor-pointer active:scale-95" title="Open in new tab">
+        <button type="button" class="reading-list-open-btn px-3 py-1.5 rounded-lg bg-surface-hover hover:bg-surface-elevated text-text-secondary hover:text-text-primary text-xs font-semibold border border-border flex items-center gap-1.5 transition-colors cursor-pointer active:scale-95" title="Go to it, or open it if it is not open yet">
           <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
           <span>Open</span>
         </button>

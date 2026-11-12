@@ -1,5 +1,6 @@
 import { VideoData, type SavedSessionTab } from "../../utils/storage";
 import { formatCompact, formatDurationWords, formatOffset, getVideoIdFromUrl } from "../../utils/format";
+import { languageOverrideFor } from "../../utils/languageOverrides";
 import { app } from "./state";
 import { deskAvatarHtml } from "./avatars";
 import { planIsPartial, plannedOrder, plannedTabIds } from "./planner";
@@ -30,6 +31,30 @@ const QUEUE_ICON_OPEN = `<svg xmlns="http://www.w3.org/2000/svg" width="15" heig
 const QUEUE_ICON_CLOSE = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
 const QUEUE_ICON_TRASH = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>`;
 
+/** The language a card shows: a choice made on the desk, else what detection found. */
+export function cardLanguageLabel(url: string, channelName: string | null | undefined, languageName: string | null | undefined): string {
+  const override = languageOverrideFor(app.languageOverrides, getVideoIdFromUrl(url), channelName);
+  if (override) return override.name;
+  return languageName ? languageName.split("(")[0].trim() : "";
+}
+
+function languageTagAria(label: string): string {
+  return label ? `Language: ${label}. Change` : "Set language";
+}
+
+/** Unlabelled videos show "Set language" on hover, so they can be labelled without hunting for the right-click menu. */
+export function languageTagButtonHtml(label: string, extraClass = ""): string {
+  return `<button type="button" draggable="false" class="lang-tag lang-tag--edit ${extraClass}${label ? "" : " lang-tag--unset"}" data-label="${escapeHtml(label)}" title="Change language" aria-label="${escapeHtml(languageTagAria(label))}">${label ? languageTagInnerHtml(label) : "Set language"}</button>`;
+}
+
+export function updateLanguageTag(element: HTMLElement, label: string): void {
+  if (element.dataset.label === label) return;
+  element.dataset.label = label;
+  element.innerHTML = label ? languageTagInnerHtml(label) : "Set language";
+  element.classList.toggle("lang-tag--unset", !label);
+  element.setAttribute("aria-label", languageTagAria(label));
+}
+
 export function renderVideoList(videos: VideoData[], sectionColorIndex?: number | "unsorted"): string {
   const dnd = tabCardDnDHtml(sectionColorIndex);
   const imgDragOff = sectionColorIndex !== undefined;
@@ -41,7 +66,7 @@ export function renderVideoList(videos: VideoData[], sectionColorIndex?: number 
     const offsetLabel = isNow ? "now" : formatOffset(elapsed);
     if (!isNow && !video.isLive) elapsed += Math.max(0, video.seconds - video.currentTime) / playbackRate;
     const rowClass = `queue-row group${isNow ? " queue-row--now" : ""}${isSelected ? " queue-row--selected" : ""}${dnd.extraClass}`;
-    const languageLabel = video.languageName ? video.languageName.split("(")[0].trim() : "";
+    const languageLabel = cardLanguageLabel(video.url, video.channelName, video.languageName);
     const stateLabel = video.suspended
       ? `<span class="text-warning">Suspended tab</span>`
       : video.isLive
@@ -92,7 +117,7 @@ export function renderVideoList(videos: VideoData[], sectionColorIndex?: number 
               <span class="manager-card-time whitespace-nowrap"><span class="manager-card-time-current ${watchedPercent > 0 ? "text-text-primary" : "text-text-muted"}">${formatCompact(video.currentTime)}</span> of <span class="manager-card-time-total">${formatCompact(video.seconds)}</span></span>
               ${plannedTabIds.has(video.id) ? `<span class="text-accent font-medium whitespace-nowrap">${planIsPartial ? "in plan, partly" : `in plan ${plannedOrder.indexOf(video.id) + 1} of ${plannedOrder.length}`}</span>` : ""}
               ${stateLabel}
-              <span class="manager-card-language lang-tag ${languageLabel ? "" : "hidden"}">${languageTagInnerHtml(languageLabel)}</span>
+              ${languageTagButtonHtml(languageLabel, "manager-card-language")}
               ${windowBadgeHtml(video)}
               ${duplicateBadgeHtml(video.url)}
             </div>
@@ -142,7 +167,7 @@ export function renderSessionGrid(tabs: SavedSessionTab[], sectionColorIndex?: n
             <svg class="absolute w-2.5 h-2.5 text-on-accent opacity-0 peer-checked:opacity-100 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
           </div>
           <div class="absolute top-1 right-1 z-10 flex gap-1 opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 transition-opacity duration-200">
-            <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center hover:bg-black/60 bg-black/40 text-white rounded-md backdrop-blur-sm transition-[background-color] active:scale-[0.96] session-open-new-tab" title="Open in new tab">
+            <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center hover:bg-black/60 bg-black/40 text-white rounded-md backdrop-blur-sm transition-[background-color] active:scale-[0.96] session-open-new-tab" title="Go to the video" aria-label="Go to the video">
               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
             </button>
             <button type="button" draggable="false" class="w-7 h-7 flex items-center justify-center hover:bg-danger/80 bg-black/40 text-white rounded-md backdrop-blur-sm transition-[background-color] active:scale-[0.96] session-remove-btn" title="Remove from session">
@@ -156,7 +181,7 @@ export function renderSessionGrid(tabs: SavedSessionTab[], sectionColorIndex?: n
             <div class="text-[10px] text-text-muted flex items-center gap-1.5 min-w-0">${deskAvatarHtml(tab.channelName)}<span class="truncate">${escapeHtml(channel)}</span></div>
             <div class="flex items-center gap-1 shrink-0">
               ${duplicateBadgeHtml(tab.url)}
-              ${tab.languageName ? `<span class="lang-tag">${languageTagInnerHtml(tab.languageName.split("(")[0].trim())}</span>` : ""}
+              ${languageTagButtonHtml(cardLanguageLabel(tab.url, tab.channelName, tab.languageName))}
             </div>
           </div>
         </div>
@@ -178,7 +203,7 @@ export function renderSessionList(tabs: SavedSessionTab[], sectionColorIndex?: n
     const urlAttr = escapeHtml(tab.url);
     const offsetLabel = formatOffset(elapsed);
     elapsed += sec;
-    const languageLabel = tab.languageName ? tab.languageName.split("(")[0].trim() : "";
+    const languageLabel = cardLanguageLabel(tab.url, tab.channelName, tab.languageName);
     return `
       <div class="queue-row group${isSelected ? " queue-row--selected" : ""}${dnd.extraClass}" data-session-tab-url="${urlAttr}"${dnd.draggableAttr}>
         <div class="queue-offset" title="When this video starts if you watch the list in order">${offsetLabel}</div>
@@ -193,12 +218,12 @@ export function renderSessionList(tabs: SavedSessionTab[], sectionColorIndex?: n
             <div class="queue-meta">
               ${deskAvatarHtml(tab.channelName)}
               <span class="truncate">${escapeHtml(channel)}</span>
-              ${languageLabel ? `<span class="lang-tag">${languageTagInnerHtml(languageLabel)}</span>` : ""}
+              ${languageTagButtonHtml(languageLabel)}
               ${duplicateBadgeHtml(tab.url)}
             </div>
           </div>
           <div class="queue-actions">
-            <button type="button" draggable="false" class="queue-action session-open-new-tab" title="Open in new tab" aria-label="Open in new tab">${QUEUE_ICON_OPEN}</button>
+            <button type="button" draggable="false" class="queue-action session-open-new-tab" title="Go to the video" aria-label="Go to the video">${QUEUE_ICON_OPEN}</button>
             <button type="button" draggable="false" class="queue-action queue-action--danger session-remove-btn" title="Remove from session" aria-label="Remove from session">${QUEUE_ICON_TRASH}</button>
           </div>
         </div>
@@ -263,7 +288,7 @@ export function renderVideoGrid(videos: VideoData[], sectionColorIndex?: number 
                         <div class="flex items-center gap-1 shrink-0">
                           ${windowBadgeHtml(video)}
                           ${duplicateBadgeHtml(video.url)}
-                          <span class="manager-card-language lang-tag ${video.languageName ? "" : "hidden"}">${languageTagInnerHtml(video.languageName ? video.languageName.split("(")[0].trim() : "")}</span>
+                          ${languageTagButtonHtml(cardLanguageLabel(video.url, video.channelName, video.languageName), "manager-card-language")}
                         </div>
                     </div>
                     ${

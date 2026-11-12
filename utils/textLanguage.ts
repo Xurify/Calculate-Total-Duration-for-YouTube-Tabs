@@ -1,6 +1,7 @@
 import { createEld } from "eld/core";
 import type { PublicPath } from "wxt/browser";
 import { languageNamedInTitle, normalizeLanguageCode, type DetectedLanguage } from "./captionLanguage";
+import { guessFromScores, settleTextGuess, type LanguagePriors, type TextLanguageGuess } from "./textLanguageGuess";
 
 const NOISE_PATTERN = /https?:\/\/\S+|www\.\S+|@\S+|#\S+|[*_|]/g;
 const MIN_TEXT_LENGTH = 20;
@@ -30,19 +31,24 @@ function cleanText(text: string): string {
 
 /**
  * Language of a title (first line) and description. The title wins when it is clear on its own:
- * descriptions often end in English sponsor and link boilerplate. Null when unsure.
+ * descriptions often end in English sponsor and link boilerplate. Null when it cannot tell; a close call
+ * comes back with its rivals.
  */
-export async function detectTextLanguage(text: string): Promise<string | null> {
+export async function detectTextLanguage(text: string): Promise<TextLanguageGuess | null> {
   const title = cleanText(text.split("\n", 1)[0]);
   const whole = cleanText(text);
   if (whole.length < MIN_TEXT_LENGTH) return null;
   try {
     const eld = await loadDetector();
+    let closeCall: TextLanguageGuess | null = null;
     for (const candidate of title.length >= MIN_TEXT_LENGTH && title !== whole ? [title, whole] : [whole]) {
       const result = eld.detect(candidate);
-      if (result.language && result.isReliable()) return result.language;
+      if (!result.language || !result.isReliable()) continue;
+      const guess = guessFromScores(result.getScores());
+      if (guess && guess.rivals.length === 0) return guess;
+      closeCall ??= guess;
     }
-    return null;
+    return closeCall;
   } catch {
     return null;
   }
@@ -68,7 +74,8 @@ export function languageDisplayName(code: string, displayLocale?: string | null)
 export async function refineLanguageWithText(
   detected: DetectedLanguage,
   text: string,
-  displayLocale?: string | null
+  displayLocale?: string | null,
+  priors: Omit<LanguagePriors, "heard"> = {}
 ): Promise<DetectedLanguage> {
   const named = languageNamedInTitle(text.split("\n", 1)[0]);
   if (named) {
@@ -78,10 +85,12 @@ export async function refineLanguageWithText(
     return { language: named, languageName: languageDisplayName(named, displayLocale) };
   }
   if (detected.language && !detected.weak) return detected;
-  const code = await detectTextLanguage(text);
-  if (!code) return detected;
+  const guess = await detectTextLanguage(text);
+  if (!guess) return detected;
+  const { code, sure } = settleTextGuess(guess, { ...priors, heard: detected.language });
+  const weak = sure ? {} : { weak: true };
   if (detected.language && normalizeLanguageCode(detected.language) === normalizeLanguageCode(code)) {
-    return { language: detected.language, languageName: detected.languageName };
+    return { language: detected.language, languageName: detected.languageName, ...weak };
   }
-  return { language: code, languageName: languageDisplayName(code, displayLocale) };
+  return { language: code, languageName: languageDisplayName(code, displayLocale), ...weak };
 }

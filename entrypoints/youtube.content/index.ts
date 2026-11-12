@@ -17,7 +17,7 @@ import { updateImmersionHud } from "./hud";
 import { applyListenFirstClass, closeListenCard, prepareListenFirst } from "./listen-first";
 import { canonicalVideoUrl, checkMandalaStatusForCurrentPage } from "./mandala";
 import { getVideoIdFromLocation, readMetadataFromDom, scheduleRead } from "./metadata";
-import { getPlaybackState, isWatchOrShorts, setPlaybackVolume, togglePlayback } from "./playback";
+import { getPlaybackState, isWatchOrShorts, seekTo, setPlaybackVolume, togglePlayback } from "./playback";
 import { mountShelfPopover } from "./shelf-popover";
 import { handleGlobalKeydown } from "./shortcuts";
 import { DEBOUNCE_MS, perf } from "./state";
@@ -101,7 +101,7 @@ export default defineContentScript({
 
     browser.runtime.onMessage.addListener(
       (
-        runtimeMessage: { action: string; reset?: boolean; volume?: number; refreshLanguage?: boolean; enabled?: boolean },
+        runtimeMessage: { action: string; reset?: boolean; volume?: number; refreshLanguage?: boolean; enabled?: boolean; seconds?: number },
         _sender: unknown,
         sendResponse: (responseResult: unknown) => void
       ) => {
@@ -140,6 +140,10 @@ export default defineContentScript({
         }
         if (runtimeMessage?.action === "toggle-play") {
           sendResponse(togglePlayback());
+          return;
+        }
+        if (runtimeMessage?.action === "seek-to" && typeof runtimeMessage.seconds === "number") {
+          sendResponse({ success: seekTo(runtimeMessage.seconds) });
           return;
         }
         if (runtimeMessage?.action === "set-volume" && typeof runtimeMessage.volume === "number") {

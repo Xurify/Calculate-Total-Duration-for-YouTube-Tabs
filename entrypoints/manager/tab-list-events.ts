@@ -2,6 +2,7 @@ import { updateSessionTabs, type SavedSessionTab } from "../../utils/storage";
 import { removeReadingListItem } from "../../utils/readingList";
 import { app } from "./state";
 import { tabListStructureFingerprint } from "./fingerprint";
+import { openLanguageModalFor } from "./language-modal";
 import { loadReadingList } from "./reading-list";
 import { render } from "./render";
 import {
@@ -19,14 +20,12 @@ import {
 import { updateSelectionUI } from "./selection";
 import {
   focusLiveVideoTab,
-  openOrFocusSessionVideo,
-  openSessionVideoInNewTab,
   sessionTabMatchesUrl,
 } from "./session-actions";
 import { refreshSavedSessionsSidebar, sessionDisplayName } from "./sessions-sidebar";
 import { renderSidebar } from "./sidebar";
 import { collapsedGroups, selectedSessionTabUrls, selectedTabIds } from "./state";
-import { closeVideoTabs, restoreSessionTabs } from "./tab-actions";
+import { closeVideoTabs, openOrFocusUrl, restoreSessionTabs } from "./tab-actions";
 import { showToast } from "./toast";
 
 const TAB_MANAGER_DRAG_MIME = "application/x-tab-manager";
@@ -79,7 +78,7 @@ export function wireTabList() {
         }
         if (target.closest(".reading-list-open-btn")) {
           event.stopPropagation();
-          await browser.tabs.create({ url, active: true });
+          await openOrFocusUrl(url);
           return;
         }
       }
@@ -106,6 +105,15 @@ export function wireTabList() {
         applyNestedGroupCollapseDom(key, collapsedGroups.has(key));
         app.lastTabListFingerprint = tabListStructureFingerprint();
       }
+      return;
+    }
+
+    if (target.closest(".lang-tag--edit")) {
+      event.stopPropagation();
+      const sessionTabUrl = (target.closest("[data-session-tab-url]") as HTMLElement | null)?.dataset.sessionTabUrl;
+      const liveId = parseInt((target.closest("[data-id]") as HTMLElement | null)?.dataset.id ?? "", 10);
+      if (sessionTabUrl != null && app.selectedSession) openLanguageModalFor({ mode: "session", url: sessionTabUrl });
+      else if (!Number.isNaN(liveId)) openLanguageModalFor({ mode: "live", tabId: liveId });
       return;
     }
 
@@ -140,7 +148,7 @@ export function wireTabList() {
         }
         if (target.closest(".session-open-new-tab")) {
           event.stopPropagation();
-          openSessionVideoInNewTab(url);
+          void openOrFocusUrl(url);
           return;
         }
         if (target.closest(".session-video-click-target")) {
@@ -151,7 +159,7 @@ export function wireTabList() {
             updateSelectionUI();
             return;
           }
-          void openOrFocusSessionVideo(url);
+          void openOrFocusUrl(url);
           return;
         }
       }

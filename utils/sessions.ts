@@ -5,6 +5,43 @@ export function videoIdFromTabUrl(url: string): string | null {
   return getVideoIdFromUrl(normalizeYoutubeUrl(url));
 }
 
+interface OpenTab {
+  id?: number;
+  url?: string;
+  windowId?: number;
+  active?: boolean;
+}
+
+/**
+ * The open tab already showing this video (or page), so opening it again can switch there instead of
+ * duplicating it. Matches YouTube by video id, so `youtu.be`, `&t=` and playlist links all count.
+ * The current window wins, then a tab that is already active somewhere.
+ */
+export function findOpenTabFor<T extends OpenTab>(tabs: readonly T[], url: string, currentWindowId?: number): T | null {
+  const wanted = videoIdFromTabUrl(url);
+  const wantedUrl = normalizeYoutubeUrl(url);
+  const matches = tabs.filter((tab) => {
+    if (tab.id == null || !tab.url) return false;
+    return wanted ? videoIdFromTabUrl(tab.url) === wanted : normalizeYoutubeUrl(tab.url) === wantedUrl;
+  });
+  const rank = (tab: T) => (tab.windowId === currentWindowId ? 2 : 0) + (tab.active ? 1 : 0);
+  return matches.sort((a, b) => rank(b) - rank(a))[0] ?? null;
+}
+
+/** Seconds a YouTube link starts at (`t=90`, `t=1m30s`, `t=90s`), or null when it names none. */
+export function linkStartSeconds(url: string): number | null {
+  try {
+    const value = new URL(url).searchParams.get("t");
+    if (!value) return null;
+    if (/^\d+$/.test(value)) return Number(value);
+    const match = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(value);
+    if (!match || !match[0]) return null;
+    return Number(match[1] ?? 0) * 3600 + Number(match[2] ?? 0) * 60 + Number(match[3] ?? 0);
+  } catch {
+    return null;
+  }
+}
+
 /** Stable key for duplicate detection (video ID when available, else normalized URL). */
 export function videoIdKeyFromUrl(url: string): string {
   return videoIdFromTabUrl(url) ?? normalizeYoutubeUrl(url);

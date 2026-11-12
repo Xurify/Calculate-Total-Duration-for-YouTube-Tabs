@@ -1,5 +1,5 @@
 import { VideoData, updateSessionTabs, type SavedSessionTab } from "../../utils/storage";
-import { videoIdFromTabUrl } from "../../utils/sessions";
+import { findOpenTabFor, linkStartSeconds, videoIdFromTabUrl } from "../../utils/sessions";
 import { app } from "./state";
 import { render } from "./render";
 import { refreshSavedSessionsSidebar } from "./sessions-sidebar";
@@ -20,6 +20,47 @@ export async function getOpenVideoIds(): Promise<Set<string>> {
     if (id) ids.add(id);
   }
   return ids;
+}
+
+/** Switches to the tab already showing this video, at the link's start time if it names one; opens a tab only when none is. */
+export async function openOrFocusUrl(url: string): Promise<void> {
+  const [tabs, currentWindow] = await Promise.all([browser.tabs.query({}), browser.windows.getCurrent().catch(() => null)]);
+  const existing = findOpenTabFor(tabs, url, currentWindow?.id);
+  if (existing?.id == null) {
+    await browser.tabs.create({ url, active: true });
+    return;
+  }
+  const start = linkStartSeconds(url);
+  if (start != null) {
+    // A sleeping (discarded) tab has no content script to seek, so it loads the link instead.
+    const seeked = existing.discarded
+      ? false
+      : await browser.tabs
+          .sendMessage(existing.id, { action: "seek-to", seconds: start })
+          .then((response) => (response as { success?: boolean } | undefined)?.success === true)
+          .catch(() => false);
+    if (!seeked) {
+      await browser.tabs.update(existing.id, { url, active: true });
+      if (existing.windowId != null) await browser.windows.update(existing.windowId, { focused: true });
+      return;
+    }
+  }
+  await browser.tabs.update(existing.id, { active: true });
+  if (existing.windowId != null) await browser.windows.update(existing.windowId, { focused: true });
+}
+
+/**
+ * Plain clicks on YouTube links (Time, Practice, Reading list) go to an open tab of that video
+ * instead of a new one. Modified and middle clicks still open a new tab, as the person asked.
+ */
+export function wireOpenLinksInExistingTabs(): void {
+  document.addEventListener("click", (event) => {
+    if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    const link = (event.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+    if (!link || link.target !== "_blank" || !videoIdFromTabUrl(link.href)) return;
+    event.preventDefault();
+    void openOrFocusUrl(link.href);
+  });
 }
 
 export async function createTabsBatched(urls: string[], windowId?: number): Promise<number> {

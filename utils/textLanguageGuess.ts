@@ -30,9 +30,10 @@ export function guessFromScores(scores: Record<string, number>): TextLanguageGue
 }
 
 /**
- * Settles a close call. Titles in other languages are full of English words ("Vlog #23 - Miami, Halloween ja
- * Shoppamine" scores English 0.63, Estonian 0.58), while English titles rarely carry another language's words.
- * So a near tie goes to what speech recognition heard, then to the channel's usual language, then to a followed
+ * Settles a close call. Words shared across languages (vlog, Halloween, place and brand names) score as English
+ * because eld learned them mostly from English text, so "Vlog #23 - Miami, Halloween ja Shoppamine" comes out
+ * English 0.63, Estonian 0.58. English edging ahead on such a title says little,
+ * so a near tie goes to what speech recognition heard, then to the channel's usual language, then to a followed
  * language over English. `sure` is false unless the text was clear or the speech agrees with it.
  */
 export function settleTextGuess(guess: TextLanguageGuess, priors: LanguagePriors): { code: string; sure: boolean } {

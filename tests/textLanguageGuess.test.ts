@@ -19,7 +19,7 @@ function settle(title: string, priors: LanguagePriors = {}): string | null {
 const LEARNER = { followed: ["ru", "sk", "en", "et", "cs"] };
 
 describe("settleTextGuess", () => {
-  test("an Estonian title full of English words goes to Estonian for someone who follows it", () => {
+  test("an Estonian title full of words shared across languages goes to Estonian for someone who follows it", () => {
     expect(settle("Vlog - Miami, Halloween ja Shoppamine")).toBe("en");
     expect(settle("Vlog - Miami, Halloween ja Shoppamine", LEARNER)).toBe("et");
   });

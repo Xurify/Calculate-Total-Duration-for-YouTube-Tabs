@@ -7,56 +7,13 @@
   --height-popup: 600px;
 }
 
-[data-v-header] {
-  view-transition-name: dashboard-header;
-}
-
 @layer components {
-  .popup-icon {
-    @apply w-8 h-8 flex items-center justify-center rounded-md border-0 bg-transparent text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer active:scale-95;
-  }
-
   .np-card {
-    @apply rounded-xl border border-border bg-surface-elevated p-3 transition-[border-color,box-shadow] duration-300;
-  }
-
-  .np-card--playing {
-    @apply border-accent/40;
+    @apply rounded-xl border border-border bg-surface-elevated p-3;
   }
 
   .meta-offset--next .meta-offset-in {
     @apply text-accent;
-  }
-
-  /* Name, bar, left, today. The fixed number columns keep the times lined up under their headings. */
-  .popup-langs {
-    @apply grid gap-x-2.5 gap-y-1;
-    grid-template-columns: minmax(0, 6.75rem) minmax(2rem, 1fr) 5rem 4.5rem;
-  }
-
-  .popup-langs-row {
-    @apply grid col-span-4 grid-cols-subgrid items-center h-[18px] text-[12px];
-  }
-
-  .popup-langs-head {
-    @apply h-4 text-[10px] font-semibold uppercase tracking-[0.06em] text-text-muted;
-  }
-
-  .popup-langs-track {
-    @apply h-1.5 bg-surface-hover;
-  }
-
-  .popup-langs-fill {
-    @apply relative block h-full min-w-[2px] overflow-hidden;
-  }
-
-  .popup-langs-num {
-    @apply text-right font-semibold text-text-primary tabular-nums whitespace-nowrap;
-  }
-
-  .popup-lang-done {
-    @apply absolute inset-y-0 left-0;
-    background: rgba(26, 23, 20, 0.42);
   }
 }
 

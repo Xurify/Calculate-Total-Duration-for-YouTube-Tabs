@@ -35,7 +35,6 @@ export async function getYouTubeTabs(): Promise<void> {
     const { prefs, metadataCache } = popup.storeState;
 
     popup.popupWindowId = currentWindow.id ?? null;
-    popup.sortByDuration = prefs.sortByDuration;
 
     const tabs = allTabs.filter((tab) => {
       if (!tab.url) return false;
@@ -365,7 +364,6 @@ export async function getYouTubeTabs(): Promise<void> {
     const app = document.getElementById("app")!;
     app.innerHTML = `
       <div class="p-8 text-center">
-        <div class="text-2xl mb-3 opacity-40">⚠️</div>
         <div class="text-sm text-text-secondary mb-1">Something went wrong</div>
         <div class="text-[10px] text-accent font-mono break-all px-4">${error?.message || "Unknown error"}</div>
         <div class="text-[10px] text-text-muted mt-4">Try refreshing your YouTube tabs</div>

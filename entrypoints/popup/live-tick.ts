@@ -1,13 +1,10 @@
 import { popup } from "./state";
 import {
   findVideoByTabId,
-  getConfirmedNowPlayingVideos,
   getNowPlayingTabId,
-  isTabActivelyPlaying,
   nowPlayingIdsFingerprint,
   refreshNowPlayingDetection,
   syncUpNextIfNowPlayingChanged,
-  updateAlsoPlayingLine,
 } from "./now-playing";
 import { renderNowPlayingCard, updateNowPlayingCard } from "./now-playing-card";
 import { getPlaybackState } from "./playback";
@@ -45,7 +42,7 @@ export function stopLiveTick(): void {
 
 export async function livePlaybackTick(): Promise<void> {
   if (liveTickInFlight) return;
-  if (popup.currentView !== "dashboard" || !document.getElementById("stat-remaining")) return;
+  if (!document.getElementById("stat-remaining")) return;
 
   liveTickInFlight = true;
   try {
@@ -60,7 +57,7 @@ export async function livePlaybackTick(): Promise<void> {
         primary.volume = playback.volume;
         primary.muted = playback.muted;
         applyPlaybackTimeToVideo(primary, playback.currentTime);
-        updateNowPlayingCard(card, primary, playback, isTabActivelyPlaying(primary));
+        updateNowPlayingCard(card, primary, playback.paused);
       }
     }
 
@@ -72,12 +69,11 @@ export async function livePlaybackTick(): Promise<void> {
     popup.lastNowPlayingDetectAt = now;
 
     const previousIds = nowPlayingIdsFingerprint();
-    const previousPrimaryId = primaryId;
     const videos = await refreshNowPlayingDetection();
     const nextPrimary = videos[0] ?? null;
 
     if (nowPlayingIdsFingerprint() !== previousIds) {
-      renderNowPlayingCard(nextPrimary, getConfirmedNowPlayingVideos());
+      renderNowPlayingCard(nextPrimary);
       if (nextPrimary) {
         const card = document.getElementById("np-card");
         const playback = await getPlaybackState(nextPrimary.id);
@@ -86,15 +82,10 @@ export async function livePlaybackTick(): Promise<void> {
           nextPrimary.volume = playback.volume;
           nextPrimary.muted = playback.muted;
           applyPlaybackTimeToVideo(nextPrimary, playback.currentTime);
-          updateNowPlayingCard(card, nextPrimary, playback, isTabActivelyPlaying(nextPrimary));
+          updateNowPlayingCard(card, nextPrimary, playback.paused);
         }
       }
       syncUpNextIfNowPlayingChanged(previousIds);
-      return;
-    }
-
-    if (nextPrimary && nextPrimary.id === previousPrimaryId) {
-      updateAlsoPlayingLine(getConfirmedNowPlayingVideos(), nextPrimary);
     }
   } finally {
     liveTickInFlight = false;

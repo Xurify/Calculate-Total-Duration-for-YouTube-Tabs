@@ -13,7 +13,6 @@ import { scheduleProbeRender } from "./render";
 
 function applyStoreToVideos(): void {
   const { prefs, metadataCache } = popup.storeState;
-  popup.sortByDuration = prefs.sortByDuration;
   popup.videoData.forEach((video) => {
     video.excluded = prefs.excludedUrls.includes(normalizeYoutubeUrl(video.url));
     const cached = lookupCachedMetadata(metadataCache, video.url);
@@ -31,7 +30,7 @@ export function handleStoreUpdated(message: StoreUpdatedMessage): void {
 
 /** Persist prefs in background — UI already updated in memory. */
 export function saveStorage(): void {
-  void saveStorageUtil(popup.videoData, popup.sortByDuration).catch((error) => {
+  void saveStorageUtil(popup.videoData, popup.storeState.prefs.sortByDuration).catch((error) => {
     console.warn("Failed to save prefs:", error);
   });
 }
@@ -110,11 +109,6 @@ export function getEffectiveWatchedSeconds(video: VideoData): number {
   if (video.isLive || video.excluded) return 0;
   if (video.seconds <= 0) return 0;
   return Math.min(video.currentTime, video.seconds);
-}
-
-export function getWatchedPercent(video: VideoData): number {
-  if (video.isLive || video.seconds <= 0) return 0;
-  return Math.min(100, Math.max(0, (video.currentTime / video.seconds) * 100));
 }
 
 export function getQueueVideos(): VideoData[] {
@@ -212,10 +206,7 @@ export function buildVideoFromTab(
 }
 
 export function getSortedVideos(): VideoData[] {
-  return [...popup.videoData].sort((a, b) => {
-    if (popup.sortByDuration) return b.seconds - a.seconds;
-    return a.index - b.index;
-  });
+  return [...popup.videoData].sort((a, b) => a.index - b.index);
 }
 
 export function getVideosInPopupWindow(): VideoData[] {

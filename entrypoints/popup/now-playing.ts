@@ -255,24 +255,6 @@ export function syncUpNextIfNowPlayingChanged(previousIds: string): void {
   updateVideoList(getVideosForUpNext());
 }
 
-export function updateAlsoPlayingLine(confirmedPlaying: VideoData[], primary: VideoData): void {
-  const alsoEl = document.getElementById("np-also-playing");
-  if (!alsoEl) return;
-  const others = confirmedPlaying.filter((video) => video.id !== primary.id);
-  if (others.length === 0) {
-    alsoEl.classList.add("hidden");
-    alsoEl.textContent = "";
-    return;
-  }
-  const preview = others
-    .slice(0, 2)
-    .map((video) => video.title)
-    .join(", ");
-  const extra = others.length > 2 ? ` (+${others.length - 2} more)` : "";
-  alsoEl.textContent = `Also playing: ${preview}${extra}`;
-  alsoEl.classList.remove("hidden");
-}
-
 export function getConfirmedNowPlayingVideos(): VideoData[] {
   return popup.resolvedNowPlayingTabIds
     .map((id) => findVideoByTabId(id))

@@ -60,35 +60,3 @@ export async function togglePlayback(tabId: number): Promise<PlaybackState | nul
   }
 }
 
-export async function setPlaybackVolume(tabId: number, volume: number): Promise<PlaybackState | null> {
-  try {
-    const state = await browser.tabs.sendMessage(tabId, { action: "set-volume", volume });
-    if (state && typeof state.volume === "number") return state as PlaybackState;
-  } catch {
-    // fall through
-  }
-
-  try {
-    const results = await browser.scripting.executeScript({
-      target: { tabId },
-      world: "MAIN",
-      args: [volume],
-      func: (nextVolume: number) => {
-        const videoEl = document.querySelector("video");
-        if (!videoEl) return { paused: true, volume: 1, muted: false, currentTime: 0 };
-        const clamped = Math.min(1, Math.max(0, nextVolume));
-        videoEl.volume = clamped;
-        if (clamped > 0 && videoEl.muted) videoEl.muted = false;
-        return {
-          paused: videoEl.paused,
-          volume: videoEl.volume,
-          muted: videoEl.muted,
-          currentTime: videoEl.currentTime,
-        };
-      },
-    });
-    return (results[0]?.result as PlaybackState) ?? null;
-  } catch {
-    return null;
-  }
-}

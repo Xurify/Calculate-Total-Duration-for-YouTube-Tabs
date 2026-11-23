@@ -298,7 +298,7 @@ function paint(): void {
   if (!panel || !data) return;
   const now = Date.now();
   const due = queue.length;
-  host?.hero({ kicker: "Practice", title: "", value: due > 0 ? String(due) : "No", suffix: due === 1 ? "sentence to review" : "sentences to review" });
+  host?.hero({ kicker: "Review", title: "", value: due > 0 ? String(due) : "No", suffix: due === 1 ? "sentence to review" : "sentences to review" });
   const learned = data.bank.filter(isLearned).length;
   const checks = data.listening.byLanguage.reduce((sum, row) => sum + checkCount(row), 0);
   host?.stats(

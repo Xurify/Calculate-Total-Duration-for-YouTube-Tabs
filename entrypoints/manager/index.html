@@ -8,24 +8,21 @@
   </head>
   <body class="font-sans bg-surface text-text-primary m-0 p-0 overflow-hidden flex flex-col h-full">
 
-    <header class="shrink-0 h-14 pl-5 pr-6 flex items-center gap-6 border-b border-border bg-surface z-20">
-      <button type="button" id="brand" class="brand sidebar-item" data-sidebar-type="all" title="Back to the desk">
+    <header class="shrink-0 h-14 pl-5 pr-6 flex items-center gap-6 max-md:gap-3 max-md:pr-3 min-w-0 border-b border-border bg-surface z-20">
+      <button type="button" id="brand" class="brand sidebar-item" data-sidebar-type="today" title="Back to Today">
         <img src="/icon/icon.svg" alt="" width="28" height="28" class="w-7 h-7 rounded-[7px]" />
         <h1 class="font-display text-[21px] font-medium tracking-tight m-0 leading-none translate-y-[2px] whitespace-nowrap max-xl:sr-only">Study Harvester</h1>
       </button>
-      <nav id="window-list" class="nav-tabs" aria-label="Views">
-        <button type="button" id="nav-desk" aria-keyshortcuts="1" class="sidebar-item nav-pill" data-sidebar-type="all">Desk</button>
-        <button type="button" id="nav-sessions" aria-keyshortcuts="2" class="sidebar-item nav-pill" data-sidebar-type="sessions">Saved sessions</button>
-        <button type="button" id="nav-reading-list" aria-keyshortcuts="3" class="sidebar-item nav-pill" data-sidebar-type="reading-list">
-          Reading list <span id="reading-list-badge" class="nav-badge">0</span>
+      <nav id="window-list" class="nav-tabs min-w-0 overflow-x-auto" aria-label="Views">
+        <button type="button" id="nav-today" aria-keyshortcuts="1" class="sidebar-item nav-pill" data-sidebar-type="today">Today</button>
+        <button type="button" id="nav-desk" aria-keyshortcuts="2" class="sidebar-item nav-pill" data-sidebar-type="all">All videos</button>
+        <button type="button" id="nav-practice" aria-keyshortcuts="3" class="sidebar-item nav-pill" data-sidebar-type="practice" title="Review saved sentences in the speaker's own voice">
+          Review <span id="practice-badge" class="nav-badge nav-badge--accent hidden">0</span>
         </button>
-        <button type="button" id="nav-time" aria-keyshortcuts="4" class="sidebar-item nav-pill" data-sidebar-type="time">Time</button>
-        <button type="button" id="nav-practice" aria-keyshortcuts="5" class="sidebar-item nav-pill" data-sidebar-type="practice" title="Review saved sentences in the speaker's own voice">
-          Practice <span id="practice-badge" class="nav-badge nav-badge--accent hidden">0</span>
-        </button>
+        <button type="button" id="nav-time" aria-keyshortcuts="4" class="sidebar-item nav-pill" data-sidebar-type="time">History</button>
       </nav>
       <div class="flex-1"></div>
-      <div class="relative group w-72 min-w-36 shrink">
+      <div class="relative group w-72 min-w-36 shrink max-md:hidden">
         <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-text-muted group-focus-within:text-accent transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
         </div>
@@ -35,16 +32,6 @@
         </button>
       </div>
       <div class="flex items-center gap-1">
-        <span class="hidden lg:inline-flex items-center gap-1.5 mr-2 text-[11px] font-medium text-text-muted" title="WebMCP tools are live on YouTube, Mandala and Clozemaster pages">
-          <span class="w-1.5 h-1.5 rounded-full bg-success"></span>
-          WebMCP
-        </span>
-        <button type="button" id="btn-save-session" class="icon-btn" title="Save the open tabs as a session (S)" aria-label="Save session" aria-keyshortcuts="s">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-        </button>
-        <button type="button" id="btn-refresh" class="icon-btn" title="Refresh" aria-label="Refresh">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
-        </button>
         <button type="button" id="btn-settings" class="icon-btn" title="Settings" aria-label="Settings">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
         </button>
@@ -53,13 +40,21 @@
 
     <main class="flex-1 min-h-0 flex overflow-hidden">
 
-      <aside id="facet-rail" class="w-[236px] shrink-0 border-r border-border overflow-y-auto custom-scrollbar px-2 py-3 flex flex-col gap-4">
-        <div class="facet-group" aria-hidden="true"><div class="facet-skeleton w-[88%]"></div><div class="facet-skeleton w-[70%]"></div></div>
-        <div class="facet-group" aria-hidden="true"><div class="facet-head">Languages</div><div class="facet-skeleton w-[60%]"></div><div class="facet-skeleton w-[64%]"></div><div class="facet-skeleton w-[58%]"></div></div>
-        <div class="facet-group" aria-hidden="true"><div class="facet-head">Channels</div><div class="facet-skeleton w-[76%]"></div><div class="facet-skeleton w-[52%]"></div><div class="facet-skeleton w-[68%]"></div><div class="facet-skeleton w-[61%]"></div></div>
+      <aside id="desk-aside" hidden class="overflow-y-auto custom-scrollbar flex flex-col gap-5" aria-label="Sources and filters">
+        <div id="source-nav" class="facet-group" role="group" aria-label="Show">
+          <button type="button" id="source-open" class="sidebar-item facet" data-sidebar-type="all"><span class="facet-name">Open tabs</span><span id="source-open-count" class="facet-count"></span></button>
+          <button type="button" id="nav-sessions" class="sidebar-item facet" data-sidebar-type="sessions"><span class="facet-name">Saved sessions</span><span id="source-sessions-count" class="facet-count"></span></button>
+          <button type="button" id="nav-reading-list" class="sidebar-item facet" data-sidebar-type="reading-list"><span class="facet-name">Reading list</span><span id="reading-list-badge" class="facet-count">0</span></button>
+        </div>
+        <div id="facet-rail" class="flex flex-col gap-4">
+          <div class="facet-group" aria-hidden="true"><div class="facet-skeleton w-[88%]"></div><div class="facet-skeleton w-[70%]"></div></div>
+        </div>
       </aside>
 
-      <section class="flex-1 min-w-0 flex flex-col overflow-hidden">
+      <section id="today-panel" class="flex-1 min-w-0 overflow-y-auto custom-scrollbar" aria-busy="true"></section>
+      <script src="/today-init.js"></script>
+
+      <section id="desk-column" hidden class="flex-1 min-w-0 flex flex-col overflow-hidden">
 
         <div id="desk-head" class="shrink-0 pt-8 pb-4">
           <div class="desk-head-grid">
@@ -77,20 +72,7 @@
               <div id="time-bar-skeleton" class="time-bar time-bar--skeleton" aria-hidden="true"></div>
               <div id="time-bar-rest" class="time-bar-rest hidden"></div>
             </div>
-            <div id="planner" class="planner-card hidden flex-col">
-              <div class="planner-title">Plan a session</div>
-              <span class="planner-budgets" role="group" aria-label="Time budget">
-                <button type="button" class="budget-chip" data-budget="20">20 min</button>
-                <button type="button" class="budget-chip" data-budget="45">45 min</button>
-                <button type="button" class="budget-chip" data-budget="90">1 h 30</button>
-                <button type="button" class="budget-chip" data-budget="all">All</button>
-              </span>
-              <button type="button" id="btn-start-plan" class="btn-primary justify-center" title="Start a study session with the planned videos (P)" aria-keyshortcuts="p">
-                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                <span id="btn-start-plan-label">Start</span>
-              </button>
-              <span id="plan-summary" class="text-xs text-text-muted"></span>
-            </div>
+
           </div>
         <div id="selection-actions" class="selection-bar hidden" role="toolbar" aria-label="Selected videos">
           <button type="button" id="btn-clear-selection" class="selection-bar-clear" title="Clear selection">
@@ -126,24 +108,11 @@
           <button type="button" id="facet-clear" class="chip hidden h-7 px-2.5 text-xs" title="Show everything">Clear filter</button>
           <span class="flex-1"></span>
           <div id="sort-select" class="custom-select custom-select--compact"></div>
-          <button type="button" id="btn-filter-duplicates" class="chip" title="Show videos that appear more than once">
-            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="8" height="14" x="3" y="5" rx="1"/><rect width="8" height="14" x="13" y="5" rx="1"/></svg>
-            <span id="btn-filter-duplicates-label">Duplicates</span>
-          </button>
-          <div class="flex items-center rounded-lg border border-border bg-surface-elevated p-0.5">
-            <button type="button" id="layout-list" class="w-7 h-6 flex items-center justify-center rounded-md text-text-muted transition-colors" title="List (V)" aria-label="List layout" aria-keyshortcuts="v">
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
-            </button>
-            <button type="button" id="layout-grid" class="w-7 h-6 flex items-center justify-center rounded-md text-text-muted transition-colors" title="Grid (V)" aria-label="Grid layout" aria-keyshortcuts="v">
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
-            </button>
-          </div>
+          <button type="button" id="btn-save-session" class="chip" title="Save the open tabs as a session (S)" aria-keyshortcuts="s">Save as session</button>
         </div>
 
         <div id="tab-list" class="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-8 pt-5 pb-24">
-          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 p-3" aria-hidden="true">
-            <div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div><div class="card-skeleton"></div>
-          </div>
+          <div class="flex flex-col gap-2" aria-hidden="true"><div class="facet-skeleton h-14 w-full"></div><div class="facet-skeleton h-14 w-full"></div><div class="facet-skeleton h-14 w-full"></div><div class="facet-skeleton h-14 w-full"></div><div class="facet-skeleton h-14 w-full"></div><div class="facet-skeleton h-14 w-full"></div></div>
         </div>
         <!-- Paints the last known rail, heading and time bar before tabs load, so nothing jumps. -->
         <script src="/desk-init.js"></script>
@@ -198,7 +167,7 @@
                 </section>
 
                 <section id="settings-sec-display" class="settings-section" data-settings-section hidden>
-                    <header class="settings-sec-head"><div><h4 class="settings-sec-title">Appearance</h4><p class="settings-sec-desc">Theme and how sharp thumbnails are.</p></div></header>
+                    <header class="settings-sec-head"><div><h4 class="settings-sec-title">Appearance</h4><p class="settings-sec-desc">Light, dark or the same as your computer.</p></div></header>
                     <div class="settings-group">
                         <div class="settings-row">
                             <div>
@@ -207,16 +176,7 @@
                             </div>
                             <div id="appearance-control" class="shrink-0"></div>
                         </div>
-                        <div class="settings-row">
-                            <div>
-                                <div class="settings-row-title">Thumbnail quality</div>
-                                <div class="settings-row-desc">High looks sharper and loads more data</div>
-                            </div>
-                            <div class="ui-segmented shrink-0" role="group" aria-label="Thumbnail quality">
-                                <button type="button" id="quality-standard" class="theme-option" aria-pressed="false">Standard</button>
-                                <button type="button" id="quality-high" class="theme-option" aria-pressed="false">High</button>
-                            </div>
-                        </div>
+
                     </div>
                 </section>
 
@@ -271,24 +231,6 @@
                         </div>
                     </div>
 
-                    <details class="settings-details mt-5">
-                        <summary class="settings-details-summary">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
-                            Developer details
-                            <span id="dev-version" class="ml-auto font-normal tabular-nums">—</span>
-                        </summary>
-                        <div class="pt-3 space-y-2 text-xs text-text-secondary">
-                            <div class="flex justify-between gap-4"><span>Content script debounce</span><span id="dev-debounce" class="tabular-nums">150 ms</span></div>
-                            <div class="flex justify-between gap-4"><span>Observer target</span><code class="text-[11px]">#primary / #content</code></div>
-                            <div class="flex items-center justify-between gap-2 pt-1">
-                                <span>Per-tab MutationObserver stats</span>
-                                <button type="button" id="btn-perf-refresh" class="chip h-7 px-2.5 text-xs">Refresh</button>
-                            </div>
-                            <div id="dev-perf-list" class="max-h-32 overflow-y-auto custom-scrollbar rounded-lg border border-border bg-surface/50 p-2 text-[11px] font-mono text-text-muted space-y-1">
-                                <div class="text-text-muted/70">Open YouTube tabs and press Refresh</div>
-                            </div>
-                        </div>
-                    </details>
                 </section>
             </div>
         </div>
@@ -371,7 +313,7 @@
             <div class="settings-group-label">On the desk</div>
             <dl class="shortcut-list">
             <div class="shortcut-row"><dt>Show this list</dt><dd><kbd>?</kbd></dd></div>
-            <div class="shortcut-row"><dt>Desk, Saved sessions, Reading list, Time, Practice</dt><dd><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd><kbd>5</kbd></dd></div>
+            <div class="shortcut-row"><dt>Today, All videos, Review, History</dt><dd><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></dd></div>
             <div class="shortcut-row"><dt>Search</dt><dd><kbd>/</kbd></dd></div>
             <div class="shortcut-row"><dt>Next or previous video</dt><dd><kbd>J</kbd><kbd>K</kbd></dd></div>
             <div class="shortcut-row"><dt>Go to the video&#39;s tab</dt><dd><kbd>Enter</kbd></dd></div>
@@ -381,8 +323,7 @@
             <div class="shortcut-row"><dt>Undo, while the Undo button shows</dt><dd><kbd>Z</kbd></dd></div>
             <div class="shortcut-row"><dt>Save session</dt><dd><kbd>S</kbd></dd></div>
             <div class="shortcut-row"><dt>Start study session</dt><dd><kbd>P</kbd></dd></div>
-            <div class="shortcut-row"><dt>Switch between list and grid</dt><dd><kbd>V</kbd></dd></div>
-            <div class="shortcut-row"><dt>Clear focus, selection or filter</dt><dd><kbd>Esc</kbd></dd></div>
+                        <div class="shortcut-row"><dt>Clear focus, selection or filter</dt><dd><kbd>Esc</kbd></dd></div>
             </dl>
             <div class="settings-group-label">On a YouTube video</div>
             <dl class="shortcut-list">
@@ -398,7 +339,7 @@
             <div class="shortcut-row"><dt>Replay this bit</dt><dd><kbd>A</kbd></dd></div>
             <div class="shortcut-row"><dt>Keep watching without answering</dt><dd><kbd>Space</kbd></dd></div>
             </dl>
-            <div class="settings-group-label">On the Practice page</div>
+            <div class="settings-group-label">On the Review page</div>
             <dl class="shortcut-list">
             <div class="shortcut-row"><dt>Play the sentence</dt><dd><kbd>Space</kbd></dd></div>
             <div class="shortcut-row"><dt>Show the text</dt><dd><kbd>T</kbd></dd></div>

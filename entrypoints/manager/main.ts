@@ -24,6 +24,7 @@ import { wireSidebarClicks } from "./sidebar";
 import { wireCompactHeader } from "./compact-header";
 import { wireStudyModal } from "./study-session";
 import { wireTabList } from "./tab-list-events";
+import { wireTodayPanel } from "./today";
 import { fetchTabs, handleStoreUpdated, scheduleFetchTabsFromEvents, scheduleProbeResultsToUi } from "./tabs";
 
 initTheme();
@@ -45,6 +46,7 @@ function setupListeners() {
   wireSections();
   wireShortcutsDialog();
   wireSettings();
+  wireTodayPanel();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -79,16 +81,11 @@ document.addEventListener("DOMContentLoaded", () => {
     render();
   });
   setupListeners();
-  const urlParameters = new URLSearchParams(window.location.search);
-  if (urlParameters.get("view") === "reading-list") {
-    app.isReadingListView = true;
-  }
-  if (urlParameters.get("view") === "time") {
-    app.isTimeView = true;
-  }
-  if (urlParameters.get("view") === "practice") {
-    app.isPracticeView = true;
-  }
+  const view = new URLSearchParams(window.location.search).get("view");
+  if (view) app.isTodayView = false;
+  if (view === "reading-list") app.isReadingListView = true;
+  if (view === "time") app.isTimeView = true;
+  if (view === "practice") app.isPracticeView = true;
   void refreshPracticeBadge();
   void loadReadingList();
   void loadLanguageOverrides().then((overrides) => {

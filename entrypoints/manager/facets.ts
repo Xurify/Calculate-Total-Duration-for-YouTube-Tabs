@@ -49,7 +49,7 @@ function languageLabelOf(languageName: string | null | undefined, code: string |
   return UNKNOWN_LANGUAGE;
 }
 
-function videoLanguageLabel(video: VideoData): string {
+export function videoLanguageLabel(video: VideoData): string {
   const override = languageOverrideFor(app.languageOverrides, getVideoIdFromUrl(video.url), video.channelName);
   if (override) return focusLabelOf(app.focusLanguages, override.name);
   if (video.language === undefined && !video.suspended) return DETECTING_LANGUAGE;
@@ -86,6 +86,13 @@ export function toggleFacet(kind: FacetKind, value = ""): void {
   } else {
     facets[kind] = value;
   }
+  app.lastTabListFingerprint = "";
+  render();
+}
+
+export function showContinueWatching(): void {
+  clearFacets();
+  facets.continue = true;
   app.lastTabListFingerprint = "";
   render();
 }
@@ -290,8 +297,6 @@ export function renderFacetRail(): void {
     const allRow: FacetRow = { kind: "all", value: "", label: "Everything", count: base.length, seconds: base.reduce((sum, video) => sum + remainingOf(video), 0) };
     html += windowScopeHtml();
     html += `<div class="facet-group">${facetButtonHtml(allRow)}${rows.continueRow.count > 0 ? facetButtonHtml(rows.continueRow) : ""}</div>`;
-    html += facetGroupHtml("Languages", rows.languages);
-    html += facetGroupHtml("Channels", rows.channels);
     html += facetGroupHtml("Piles", rows.piles, newPile, "facet-group--piles");
   } else if (app.selectedSession) {
     const sections = orderedSections(app.selectedSession.sections);
@@ -299,8 +304,6 @@ export function renderFacetRail(): void {
     const rows = facetRowsForSession(base, sections);
     const allRow: FacetRow = { kind: "all", value: "", label: "Whole session", count: base.length, seconds: base.reduce((sum, tab) => sum + (tab.seconds ?? 0), 0) };
     html += `<div class="facet-group">${facetButtonHtml(allRow)}</div>`;
-    html += facetGroupHtml("Languages", rows.languages);
-    html += facetGroupHtml("Channels", rows.channels);
     html += facetGroupHtml("Piles", rows.piles, newPile, "facet-group--piles");
   }
   if (html !== app.lastFacetRailHtml) {

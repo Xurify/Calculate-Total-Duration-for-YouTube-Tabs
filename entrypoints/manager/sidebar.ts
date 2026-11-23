@@ -61,18 +61,27 @@ export function renderSidebar() {
 }
 
 export function syncTopNavState(): void {
+  const inDesk = !app.isTodayView && !app.isTimeView && !app.isPracticeView;
   const states: [string, boolean][] = [
-    ["nav-desk", !app.isReadingListView && !app.isSessionsView && !app.isTimeView && !app.isPracticeView && app.selectedSession == null],
-    ["nav-reading-list", app.isReadingListView],
-    ["nav-sessions", app.isSessionsView || app.selectedSession != null],
+    ["nav-today", app.isTodayView],
+    ["nav-desk", inDesk],
     ["nav-time", app.isTimeView],
     ["nav-practice", app.isPracticeView],
+    ["source-open", inDesk && !app.isReadingListView && !app.isSessionsView && app.selectedSession == null],
+    ["nav-reading-list", inDesk && app.isReadingListView],
+    ["nav-sessions", inDesk && (app.isSessionsView || app.selectedSession != null)],
   ];
   for (const [id, active] of states) {
     const element = document.getElementById(id);
-    element?.classList.toggle("bg-surface-hover", active);
-    element?.classList.toggle("text-text-primary", active);
+    if (!element) continue;
+    if (element.classList.contains("facet")) element.setAttribute("aria-current", String(active));
+    else if (active) element.setAttribute("aria-current", "page");
+    else element.removeAttribute("aria-current");
   }
+  const openCount = document.getElementById("source-open-count");
+  if (openCount) openCount.textContent = String(app.allVideos.length);
+  const sessionsCount = document.getElementById("source-sessions-count");
+  if (sessionsCount) sessionsCount.textContent = String(app.savedSessionsCount);
   document.getElementById("windows-block")?.classList.toggle("hidden", app.isReadingListView || app.isSessionsView || app.isTimeView || app.isPracticeView || app.selectedSession != null);
 }
 
@@ -242,6 +251,19 @@ export function wireSidebarClicks() {
     const item = (event.target as HTMLElement).closest(".sidebar-item");
     if (!item) return;
     const type = item.getAttribute("data-sidebar-type");
+    app.isTodayView = type === "today";
+    if (type === "today") {
+      app.isPracticeView = false;
+      app.isTimeView = false;
+      app.isSessionsView = false;
+      app.isReadingListView = false;
+      app.selectedSession = null;
+      selectedSessionTabUrls.clear();
+      selectedTabIds.clear();
+      updateSelectionUI();
+      render();
+      return;
+    }
     if (type === "practice") {
       app.isPracticeView = true;
       app.isTimeView = false;

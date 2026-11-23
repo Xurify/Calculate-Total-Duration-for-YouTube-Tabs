@@ -1,3 +1,4 @@
+import { startTodayPlan } from "./today";
 import { closeAllCustomSelects } from "./custom-select";
 import { handlePracticeKeydown } from "./practice";
 import { app } from "./state";
@@ -109,7 +110,7 @@ function undoFromToast(): boolean {
   return true;
 }
 
-const VIEW_SHORTCUTS: Record<string, string> = { "1": "nav-desk", "2": "nav-sessions", "3": "nav-reading-list", "4": "nav-time", "5": "nav-practice" };
+const VIEW_SHORTCUTS: Record<string, string> = { "1": "nav-today", "2": "nav-desk", "3": "nav-practice", "4": "nav-time" };
 
 export function handleDeskKeydown(event: KeyboardEvent): void {
   if (anyDialogOpen()) return;
@@ -153,13 +154,8 @@ export function handleDeskKeydown(event: KeyboardEvent): void {
       return;
     case "p":
       event.preventDefault();
-      clickIfShown("btn-start-plan");
+      startTodayPlan();
       return;
-    case "v": {
-      event.preventDefault();
-      clickIfShown(app.layoutMode === "grid" ? "layout-list" : "layout-grid");
-      return;
-    }
     case "a":
       event.preventDefault();
       clickIfShown("select-all-checkbox");

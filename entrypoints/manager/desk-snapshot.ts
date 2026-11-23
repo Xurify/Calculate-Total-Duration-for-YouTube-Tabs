@@ -31,9 +31,6 @@ function writeDeskSnapshot(): void {
         timeValue: text("desk-time-value"),
         timeSuffix: text("desk-time-suffix"),
         stats: text("current-view-stats"),
-        planSummary: text("plan-summary"),
-        planLabel: text("btn-start-plan-label"),
-        plannerVisible: visible("planner"),
       })
     );
   } catch {

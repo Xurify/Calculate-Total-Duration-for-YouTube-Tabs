@@ -46,7 +46,7 @@ function applyPrefsFromStore(): void {
   const { prefs } = storeState;
   app.thumbnailQuality = prefs.thumbnailQuality;
   app.groupingMode = prefs.groupingMode;
-  app.layoutMode = prefs.layoutMode;
+  app.layoutMode = "list";
   app.sortOption = prefs.sortOption;
   app.sortSelectHandle?.setValue(app.sortOption);
 }

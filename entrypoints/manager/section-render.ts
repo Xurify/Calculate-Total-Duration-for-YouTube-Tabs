@@ -2,7 +2,7 @@ import { VideoData, type SavedSessionTab, type SessionSection } from "../../util
 import { formatTime } from "../../utils/format";
 import { app } from "./state";
 import { deskAvatarHtml } from "./avatars";
-import { renderSessionGrid, renderSessionList, renderVideoGrid, renderVideoList } from "./cards";
+import { renderSessionList, renderVideoList } from "./cards";
 import { sectionRailVar } from "./palette";
 import {
   partitionLiveVideosBySection,
@@ -70,7 +70,7 @@ function renderSessionTabsInnerHtml(
   if (tabs.length === 0) return "";
   if (app.groupingMode === "none") {
     const sorted = sortSessionTabsForDisplay(tabs);
-    return app.layoutMode === "grid" ? renderSessionGrid(sorted, sectionColor) : renderSessionList(sorted, sectionColor);
+    return renderSessionList(sorted, sectionColor);
   }
   const groups = new Map<string, SavedSessionTab[]>();
   tabs.forEach((tab) => {
@@ -85,7 +85,7 @@ function renderSessionTabsInnerHtml(
       const groupDuration = tabList.reduce((sum, tab) => sum + (tab.seconds ?? 0), 0);
       const sortedTabs = sortSessionTabsForDisplay(tabList);
       const gridOrList =
-        app.layoutMode === "grid" ? renderSessionGrid(sortedTabs, sectionColor) : renderSessionList(sortedTabs, sectionColor);
+        renderSessionList(sortedTabs, sectionColor);
       return `
             <div class="mb-3">
               <div class="flex items-center gap-3 px-2 py-1.5 rounded-md hover:bg-surface-hover/30 group/header select-none">
@@ -116,7 +116,7 @@ function renderLiveVideosInnerHtml(
   if (videos.length === 0) return "";
   if (app.groupingMode === "none") {
     const sortedVideos = sortVideosForDisplay(videos);
-    return app.layoutMode === "grid" ? renderVideoGrid(sortedVideos, sectionColor) : renderVideoList(sortedVideos, sectionColor);
+    return renderVideoList(sortedVideos, sectionColor);
   }
   const groups = new Map<string, VideoData[]>();
   videos.forEach((video) => {
@@ -133,7 +133,7 @@ function renderLiveVideosInnerHtml(
       const allSelected = groupVideos.every((video) => selectedTabIds.has(video.id));
       const someSelected = !allSelected && groupVideos.some((video) => selectedTabIds.has(video.id));
       const inner =
-        app.layoutMode === "grid" ? renderVideoGrid(sortedGroupVideos, sectionColor) : renderVideoList(sortedGroupVideos, sectionColor);
+        renderVideoList(sortedGroupVideos, sectionColor);
       return `
             <div class="mb-3">
                 <div class="flex items-center gap-3 px-2 py-1.5 rounded-md hover:bg-surface-hover/30 group/header select-none">

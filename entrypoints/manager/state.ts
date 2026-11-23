@@ -25,6 +25,8 @@ interface AppState {
   allVideos: VideoData[];
   windowGroups: WindowGroup[];
   currentWindowId: number | 'all';
+  /** The landing page: today's goals and a ready-made session. */
+  isTodayView: boolean;
   isReadingListView: boolean;
   /** Top-nav "Saved sessions" view: lists sessions instead of the board. */
   isSessionsView: boolean;
@@ -77,6 +79,7 @@ export const app: AppState = {
   allVideos: [],
   windowGroups: [],
   currentWindowId: 'all',
+  isTodayView: true,
   isReadingListView: false,
   isSessionsView: false,
   isTimeView: false,

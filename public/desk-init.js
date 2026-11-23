@@ -1,5 +1,5 @@
 // Runs synchronously while the page parses, before the manager's module script loads tabs.
-// With a snapshot it paints the last known desk (rail, heading, time bar, planner, list);
+// With a snapshot it paints the last known desk (rail, heading, time bar, list);
 // without one it marks the page as loading so the skeleton shows instead of zeros.
 (function paintLastKnownDesk() {
   var root = document.documentElement;
@@ -32,13 +32,6 @@
     text("desk-time-value", snap.timeValue);
     text("desk-time-suffix", snap.timeSuffix);
     text("current-view-stats", snap.stats);
-    text("plan-summary", snap.planSummary);
-    text("btn-start-plan-label", snap.planLabel);
-    var planner = document.getElementById("planner");
-    if (planner && snap.plannerVisible) {
-      planner.classList.remove("hidden");
-      planner.classList.add("flex");
-    }
     if (snap.list) set("tab-list", snap.list);
     root.classList.add("desk-snapshot");
   } catch (error) {

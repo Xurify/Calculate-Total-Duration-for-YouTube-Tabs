@@ -5,12 +5,13 @@ import { renderPracticePanel } from "./practice";
 import { summarizeDuplicates } from "../../utils/sessions";
 import { app } from "./state";
 import { deskAvatarHtml } from "./avatars";
-import { renderSessionGrid, renderSessionList, renderVideoGrid, renderVideoList } from "./cards";
+import { renderSessionList, renderVideoList } from "./cards";
 import { saveDeskSnapshot } from "./desk-snapshot";
 import { facetCrumbText, pruneStaleFacets, renderFacetCrumb, renderFacetRail, renderTimeBar } from "./facets";
 import { tabListStructureFingerprint } from "./fingerprint";
 import { applyRowFocus } from "./keyboard";
-import { renderPlanner } from "./planner";
+import { remainingOf } from "./playback";
+import { renderTodayPanel } from "./today";
 import { renderReadingListCard } from "./reading-list";
 import { orderedSections, partitionLiveVideosBySection } from "./sections";
 import { applyTabListCheckboxIndeterminateFromAttr, updateSelectionUI } from "./selection";
@@ -55,7 +56,6 @@ export function updateCurrentViewStatsFromState(): void {
     ...liveHeroTime(videosToShow),
   });
   renderTimeBar();
-  renderPlanner();
 }
 
 export function updateTabListAggregateHeadersFromState(): void {
@@ -149,6 +149,8 @@ export function updateLiveTabListCardsFromState() {
       curEl.classList.toggle("text-text-muted", watchedPercent <= 0);
     }
     if (listBar) listBar.style.width = `${watchedPercent}%`;
+    const leftEl = card.querySelector(".manager-card-left");
+    if (leftEl) leftEl.textContent = video.isLive ? "" : `${formatDurationWords(remainingOf(video))}${video.currentTime > 0 ? " left" : ""}`;
 
     const languageLabel = video.languageName ? video.languageName.split("(")[0].trim() : "";
     const langEl = card.querySelector(".manager-card-language") as HTMLElement | null;
@@ -203,51 +205,22 @@ function renderMain() {
       settingsModal.classList.remove("flex", "items-center", "justify-center", "animate-in", "fade-in");
     }
 
-    const btnQualityStd = document.getElementById("quality-standard");
-    const btnQualityHigh = document.getElementById("quality-high");
-
-    btnQualityStd?.setAttribute("aria-pressed", String(app.thumbnailQuality === "standard"));
-    btnQualityHigh?.setAttribute("aria-pressed", String(app.thumbnailQuality !== "standard"));
   }
-  const btnGroupNone = document.getElementById('view-list');
-  const btnGroupChannel = document.getElementById('view-channel');
-  const btnGroupLanguage = document.getElementById('view-language');
-
-  if (btnGroupNone && btnGroupChannel && btnGroupLanguage) {
-    [btnGroupNone, btnGroupChannel, btnGroupLanguage].forEach(btn => {
-      btn.classList.remove('text-accent', 'bg-surface-hover');
-      btn.classList.add('text-text-muted');
-    });
-    if (app.groupingMode === 'none') {
-      btnGroupNone.classList.add('text-accent', 'bg-surface-hover');
-      btnGroupNone.classList.remove('text-text-muted');
-    } else if (app.groupingMode === 'channel') {
-      btnGroupChannel.classList.add('text-accent', 'bg-surface-hover');
-      btnGroupChannel.classList.remove('text-text-muted');
-    } else if (app.groupingMode === 'language') {
-      btnGroupLanguage.classList.add('text-accent', 'bg-surface-hover');
-      btnGroupLanguage.classList.remove('text-text-muted');
-    }
-  }
-
-  const btnLayoutList = document.getElementById('layout-list');
-  const btnLayoutGrid = document.getElementById('layout-grid');
-
-  if (btnLayoutList && btnLayoutGrid) {
-    if (app.layoutMode === 'list') {
-      btnLayoutList.classList.add('text-accent', 'bg-surface-hover');
-      btnLayoutList.classList.remove('text-text-muted');
-      btnLayoutGrid.classList.remove('text-accent', 'bg-surface-hover');
-      btnLayoutGrid.classList.add('text-text-muted');
-    } else {
-      btnLayoutGrid.classList.add('text-accent', 'bg-surface-hover');
-      btnLayoutGrid.classList.remove('text-text-muted');
-      btnLayoutList.classList.remove('text-accent', 'bg-surface-hover');
-      btnLayoutList.classList.add('text-text-muted');
-    }
-  }
-
   if (!container || !headerTitle || !headerStats) return;
+
+  const todayPanel = document.getElementById("today-panel");
+  const deskColumn = document.getElementById("desk-column");
+  const deskAside = document.getElementById("desk-aside");
+  if (todayPanel) todayPanel.hidden = !app.isTodayView;
+  if (deskColumn) deskColumn.hidden = app.isTodayView;
+  if (deskAside) deskAside.hidden = app.isTodayView || app.isTimeView || app.isPracticeView;
+  if (app.isTodayView) {
+    syncTopNavState();
+    app.timeViewShown = false;
+    app.lastTabListFingerprint = "";
+    renderTodayPanel();
+    return;
+  }
 
   const enteringTime = app.isTimeView && !app.timeViewShown;
   app.timeViewShown = app.isTimeView;
@@ -258,7 +231,6 @@ function renderMain() {
   renderFacetRail();
   renderTimeBar();
   renderFacetCrumb();
-  renderPlanner();
   container.classList.toggle("hidden", app.isSessionsView || app.isTimeView || app.isPracticeView);
 
   const sessionsPanel = document.getElementById("sessions-panel");
@@ -295,9 +267,9 @@ function renderMain() {
       return;
     }
     if (viewToolbar) viewToolbar.classList.add("hidden");
-    headerTitle.innerText = "where the time went";
+    headerTitle.innerText = "what you watched";
     headerStats.innerText = "";
-    setDeskHero({ kicker: "Time", title: "", value: "…", suffix: "" });
+    setDeskHero({ kicker: "History", title: "", value: "…", suffix: "" });
     app.lastTabListFingerprint = "";
     void renderTimePanel();
     return;
@@ -383,7 +355,7 @@ function renderMain() {
       setTabListInnerHTML(container, emptyListMessage());
     } else {
       const sorted = sortSessionTabsForDisplay(tabsToShow);
-      setTabListInnerHTML(container, app.layoutMode === "grid" ? renderSessionGrid(sorted) : `<div class="queue-card">${renderSessionList(sorted)}</div>`);
+      setTabListInnerHTML(container, `<div class="queue-card">${renderSessionList(sorted)}</div>`);
     }
     applyRowFocus();
     app.lastTabListFingerprint = fpSession;
@@ -426,9 +398,8 @@ function renderMain() {
     setTabListInnerHTML(container, emptyListMessage());
   } else {
     const sortedVideos = sortVideosForDisplay(videosToShow);
-    setTabListInnerHTML(container, app.layoutMode === "grid" ? renderVideoGrid(sortedVideos) : `<div class="queue-card">${renderVideoList(sortedVideos)}</div>`);
+    setTabListInnerHTML(container, `<div class="queue-card">${renderVideoList(sortedVideos)}</div>`);
   }
-  renderPlanner();
   applyRowFocus();
   app.lastTabListFingerprint = fpLive;
   saveDeskSnapshot();

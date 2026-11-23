@@ -4,7 +4,6 @@ import { summarizeDuplicates } from "../../utils/sessions";
 import { app } from "./state";
 import { type FacetKind, toggleFacet } from "./facets";
 import { handleDeskKeydown } from "./keyboard";
-import { plannedTabIds } from "./planner";
 import { render } from "./render";
 import { openAddSectionModal } from "./sections";
 import { updateSelectionUI } from "./selection";
@@ -73,10 +72,6 @@ export function mountDeskSelects() {
 }
 
 export function wireDeskToolbar() {
-  document.getElementById("btn-refresh")?.addEventListener("click", () => {
-    fetchTabs();
-  });
-
   document.getElementById("btn-clear-selection")?.addEventListener("click", () => {
     selectedTabIds.clear();
     selectedSessionTabUrls.clear();
@@ -118,19 +113,6 @@ export function wireDeskToolbar() {
 
   document.getElementById("btn-stage-study-header")?.addEventListener("click", () => {
     openStudySessionModal();
-  });
-
-  document.getElementById("planner")?.addEventListener("click", (event) => {
-    const chip = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-budget]");
-    if (!chip) return;
-    app.planBudgetMinutes = chip.dataset.budget === "all" ? null : Number(chip.dataset.budget);
-    app.lastTabListFingerprint = "";
-    render();
-  });
-
-  document.getElementById("btn-start-plan")?.addEventListener("click", () => {
-    if (plannedTabIds.size === 0) return;
-    openStudySessionModal(Array.from(plannedTabIds));
   });
 
   const onFacetClick = (event: Event) => {
@@ -201,28 +183,6 @@ export function wireViewControls() {
   document.getElementById("view-language")?.addEventListener("click", () => {
     app.groupingMode = "language";
     saveSettings();
-    render();
-  });
-
-  document.getElementById("layout-list")?.addEventListener("click", () => {
-    app.layoutMode = "list";
-    saveSettings();
-    render();
-  });
-  document.getElementById("layout-grid")?.addEventListener("click", () => {
-    app.layoutMode = "grid";
-    saveSettings();
-    render();
-  });
-
-  document.getElementById("btn-filter-duplicates")?.addEventListener("click", () => {
-    if (app.showDuplicatesOnly) {
-      app.showDuplicatesOnly = false;
-    } else {
-      const summary = summarizeDuplicates(app.scopeVideoIdCounts);
-      if (summary.duplicateVideoCount === 0) return;
-      app.showDuplicatesOnly = true;
-    }
     render();
   });
 

@@ -76,7 +76,7 @@ function renderFocusLanguageList(): void {
     hint.textContent =
       chosen.size === 0
         ? "Pick the ones you care about. The rest is still counted, as Other."
-        : "Only these get their own rows and colours on the Time page, the desk and the popup. The rest is counted as Other.";
+        : "Only these get their own rows and colours on Today, History, the desk and the popup. The rest is counted as Other.";
   }
 }
 
@@ -181,18 +181,6 @@ export function wireSettings() {
     if (event.key === "Escape" && app.isSettingsOpen && !document.querySelector("#confirm-modal:not(.hidden), #shortcuts-modal:not(.hidden)")) closeSettings();
   });
 
-  document.getElementById("quality-standard")?.addEventListener("click", () => {
-    app.thumbnailQuality = "standard";
-    saveSettings();
-    render();
-  });
-
-  document.getElementById("quality-high")?.addEventListener("click", () => {
-    app.thumbnailQuality = "high";
-    saveSettings();
-    render();
-  });
-
   document.getElementById("btn-clear-cache")?.addEventListener("click", async () => {
     const confirmed = await showConfirm({
       title: "Clear video details?",
@@ -260,36 +248,6 @@ export function wireSettings() {
     } catch (error) {
       console.error("Import failed:", error);
       showToast(error instanceof Error ? error.message : "Could not import sessions.");
-    }
-  });
-
-  document.getElementById("btn-perf-refresh")?.addEventListener("click", async () => {
-    const container = document.getElementById("dev-perf-list");
-    if (!container) return;
-    container.innerHTML = "<span class='text-text-muted/70'>Fetching…</span>";
-    const rows: string[] = [];
-    for (const video of app.allVideos) {
-      try {
-        const stats = await browser.tabs.sendMessage(video.id, { action: "get-perf-stats" }) as {
-          totalMutations?: number;
-          totalReads?: number;
-          ratio?: string;
-          debounceMs?: number;
-        } | undefined;
-        if (stats && typeof stats.totalMutations === "number") {
-          const title = video.title.slice(0, 20) + (video.title.length > 20 ? "…" : "");
-          rows.push(`Tab ${video.id} · ${title} · mut: ${stats.totalMutations} read: ${stats.totalReads ?? "—"} ratio: ${stats.ratio ?? "—"}`);
-        } else {
-          rows.push(`Tab ${video.id} · (no content script)`);
-        }
-      } catch {
-        rows.push(`Tab ${video.id} · (unavailable)`);
-      }
-    }
-    if (rows.length === 0) {
-      container.innerHTML = "<span class='text-text-muted/70'>No YouTube tabs open</span>";
-    } else {
-      container.innerHTML = rows.map((row) => `<div class="truncate" title="${escapeHtml(row)}">${escapeHtml(row)}</div>`).join("");
     }
   });
 }

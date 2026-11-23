@@ -87,7 +87,7 @@ function writeMandalaLibrary(library: MandalaChartLibrary): void {
       })
     );
   } catch (error) {
-    console.warn("[Study Harvester] Failed to write Mandala library:", error);
+    console.warn("[Earshot] Failed to write Mandala library:", error);
   }
 }
 
@@ -355,7 +355,7 @@ async function handTimeToMandala(): Promise<void> {
     });
     void syncMandalaSummaryToExtension();
   } catch (error) {
-    console.warn("[Study Harvester] Could not hand time to Mandala:", error);
+    console.warn("[Earshot] Could not hand time to Mandala:", error);
   } finally {
     handoverInFlight = false;
     if (handoverAskedAgain) {

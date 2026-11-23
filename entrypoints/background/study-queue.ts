@@ -106,7 +106,7 @@ export async function stageFocusedStudyQueue(payload: StageQueuePayload, sender:
           buildApprovalRequest(sender, {
             title: `Close ${tabsToStash.length} YouTube ${tabsToStash.length === 1 ? "tab" : "tabs"}?`,
             summary:
-              "This page wants to save these tabs as a session in Study Harvester and then close them. You can reopen them from Saved Sessions.",
+              "This page wants to save these tabs as a session in Earshot and then close them. You can reopen them from Saved Sessions.",
             items: tabsToStash.map((tab) => tab.title || tab.url),
             confirmLabel: "Stash and close",
             destructive: true,

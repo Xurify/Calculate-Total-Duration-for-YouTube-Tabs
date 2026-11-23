@@ -1,5 +1,5 @@
 /**
- * WebMCP tools over Study Harvester's saved sessions, registered on YouTube and Mandala pages.
+ * WebMCP tools over Earshot's saved sessions, registered on YouTube and Mandala pages.
  * Both pages reach the extension through the same bridge actions.
  */
 import type { WebMcpToolDefinition } from "./webmcp";
@@ -8,7 +8,7 @@ import { sendBridgeRequest } from "./webmcpBridge";
 export const listSavedSessionsTool: WebMcpToolDefinition<Record<string, unknown>, unknown> = {
   name: "youtube_list_saved_sessions",
   description:
-    "Lists the sessions saved in Study Harvester, including the backlogs youtube_stage_study_queue stashed, with each session's id, name, video count, total duration, languages and videos. Use it to find a stashed video and reopen it with youtube_open_saved_session. The first call from this page opens an approval window, so the user must allow it.",
+    "Lists the sessions saved in Earshot, including the backlogs youtube_stage_study_queue stashed, with each session's id, name, video count, total duration, languages and videos. Use it to find a stashed video and reopen it with youtube_open_saved_session. The first call from this page opens an approval window, so the user must allow it.",
   annotations: {
     readOnlyHint: true,
     untrustedContentHint: true,

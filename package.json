@@ -1,6 +1,6 @@
 {
   "name": "calculate-total-duration-for-youtube",
-  "description": "Turn open YouTube tabs into a study desk: see the time left, sort videos into piles, and start focused sessions.",
+  "description": "Plan your language listening on YouTube: minutes left on today's goals, one-click sessions from your open tabs, and sentences to review.",
   "private": true,
   "version": "1.0.0",
   "type": "module",

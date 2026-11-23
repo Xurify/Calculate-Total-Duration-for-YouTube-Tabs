@@ -118,7 +118,7 @@ export default defineBackground(() => {
       void Promise.all([
         siteTracker.entries(),
         withWatchLog(async (log) => {
-          await fillMissingWatchLanguages(log).catch((error) => console.warn("[Study Harvester] watch languages:", error));
+          await fillMissingWatchLanguages(log).catch((error) => console.warn("[Earshot] watch languages:", error));
           return [...log];
         }),
         loadLanguageOverrides(),
@@ -684,7 +684,7 @@ export default defineBackground(() => {
         buildApprovalRequest(sender, {
           title: "Share your saved sessions?",
           summary:
-            "This page wants the names and video lists of the sessions saved in Study Harvester.",
+            "This page wants the names and video lists of the sessions saved in Earshot.",
           confirmLabel: "Share sessions",
           destructive: false,
         })

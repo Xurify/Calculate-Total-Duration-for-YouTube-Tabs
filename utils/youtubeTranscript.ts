@@ -158,7 +158,7 @@ async function fetchCaptionTrackSegments(baseUrl: string): Promise<TranscriptSeg
       }
     }
   } catch (error) {
-    console.warn("[Study Harvester] Failed to fetch or parse transcript XML:", error);
+    console.warn("[Earshot] Failed to fetch or parse transcript XML:", error);
   }
 
   return segments;

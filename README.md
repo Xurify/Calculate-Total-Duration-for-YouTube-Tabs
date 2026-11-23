@@ -1,6 +1,6 @@
-# Study Harvester
+# Earshot
 
-A browser extension that turns your open YouTube tabs into a study desk.
+A browser extension for learning languages by listening: it plans your YouTube watching around daily language goals.
 
 - **Today.** The desk opens on today: how many minutes are left on your daily language goals, one button that plans a session from the languages that are behind, and a row per language with its next video.
 - **All videos.** Every open tab in one list, with the time left per video. The bar of time per language filters the list; open tabs, saved sessions and the reading list are three sources of the same view. Sort videos into piles by dragging a row onto a pile, or right-clicking it.

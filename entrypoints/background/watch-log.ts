@@ -36,7 +36,7 @@ export function withWatchLog<T>(work: (log: WatchEntry[]) => Promise<T> | T): Pr
     watchLog ??= await loadWatchLog();
     return work(watchLog);
   });
-  watchQueue = run.catch((error) => console.warn("[Study Harvester] watch log:", error));
+  watchQueue = run.catch((error) => console.warn("[Earshot] watch log:", error));
   return run;
 }
 

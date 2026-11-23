@@ -42,7 +42,7 @@ async function copyItems(items: string[]) {
 }
 
 function render(request: ApprovalRequest) {
-  document.title = `Study Harvester · ${request.title}`;
+  document.title = `Earshot · ${request.title}`;
   titleElement.textContent = request.title;
   originElement.textContent = request.origin;
   summaryElement.textContent = request.summary;

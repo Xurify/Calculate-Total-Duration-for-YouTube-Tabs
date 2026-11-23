@@ -9,8 +9,8 @@ const ELD_DIR = resolve("node_modules/eld/src");
 export default defineConfig({
   manifestVersion: 3,
   manifest: {
-    name: "Study Harvester",
-    description: "Turn open YouTube tabs into a study desk: see the time left, sort videos into piles, and start focused sessions.",
+    name: "Earshot",
+    description: "Plan your language listening on YouTube: minutes left on today's goals, one-click sessions from your open tabs, and sentences to review.",
     permissions: ["tabs", "scripting", "storage", "readingList", "history", "idle", "alarms"],
     host_permissions: [
       "*://*.youtube.com/*",

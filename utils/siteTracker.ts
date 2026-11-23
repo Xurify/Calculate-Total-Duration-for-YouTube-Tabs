@@ -104,7 +104,7 @@ export class SiteTracker {
 
   /** Runs tracker work one piece at a time, so two events never read and write the log at once. */
   #enqueue(work: () => Promise<void>): Promise<void> {
-    this.#queue = this.#queue.then(() => this.#ready).then(work, work).catch((error) => console.warn("[Study Harvester] time tracker:", error));
+    this.#queue = this.#queue.then(() => this.#ready).then(work, work).catch((error) => console.warn("[Earshot] time tracker:", error));
     return this.#queue;
   }
 
@@ -324,7 +324,7 @@ export class SiteTracker {
     try {
       if (!match) {
         await api.setBadgeText({ text: "", tabId: active.tabId });
-        await api.setTitle({ title: "Study Harvester", tabId: active.tabId });
+        await api.setTitle({ title: "Earshot", tabId: active.tabId });
         return;
       }
       const today = summarize(await this.#getLog(), 1).byPillar[match.pillarIndex];

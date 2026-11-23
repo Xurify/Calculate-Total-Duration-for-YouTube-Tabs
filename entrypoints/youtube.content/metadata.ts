@@ -50,13 +50,17 @@ type PlayerResponseShape = Parameters<typeof detectLanguageFromPlayerResponse>[0
   };
 };
 
-function readPlayerResponseFromPage(): PlayerResponseShape | null {
+/** Shorts swap videos in the page without a reload, so these sources can still describe the previous video. */
+function readPlayerResponseFromPage(videoId: string | null): PlayerResponseShape | null {
+  const forThisVideo = (playerResponse: PlayerResponseShape | null | undefined): PlayerResponseShape | null =>
+    videoId && playerResponse?.videoDetails?.videoId === videoId ? playerResponse : null;
+
   try {
     const moviePlayerElement = document.getElementById("movie_player") as (HTMLElement & {
       getPlayerResponse?: () => PlayerResponseShape;
     }) | null;
     if (moviePlayerElement && typeof moviePlayerElement.getPlayerResponse === "function") {
-      const playerResponse = moviePlayerElement.getPlayerResponse();
+      const playerResponse = forThisVideo(moviePlayerElement.getPlayerResponse());
       if (playerResponse) return playerResponse;
     }
   } catch {
@@ -64,8 +68,9 @@ function readPlayerResponseFromPage(): PlayerResponseShape | null {
   }
 
   try {
-    const fromWindow = (window as unknown as { ytInitialPlayerResponse?: PlayerResponseShape })
-      .ytInitialPlayerResponse;
+    const fromWindow = forThisVideo(
+      (window as unknown as { ytInitialPlayerResponse?: PlayerResponseShape }).ytInitialPlayerResponse
+    );
     if (fromWindow) return fromWindow;
   } catch {
     // Ignore window read failure
@@ -79,7 +84,8 @@ function readPlayerResponseFromPage(): PlayerResponseShape | null {
         scriptContent.match(/var ytInitialPlayerResponse\s*=\s*({.+?});/s) ||
         scriptContent.match(/window\["ytInitialPlayerResponse"\]\s*=\s*({.+?});/s);
       if (!playerResponseMatch) continue;
-      return JSON.parse(playerResponseMatch[1]) as PlayerResponseShape;
+      const playerResponse = forThisVideo(JSON.parse(playerResponseMatch[1]) as PlayerResponseShape);
+      if (playerResponse) return playerResponse;
     }
   } catch {
     // Ignore script parse failure
@@ -95,13 +101,13 @@ let languageLookup: { videoId: string; at: number; result: Promise<DetectedLangu
 async function lookUpLanguage(videoId: string): Promise<DetectedLanguage | undefined> {
   let source: PageLanguageSource | null = await requestPageLanguage(videoId);
   if (!source) {
-    const playerResponse = readPlayerResponseFromPage();
-    if (playerResponse?.videoDetails?.videoId === videoId) {
+    const playerResponse = readPlayerResponseFromPage(videoId);
+    if (playerResponse) {
       source = {
         videoId,
         detected: detectLanguageFromPlayerResponse(playerResponse),
         text: languageTextFromPlayerResponse(playerResponse),
-        channelName: playerResponse.videoDetails.author ?? null,
+        channelName: playerResponse.videoDetails?.author ?? null,
       };
     }
   }
@@ -146,7 +152,7 @@ export async function readMetadataFromDom(refreshLanguage = false): Promise<Cach
     }
   }
 
-  const playerResponse = readPlayerResponseFromPage();
+  const playerResponse = readPlayerResponseFromPage(videoId);
   if (duration === 0 && playerResponse?.videoDetails?.lengthSeconds) {
     duration = parseInt(playerResponse.videoDetails.lengthSeconds, 10) || 0;
   }

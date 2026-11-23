@@ -28,15 +28,16 @@ export default defineContentScript({
   matches: ["*://*.youtube.com/*"],
   main(context) {
     // Media events don't bubble, so listen in the capture phase to catch every <video> YouTube swaps in.
-    document.addEventListener(
-      "ratechange",
-      (event) => {
-        const videoElement = event.target;
-        if (!(videoElement instanceof HTMLVideoElement) || page.sentencePlayback?.restoreRate != null) return;
-        void browser.storage.local.set({ [PLAYBACK_RATE_KEY]: videoElement.playbackRate });
-      },
-      true
-    );
+    const recordPlaybackRate = (event: Event) => {
+      const videoElement = event.target;
+      if (!(videoElement instanceof HTMLVideoElement) || page.sentencePlayback?.restoreRate != null) return;
+      // Hover previews play muted outside the player and must not set the desk's speed.
+      if (!videoElement.closest("#movie_player, #shorts-player")) return;
+      void browser.storage.local.set({ [PLAYBACK_RATE_KEY]: videoElement.playbackRate });
+    };
+    document.addEventListener("ratechange", recordPlaybackRate, true);
+    // Also on play: a speed set in another tab must not stay on the desk while this tab plays at its own speed.
+    document.addEventListener("play", recordPlaybackRate, true);
     registerBridgeListener({
       "get-open-tabs-catalog": () => browser.runtime.sendMessage({ action: "get-open-tabs-catalog" }),
       "stage-focused-study-queue": (payload) =>

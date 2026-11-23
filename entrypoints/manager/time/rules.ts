@@ -3,7 +3,7 @@ import { formatMinutesWords } from "../../../utils/timeUi";
 import type { WatchSummary } from "../../../utils/watchLog";
 import { isGoal, ruleKey, type LanguageLimit, type LanguageLimitUsage } from "../../../utils/languageLimits";
 import { durationFieldHtml } from "../../../utils/controls";
-import { colorOfLanguage, languageColorMap, languageMarkHtml, timeSectionHeading, TRASH_ICON } from "./html";
+import { colorOfLanguage, languageColorMap, languageMarkHtml, TRASH_ICON } from "./html";
 import { lastTimeResponse, newRuleKind, renderTimePanel } from "./panel";
 import { escapeHtml } from "../util";
 
@@ -46,16 +46,16 @@ export function dailyRulesHtml(rules: LanguageLimitUsage[], watch: WatchSummary,
       </li>`;
     })
     .join("");
-  return `<section class="flex flex-col gap-3 time-card">
-    ${timeSectionHeading("Daily goals and limits", "", "goal")}
+  return `<div class="flex flex-col gap-3">
+    <h3 class="text-sm font-semibold text-text-secondary m-0">Daily goals and limits</h3>
     <p class="text-xs text-text-muted m-0">A goal is the least you want in a language each day, a limit the most. The player shows a note when a goal is reached and when a limit is close or passed. Time is real time, so 2× speed counts half.${prefs.watchHistory ? "" : " Goals and limits need YouTube history, which is off."}</p>
     ${rowsHtml ? `<ul class="m-0 p-0 list-none flex flex-col gap-2.5">${rowsHtml}</ul>` : ""}
-  </section>`;
+  </div>`;
 }
 
 /** Painted once per visit, apart from the live rows above it, so a refresh never touches what is being typed. */
 export function addRuleFormHtml(): string {
-  return `<form id="time-rule-add" class="time-card flex flex-wrap items-center gap-2 -mt-2">
+  return `<form id="time-rule-add" class="flex flex-wrap items-center gap-2">
       <span class="ui-segmented" role="group" aria-label="Kind">
         <button type="button" class="time-rule-kind budget-chip text-xs" data-kind="goal" aria-pressed="${newRuleKind === "goal"}">At least</button>
         <button type="button" class="time-rule-kind budget-chip text-xs" data-kind="limit" aria-pressed="${newRuleKind === "limit"}">At most</button>

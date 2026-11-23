@@ -17,7 +17,6 @@ import {
   ruleKey,
   type LanguageLimit,
 } from "../../../utils/languageLimits";
-import { CHANNEL_AVATARS_KEY } from "../../../utils/channelAvatars";
 import { focusHoursRows, focusWatchSummary, OTHER_LANGUAGES } from "../../../utils/focusLanguages";
 import { durationFieldMinutes, wireCombobox, wireSteppers } from "../../../utils/controls";
 import { app } from "../state";
@@ -27,40 +26,37 @@ import { openSettings } from "../settings";
 import { setDeskHero } from "../sidebar";
 import { openExportModal, wireExportModal } from "./export";
 import { languageDot, plural, timeAgoWords } from "./html";
-import { languageHoursSectionHtml, streakSectionHtml } from "./progress";
+import { hoursEditHtml, languagesTableHtml } from "./progress";
 import { addRuleFormHtml, dailyRulesHtml, plainRules, sameRule, saveDailyRules } from "./rules";
-import { watchSectionsHtml } from "./watch-sections";
+import { dayChartHtml } from "./watch-sections";
 import { showToast } from "../toast";
 import { downloadText, escapeHtml } from "../util";
 
-/* ───────────────────────── Time: where the week went ───────────────────────── */
+/* ───────────────────────── History: minutes, languages, goals ───────────────────────── */
 
 export let timeRange: 7 | 30 | 90 = 7;
 export let lastTimeResponse: TimeSummaryResponse | null = null;
 /** Every watched language, before the ones outside Settings' list fold into "Other". */
 let watchedLanguageLabels: string[] = [];
 let timePanelWired = false;
-export let showAllChannels = false;
-export let openChannel: string | null = null;
-
-export let videoRowsShown = 0;
 export let newRuleKind: "goal" | "limit" = "goal";
 let ruleSaveTimer: ReturnType<typeof setTimeout> | null = null;
 const RULE_SAVE_DELAY_MS = 600;
+/** Kept across repaints, so the edit area stays open while the rest of the page refreshes. */
+let goalsOpen = false;
 
 let timeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let lastTimeRefreshAt = 0;
 const TIME_REFRESH_MIN_MS = 2000;
-const TIME_SLOTS = ["rules", "add", "streak", "hours", "range", "watch", "mandala", "tracking"] as const;
+const TIME_SLOTS = ["range", "watch", "languages", "rules", "add", "hours", "tracking", "mandala"] as const;
 type TimeSlot = (typeof TIME_SLOTS)[number];
 const paintedTimeSlots = new Map<TimeSlot, string>();
-export let dayChartMode: "screen" | "language" = "language";
 
-const TIME_RANGES = [7, 30, 90] as const;
-export const CHANNEL_ROWS = 8;
-export const VIDEO_ROWS_PAGE = 20;
-export const CHANNEL_TOOLTIP_TITLES = 10;
-export const HEAT_LEVELS = 5;
+const RANGE_CHOICES: { days: 7 | 30 | 90; label: string }[] = [
+  { days: 7, label: "7 days" },
+  { days: 30, label: "30 days" },
+  { days: 90, label: "90 days" },
+];
 
 function mandalaSectionHtml(data: TimeSummaryResponse): string {
   const { summary, rules, mandala, piles } = data;
@@ -132,7 +128,7 @@ function mandalaSectionHtml(data: TimeSummaryResponse): string {
   return `
     <details class="time-card group flex flex-col gap-4"${inUse ? " open" : ""}>
       <summary class="flex items-center gap-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
-        <h2 class="font-display text-[22px] font-medium m-0 flex items-center gap-2">Mandala<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-text-muted transition-transform group-open:rotate-90" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></h2>
+        <h3 class="text-sm font-semibold text-text-secondary m-0 flex items-center gap-2">Mandala<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-text-muted transition-transform group-open:rotate-90" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></h3>
         ${counted > 0 ? `<span class="text-sm text-text-muted tabular-nums">${formatMinutesWords(counted)}</span>` : ""}
       </summary>
       <div class="flex flex-col gap-4 mt-4">
@@ -239,7 +235,7 @@ export async function renderTimePanel(): Promise<void> {
       <p class="text-xs text-text-muted m-0">${escapeHtml(error instanceof Error ? error.message : String(error))}</p>
       <button type="button" id="time-retry" class="chip">Try again</button>
     </div>`;
-    setDeskHero({ kicker: "Time", title: "", value: "Watch time", suffix: "didn't load" });
+    setDeskHero({ kicker: "History", title: "", value: "Watch time", suffix: "didn't load" });
     panel.setAttribute("aria-busy", "false");
     return;
   }
@@ -255,10 +251,10 @@ export async function renderTimePanel(): Promise<void> {
     if (headerStats.textContent !== stats) headerStats.textContent = stats;
   }
   setDeskHero({
-    kicker: "Time",
+    kicker: "History",
     title: "",
     value: formatMinutesWords(watch.total.playedSeconds),
-    suffix: `watched in the last ${timeRange} days`,
+    suffix: `in the last ${timeRange} days`,
   });
   paintTimePanel(panel, data);
   panel.setAttribute("aria-busy", "false");
@@ -274,45 +270,78 @@ export function scheduleTimeRefresh(): void {
   }, wait);
 }
 
-function timeSlotHtml(slot: TimeSlot, data: TimeSummaryResponse): string {
-  const { watch, prefs } = data;
-  switch (slot) {
-    case "rules":
-      return dailyRulesHtml(data.limits ?? [], watch, prefs);
-    case "add":
-      return addRuleFormHtml();
-    case "streak":
-      return data.streaks ? streakSectionHtml(data.streaks, watch) : "";
-    case "hours":
-      return languageHoursSectionHtml(data.hours ?? [], watch);
-    case "range":
-      return `<div class="time-card flex items-center justify-between gap-3 pt-2"><span class="text-sm text-text-secondary">Everything below covers the last</span><span class="ui-segmented" role="group" aria-label="Range">
-        ${TIME_RANGES.map((days) => `<button type="button" class="time-range budget-chip" data-days="${days}" aria-pressed="${timeRange === days}">${days} days</button>`).join("")}
-      </span></div>`;
-    case "watch":
-      return watchSectionsHtml(watch, prefs);
-    case "mandala":
-      return mandalaSectionHtml(data);
-    case "tracking":
-      return `<section class="time-card flex flex-col gap-3">
-      <h2 class="font-display text-[22px] font-medium m-0">Tracking</h2>
+/** Static frame: the Edit goals area and the advanced section are not repainted, so their open state survives. */
+function skeletonHtml(): string {
+  return `<div data-time-slot="range" class="contents"></div>
+    <div data-time-slot="watch" class="contents"></div>
+    <section class="flex flex-col gap-4 time-card" aria-labelledby="time-languages-heading">
+      <div class="flex items-center gap-3 flex-wrap">
+        <h2 id="time-languages-heading" class="font-display text-[22px] font-medium m-0 flex-1">Languages</h2>
+        <button type="button" id="time-edit-goals" class="chip h-8 text-xs" aria-expanded="${goalsOpen}" aria-controls="time-goals-edit">Edit goals</button>
+      </div>
+      <div data-time-slot="languages" class="contents"></div>
+      <div id="time-goals-edit" class="time-goals-edit${goalsOpen ? "" : " hidden"}">
+        <div class="flex justify-end"><button type="button" id="time-choose-languages" class="link-btn text-xs">Choose languages</button></div>
+        <div data-time-slot="rules" class="contents"></div>
+        <div data-time-slot="add" class="contents"></div>
+        <div data-time-slot="hours" class="contents"></div>
+      </div>
+    </section>
+    <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-text-muted">
+      <span>Only time the player is actually playing counts.</span>
+      <button type="button" id="time-export-csv" class="link-btn text-xs">Export as CSV</button>
+    </div>
+    <details class="history-advanced time-card group flex flex-col gap-4">
+      <summary class="flex items-center gap-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden"><h2 class="font-display text-[22px] font-medium m-0 flex-1">Tracking and Mandala</h2><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-text-muted transition-transform group-open:rotate-90" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></summary>
+      <div class="flex flex-col gap-6 mt-4">
+        <div data-time-slot="tracking" class="contents"></div>
+        <div data-time-slot="mandala" class="contents"></div>
+      </div>
+    </details>`;
+}
+
+function trackingHtml(prefs: TimeTrackingPrefs): string {
+  return `<div class="flex flex-col gap-3">
+      <h3 class="text-sm font-semibold text-text-secondary m-0">Tracking</h3>
       <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
         <label class="flex items-center gap-2.5 text-sm text-text-primary cursor-pointer"><input type="checkbox" role="switch" id="time-watch-history" class="ui-switch"${prefs.watchHistory ? " checked" : ""} /> YouTube history</label>
         <label class="flex items-center gap-2.5 text-sm text-text-primary cursor-pointer"><input type="checkbox" role="switch" id="time-enabled" class="ui-switch"${prefs.enabled ? " checked" : ""} /> Mandala page time</label>
-        <span class="flex items-center gap-2 text-sm text-text-secondary">Idle after <div class="time-select" data-select="idle" data-value="${prefs.idleSeconds}" data-label="Idle after"></div></span>
+        <div class="flex items-center gap-2 text-sm text-text-secondary">Idle after <div class="time-select" data-select="idle" data-value="${prefs.idleSeconds}" data-label="Idle after"></div></div>
         <span class="flex-1"></span>
-        <button type="button" id="time-export-csv" class="chip h-8 text-xs">Export CSV</button>
         <button type="button" id="time-export" class="chip h-8 text-xs" title="Everything, including Mandala page time, as JSON">Back up JSON</button>
         <button type="button" id="time-clear" class="chip h-8 text-xs chip--danger">Delete all time data</button>
       </div>
       <p class="text-xs text-text-muted m-0">Stored only in this browser.</p>
-    </section>`;
+    </div>`;
+}
+
+function timeSlotHtml(slot: TimeSlot, data: TimeSummaryResponse): string {
+  const { watch, prefs } = data;
+  switch (slot) {
+    case "range":
+      return `<div class="flex justify-end"><span class="ui-segmented" role="group" aria-label="Time range">${RANGE_CHOICES.map(
+        ({ days, label }) => `<button type="button" class="time-range budget-chip" data-days="${days}" aria-pressed="${timeRange === days}">${label}</button>`
+      ).join("")}</span></div>`;
+    case "watch":
+      return dayChartHtml(watch, prefs);
+    case "languages":
+      return languagesTableHtml(data, timeRange);
+    case "rules":
+      return dailyRulesHtml(data.limits ?? [], watch, prefs);
+    case "add":
+      return addRuleFormHtml();
+    case "hours":
+      return hoursEditHtml(data.hours ?? [], watch);
+    case "tracking":
+      return trackingHtml(prefs);
+    case "mandala":
+      return mandalaSectionHtml(data);
   }
 }
 
-/** A slot the person is using (focus, an open menu or form) waits until they leave it. */
+/** A slot the person is using (focus or an open menu) waits until they leave it. */
 function timeSlotBusy(box: HTMLElement): boolean {
-  return box.contains(document.activeElement) || box.querySelector(".hours-form.flex, [aria-expanded=true]") !== null;
+  return box.contains(document.activeElement) || box.querySelector("[aria-expanded=true]") !== null;
 }
 
 /**
@@ -322,7 +351,7 @@ function timeSlotBusy(box: HTMLElement): boolean {
 function paintTimePanel(panel: HTMLElement, data: TimeSummaryResponse): void {
   if (!panel.querySelector("[data-time-slot]")) {
     paintedTimeSlots.clear();
-    panel.innerHTML = TIME_SLOTS.map((slot) => `<div class="contents" data-time-slot="${slot}"${slot === "watch" ? ` id="time-watch"` : ""}></div>`).join("");
+    panel.innerHTML = skeletonHtml();
   }
   for (const slot of TIME_SLOTS) {
     const box = panel.querySelector<HTMLElement>(`[data-time-slot="${slot}"]`);
@@ -368,14 +397,6 @@ function wireAddRuleLanguage(box: HTMLElement): void {
   });
 }
 
-function repaintWatchSections(panel: HTMLElement): void {
-  const box = panel.querySelector<HTMLElement>("#time-watch");
-  if (!box || !lastTimeResponse) return;
-  const html = watchSectionsHtml(lastTimeResponse.watch, lastTimeResponse.prefs);
-  box.innerHTML = html;
-  paintedTimeSlots.set("watch", html);
-}
-
 function wireTimePanel(panel: HTMLElement): void {
   if (timePanelWired) return;
   timePanelWired = true;
@@ -388,40 +409,18 @@ function wireTimePanel(panel: HTMLElement): void {
     }, 0);
   });
 
-  browser.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local" || !changes[CHANNEL_AVATARS_KEY] || !lastTimeResponse || !app.isTimeView) return;
-    const avatars = (changes[CHANNEL_AVATARS_KEY].newValue ?? {}) as Record<string, string>;
-    let found = false;
-    for (const channel of lastTimeResponse.watch.byChannel) {
-      if (!channel.avatarUrl && avatars[channel.channelName]) {
-        channel.avatarUrl = avatars[channel.channelName];
-        found = true;
-      }
-    }
-    if (found) repaintWatchSections(panel);
-  });
-
   panel.addEventListener("click", async (event) => {
     const target = event.target as HTMLElement;
-    const hoursToggle = target.closest<HTMLElement>(".hours-edit, .hours-cancel");
-    if (hoursToggle) {
-      const card = hoursToggle.closest<HTMLElement>(".hours-card");
-      const form = card?.querySelector<HTMLFormElement>(".hours-form");
-      const opening = hoursToggle.classList.contains("hours-edit");
-      form?.classList.toggle("hidden", !opening);
-      form?.classList.toggle("flex", opening);
-      card?.querySelector<HTMLElement>(".hours-edit")?.parentElement?.classList.toggle("hidden", opening);
-      if (opening) form?.querySelector<HTMLInputElement>("input")?.focus();
-      else card?.querySelector<HTMLElement>(".hours-edit")?.focus();
-      return;
-    }
     const range = target.closest<HTMLElement>(".time-range");
     if (range) {
-      timeRange = TIME_RANGES.find((days) => String(days) === range.dataset.days) ?? 7;
-      showAllChannels = false;
-      openChannel = null;
-      videoRowsShown = 0;
+      timeRange = RANGE_CHOICES.find((choice) => String(choice.days) === range.dataset.days)?.days ?? 7;
       await renderTimePanel();
+      return;
+    }
+    if (target.closest("#time-edit-goals")) {
+      goalsOpen = !goalsOpen;
+      panel.querySelector("#time-edit-goals")?.setAttribute("aria-expanded", String(goalsOpen));
+      panel.querySelector("#time-goals-edit")?.classList.toggle("hidden", !goalsOpen);
       return;
     }
     const kind = target.closest<HTMLElement>(".time-rule-kind");
@@ -430,37 +429,6 @@ function wireTimePanel(panel: HTMLElement): void {
       for (const button of panel.querySelectorAll<HTMLElement>(".time-rule-kind")) button.setAttribute("aria-pressed", String(button === kind));
       const submit = panel.querySelector<HTMLElement>("#time-rule-add [type=submit]");
       if (submit) submit.textContent = newRuleKind === "goal" ? "Add goal" : "Add limit";
-      return;
-    }
-    const dayMode = target.closest<HTMLElement>(".time-day-mode");
-    if (dayMode) {
-      dayChartMode = dayMode.dataset.mode === "language" ? "language" : "screen";
-      repaintWatchSections(panel);
-      return;
-    }
-    if (target.closest("#time-channels-toggle")) {
-      showAllChannels = !showAllChannels;
-      repaintWatchSections(panel);
-      return;
-    }
-    const filter = target.closest<HTMLElement>(".time-channel-filter");
-    if (filter) {
-      app.channelLanguageFilter = filter.dataset.language || null;
-      showAllChannels = false;
-      openChannel = null;
-      repaintWatchSections(panel);
-      return;
-    }
-    const channelRow = target.closest<HTMLElement>(".time-channel");
-    if (channelRow && !target.closest("a")) {
-      openChannel = openChannel === channelRow.dataset.channel ? null : (channelRow.dataset.channel ?? null);
-      repaintWatchSections(panel);
-      return;
-    }
-    const moreVideos = target.closest<HTMLElement>("#time-videos-more");
-    if (moreVideos) {
-      videoRowsShown = Number(moreVideos.dataset.shown) + VIDEO_ROWS_PAGE * 2;
-      repaintWatchSections(panel);
       return;
     }
     const removeRule = target.closest<HTMLElement>(".time-rule-delete");
@@ -545,7 +513,7 @@ function wireTimePanel(panel: HTMLElement): void {
     const language = String(fields.get("language") ?? "").trim();
     const minutes = parseDurationMinutes(String(fields.get("minutes") ?? ""));
     if (!language || minutes === null || minutes < 1 || minutes > MAX_LIMIT_MINUTES) return;
-    // Pick up the label as the Time page spells it, so "english" still matches "English".
+    // Pick up the label as the page spells it, so "english" still matches "English".
     const known = watchedLanguageLabels.find((label) => languageKey(label) === languageKey(language));
     const rule: LanguageLimit = newRuleKind === "goal" ? { language: known ?? language, minutes, kind: "goal" } : { language: known ?? language, minutes };
     const others = plainRules().filter((each) => ruleKey(each) !== ruleKey(rule));

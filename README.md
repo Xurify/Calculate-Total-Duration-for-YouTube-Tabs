@@ -1,4 +1,4 @@
-# Earshot
+# Language Immersion Tracker
 
 A browser extension for learning languages by listening: it plans your YouTube watching around daily language goals.
 

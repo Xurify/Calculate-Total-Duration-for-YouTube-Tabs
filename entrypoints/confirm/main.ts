@@ -42,7 +42,7 @@ async function copyItems(items: string[]) {
 }
 
 function render(request: ApprovalRequest) {
-  document.title = `Earshot · ${request.title}`;
+  document.title = `Language Immersion Tracker · ${request.title}`;
   titleElement.textContent = request.title;
   originElement.textContent = request.origin;
   summaryElement.textContent = request.summary;

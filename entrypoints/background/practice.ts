@@ -15,7 +15,7 @@ let practiceQueue: Promise<unknown> = Promise.resolve();
 
 export function withPracticeStore<T>(work: () => Promise<T>): Promise<T> {
   const run = practiceQueue.then(work);
-  practiceQueue = run.catch((error) => console.warn("[Earshot] practice:", error));
+  practiceQueue = run.catch((error) => console.warn("[Language Immersion Tracker] practice:", error));
   return run;
 }
 

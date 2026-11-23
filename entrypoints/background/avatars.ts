@@ -39,7 +39,7 @@ export function fillChannelAvatars(channels: { channelName: string; videoId: str
         if (avatar) found[channel.channelName] = avatar;
         else misses[channel.channelName] = now;
       } catch (error) {
-        console.warn("[Earshot] channel avatar:", error);
+        console.warn("[Language Immersion Tracker] channel avatar:", error);
       }
     }
     await recordChannelAvatars(found);

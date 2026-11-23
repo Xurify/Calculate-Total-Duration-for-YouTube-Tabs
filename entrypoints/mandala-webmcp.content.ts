@@ -1,6 +1,6 @@
 /**
  * Mandala WebMCP Content Script (runs in MAIN world).
- * Injects Earshot tools onto mandalamethod.vercel.app so that browser AI
+ * Injects Language Immersion Tracker tools onto mandalamethod.vercel.app so that browser AI
  * agents can query open YouTube tabs, stage study queues, and inspect Chrome's Reading
  * List directly alongside Mandala's chart tools (PR #12 / PR #15).
  */

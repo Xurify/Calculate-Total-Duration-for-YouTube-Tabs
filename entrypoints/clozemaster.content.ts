@@ -87,7 +87,7 @@ function syncCardsToClozemasterLocalStorage(cards: StagedClozeCard[]): void {
       JSON.stringify(stagedCollections)
     );
   } catch (error) {
-    console.warn("[Earshot] Failed to sync cards to Clozemaster storage:", error);
+    console.warn("[Language Immersion Tracker] Failed to sync cards to Clozemaster storage:", error);
   }
 }
 

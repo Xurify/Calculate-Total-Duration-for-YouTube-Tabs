@@ -48,7 +48,7 @@ export async function prepareListenFirst(): Promise<ListenCheckState | null> {
   return page.listenState;
 }
 
-export async function setListenFirst(enabled: boolean): Promise<void> {
+export function setListenFirst(enabled: boolean): void {
   page.listenFirst = enabled;
   page.listenPreviousTime = null;
   applyListenFirstClass();
@@ -56,11 +56,10 @@ export async function setListenFirst(enabled: boolean): Promise<void> {
   void browser.storage.local.set({ [LISTEN_FIRST_KEY]: enabled });
   if (!enabled) {
     closeListenCard?.(false);
-    showImmersionToast("Listen first is off. Captions are back.");
     return;
   }
-  const state = await prepareListenFirst();
-  if (state) showImmersionToast("Listen first: captions hidden. The video stops after each bit of speech.");
+  // Loads captions now, so the first pause does not wait on them.
+  void prepareListenFirst();
 }
 
 export function checkListenFirst(videoElement: HTMLVideoElement): void {
@@ -86,7 +85,7 @@ function replayCheckpoint(checkpoint: ListeningCheckpoint): void {
 }
 
 function kbdHint(text: string): HTMLElement {
-  return element("kbd", "sh-listen-kbd", text);
+  return element("kbd", "study-harvester-key", text);
 }
 
 function listenCardButton(label: string, key: string, className = ""): HTMLButtonElement {
@@ -109,19 +108,8 @@ function showListenCard(state: ListenCheckState, index: number): void {
   card.setAttribute("aria-live", "polite");
 
   const head = element("div", "sh-listen-head");
-  const tallyText = () => {
-    const total = page.listenVideoTally.caught + page.listenVideoTally.read + page.listenVideoTally.missed;
-    return total > 0 ? `Caught ${page.listenVideoTally.caught} of ${total} by ear` : "First check in this video";
-  };
-  head.append(element("span", "sh-listen-kicker", "Listen first"), element("span", "sh-listen-meta", `${index + 1} of ${state.checkpoints.length} · ${tallyText()}`));
-  const offButton = element("button", "sh-listen-off", "Turn off");
-  offButton.type = "button";
-  offButton.title = "Turn Listen first off and bring captions back (E)";
-  head.append(offButton);
-
-  const body = element("div", "sh-listen-body");
   const prompt = element("p", "sh-listen-prompt", "Did you catch that?");
-  body.append(prompt);
+  head.append(prompt, element("span", "sh-listen-meta", `${index + 1} of ${state.checkpoints.length}`));
 
   const actions = element("div", "sh-listen-actions");
   const replayButton = listenCardButton("Replay", "A");
@@ -129,7 +117,7 @@ function showListenCard(state: ListenCheckState, index: number): void {
   const secondButton = listenCardButton("Show text", "S");
   const primaryButton = listenCardButton("Caught it", "↵", "is-accent");
   actions.append(replayButton, element("span", "sh-listen-spacer"), secondButton, primaryButton);
-  card.append(head, body, actions);
+  card.append(head, actions);
 
   const close = (resume: boolean) => {
     card.remove();
@@ -148,7 +136,6 @@ function showListenCard(state: ListenCheckState, index: number): void {
   };
 
   const record = (result: CheckResult) => {
-    page.listenVideoTally[result] += 1;
     const videoId = state.videoId;
     const sentence =
       result === "caught"
@@ -174,14 +161,14 @@ function showListenCard(state: ListenCheckState, index: number): void {
       })
       .catch(() => {});
     close(true);
-    if (result !== "caught") showImmersionToast("Saved for review on the desk's Practice page");
+    if (result !== "caught") showImmersionToast("Saved for the desk's Review page");
   };
 
   const reveal = () => {
     if (revealed) return;
     revealed = true;
     prompt.remove();
-    body.append(element("p", "sh-listen-text", text), element("p", "sh-listen-hint", "Listen again while you read."));
+    actions.before(element("p", "sh-listen-text", text), element("p", "sh-listen-hint", "Listen again while you read."));
     secondButton.replaceChildren(element("span", "", "Still lost"), kbdHint("N"));
     primaryButton.replaceChildren(element("span", "", "Got it now"), kbdHint("↵"));
     replayCheckpoint(checkpoint);
@@ -190,7 +177,6 @@ function showListenCard(state: ListenCheckState, index: number): void {
   replayButton.addEventListener("click", () => replayCheckpoint(checkpoint));
   secondButton.addEventListener("click", () => (revealed ? record("missed") : reveal()));
   primaryButton.addEventListener("click", () => record(revealed ? "read" : "caught"));
-  offButton.addEventListener("click", () => void setListenFirst(false));
 
   closeListenCard = close;
   handleListenCardKey = (keyboardEvent) => {

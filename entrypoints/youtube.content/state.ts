@@ -62,7 +62,6 @@ interface PageState {
   listenFirst: boolean;
   listenState: ListenCheckState | null;
   listenPreviousTime: number | null;
-  listenVideoTally: { caught: number; read: number; missed: number; };
 }
 
 /** Mutable values shared across modules; ES module bindings can't be reassigned by importers. */
@@ -105,5 +104,4 @@ export const page: PageState = {
   listenFirst: false,
   listenState: null,
   listenPreviousTime: null,
-  listenVideoTally: { caught: 0, read: 0, missed: 0 },
 };

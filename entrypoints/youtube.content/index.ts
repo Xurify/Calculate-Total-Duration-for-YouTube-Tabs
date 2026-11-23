@@ -17,11 +17,11 @@ import { updateImmersionHud } from "./hud";
 import { applyListenFirstClass, closeListenCard, prepareListenFirst } from "./listen-first";
 import { canonicalVideoUrl, checkMandalaStatusForCurrentPage } from "./mandala";
 import { getVideoIdFromLocation, readMetadataFromDom, scheduleRead } from "./metadata";
-import { getPlaybackState, isWatchOrShorts, setPlaybackVolume, togglePlayback } from "./playback";
+import { getPlaybackState, isWatchOrShorts, togglePlayback } from "./playback";
 import { mountShelfPopover } from "./shelf-popover";
 import { handleGlobalKeydown } from "./shortcuts";
 import { DEBOUNCE_MS, perf } from "./state";
-import { LIMIT_TOAST_MS, limitWarningText, showImmersionToast, showLimitCard } from "./toasts";
+import { LIMIT_TOAST_MS, limitNearText, showImmersionToast, showLimitCard } from "./toasts";
 import { type ClipRequest, initializeWatchPageFeatures, playClip, teardownWatchPageFeatures } from "./watch-page";
 
 export default defineContentScript({
@@ -143,10 +143,6 @@ export default defineContentScript({
           sendResponse(togglePlayback());
           return;
         }
-        if (runtimeMessage?.action === "set-volume" && typeof runtimeMessage.volume === "number") {
-          sendResponse(setPlaybackVolume(runtimeMessage.volume));
-          return;
-        }
         if (runtimeMessage?.action === "get-perf-stats") {
           const stats = {
             totalMutations: perf.totalMutations,
@@ -174,8 +170,9 @@ export default defineContentScript({
           | undefined;
         const warnings = response?.limitWarnings ?? [];
         const over = warnings.find((warning) => warning.level === "over");
-        if (over && response?.recommendations?.length) showLimitCard(over, response.recommendations);
-        else if (warnings[0]) showImmersionToast(limitWarningText(over ?? warnings[0]), LIMIT_TOAST_MS);
+        const near = warnings.find((warning) => warning.level === "near");
+        if (over) showLimitCard(over, response?.recommendations ?? []);
+        else if (near) showImmersionToast(limitNearText(near), LIMIT_TOAST_MS);
         return response;
       },
     }).start(context);

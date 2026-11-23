@@ -20,7 +20,6 @@ export function initializeWatchPageFeatures(context: {
     closeListenCard?.(false);
     page.listenState = null;
     page.listenPreviousTime = null;
-    page.listenVideoTally = { caught: 0, read: 0, missed: 0 };
   }
 
   injectImmersionStyles();

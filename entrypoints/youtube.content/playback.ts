@@ -28,14 +28,3 @@ export function togglePlayback() {
   }
   return getPlaybackState();
 }
-
-export function setPlaybackVolume(volume: number) {
-  const videoElement = document.querySelector("video");
-  if (!videoElement) return getPlaybackState();
-  const clampedVolume = Math.min(1, Math.max(0, volume));
-  videoElement.volume = clampedVolume;
-  if (clampedVolume > 0 && videoElement.muted) {
-    videoElement.muted = false;
-  }
-  return getPlaybackState();
-}

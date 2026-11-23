@@ -18,6 +18,9 @@ export function getTargetPlayerContainer(): HTMLElement {
   return shownPlayer ?? candidates[0] ?? document.body;
 }
 
+/** Matches the opacity transition in styles.ts. */
+const FADE_MS = 150;
+
 export function showImmersionToast(messageText: string, durationMs = 3200) {
   const existingToast = document.getElementById("study-harvester-hud-toast");
   if (existingToast) {
@@ -33,26 +36,19 @@ export function showImmersionToast(messageText: string, durationMs = 3200) {
   container.appendChild(toastElement);
   requestAnimationFrame(() => {
     toastElement.style.opacity = "1";
-    toastElement.style.transform = "translateY(0)";
   });
 
   window.setTimeout(() => {
     toastElement.style.opacity = "0";
-    toastElement.style.transform = "translateY(4px)";
-    window.setTimeout(() => toastElement.remove(), 250);
+    window.setTimeout(() => toastElement.remove(), FADE_MS);
   }, durationMs);
 }
 
 export const LIMIT_TOAST_MS = 9000;
 const LIMIT_CARD_ID = "study-harvester-limit-card";
 
-export function limitWarningText(warning: LimitWarning): string {
-  const used = formatMinutesWords(warning.usedSeconds);
-  const limit = formatMinutesWords(warning.minutes * 60);
-  if (warning.level === "met") return `${warning.language}: daily goal of ${limit} reached. Nice work.`;
-  return warning.level === "over"
-    ? `${warning.language}: daily limit of ${limit} reached (${used} today).`
-    : `${warning.language}: ${used} of your ${limit} daily limit. Time to switch language soon?`;
+export function limitNearText(warning: LimitWarning): string {
+  return `${warning.language}: ${formatMinutesWords(warning.usedSeconds)} of your ${formatMinutesWords(warning.minutes * 60)} daily limit`;
 }
 
 export function element<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {
@@ -66,7 +62,7 @@ function closeLimitCard(): void {
   const card = document.getElementById(LIMIT_CARD_ID);
   if (!card) return;
   card.classList.remove("is-shown");
-  window.setTimeout(() => card.remove(), 200);
+  window.setTimeout(() => card.remove(), FADE_MS);
 }
 
 /** Built from DOM nodes, since titles come from YouTube and are shown as text. */
@@ -79,7 +75,8 @@ export function showLimitCard(warning: LimitWarning, recommendations: Recommenda
 
   const head = element("div", "sh-limit-head");
   head.append(element("strong", "sh-limit-title", `${warning.language} limit reached`), element("span", "sh-limit-used", `${formatMinutesWords(warning.usedSeconds)} of ${formatMinutesWords(warning.minutes * 60)}`));
-  card.append(head, element("p", "sh-limit-note", "Switch to something from your history instead?"));
+  card.append(head);
+  if (recommendations.length > 0) card.append(element("p", "sh-limit-note", "Switch to something from your history instead?"));
 
   const list = element("div", "sh-limit-list");
   for (const pick of recommendations) {

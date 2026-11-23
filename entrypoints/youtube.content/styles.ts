@@ -60,19 +60,10 @@ export function injectImmersionStyles(): void {
       cursor: pointer;
       transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
     }
-    .study-harvester-hud-btn:hover:not(:disabled) {
+    .study-harvester-hud-btn:hover {
       background-color: rgba(38, 38, 38, 0.8);
       border-color: rgba(255, 255, 255, 0.22);
       transform: translateY(-1px);
-    }
-    .study-harvester-hud-btn:disabled {
-      cursor: default;
-      color: var(--sh-muted);
-    }
-    .study-harvester-hud-btn.is-icon {
-      width: 36px;
-      padding: 0;
-      justify-content: center;
     }
     .study-harvester-hud-btn.is-accent {
       border-color: transparent;
@@ -81,9 +72,27 @@ export function injectImmersionStyles(): void {
       font-weight: 600;
       box-shadow: 0 6px 20px -10px rgba(0, 0, 0, 0.8);
     }
-    .study-harvester-hud-btn.is-accent:hover:not(:disabled) {
+    .study-harvester-hud-btn.is-accent:hover {
       background-color: #62c3a8;
       filter: brightness(1.06);
+    }
+    .study-harvester-key {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 20px;
+      height: 20px;
+      padding: 0 5px;
+      box-sizing: border-box;
+      border-radius: 6px;
+      background-color: rgba(255, 255, 255, 0.1);
+      color: inherit;
+      font: 600 11px/1 "YouTube Sans", Roboto, Arial, sans-serif;
+      opacity: 0.8;
+    }
+    .study-harvester-hud-btn.is-accent .study-harvester-key,
+    #study-harvester-listen-card .sh-listen-btn.is-accent .study-harvester-key {
+      background-color: rgba(20, 20, 20, 0.14);
     }
     .study-harvester-shelf-popover {
       --sh-ink: #f1f1ef;
@@ -193,7 +202,6 @@ export function injectImmersionStyles(): void {
       display: flex;
       flex-direction: column;
       gap: 10px;
-      animation: study-harvester-rise 0.22s ease-out;
     }
     .study-harvester-cloze-card:focus {
       outline: none;
@@ -407,9 +415,8 @@ export function injectImmersionStyles(): void {
       color: #f1f1ef;
       font: 400 14px/20px Roboto, Arial, sans-serif;
       z-index: 61;
-      transition: opacity 0.2s ease, transform 0.2s ease;
+      transition: opacity 0.15s ease;
       opacity: 0;
-      transform: translateY(4px);
       pointer-events: none;
     }
     #study-harvester-limit-card {
@@ -431,12 +438,16 @@ export function injectImmersionStyles(): void {
       font: 400 13px/18px Roboto, Arial, sans-serif;
       z-index: 62;
       opacity: 0;
-      transform: translateY(6px);
-      transition: opacity 0.2s ease, transform 0.2s ease;
+      transition: opacity 0.15s ease;
     }
     #study-harvester-limit-card.is-shown {
       opacity: 1;
-      transform: translateY(0);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #study-harvester-hud-toast,
+      #study-harvester-limit-card {
+        transition: none;
+      }
     }
     #study-harvester-limit-card .sh-limit-head {
       display: flex;
@@ -562,38 +573,15 @@ export function injectImmersionStyles(): void {
     }
     #study-harvester-listen-card .sh-listen-head {
       display: flex;
-      align-items: center;
+      align-items: baseline;
       gap: 10px;
-      font-size: 12px;
-      color: rgba(241, 241, 239, 0.6);
-    }
-    #study-harvester-listen-card .sh-listen-kicker {
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      text-transform: none;
-      color: #62c3a8;
     }
     #study-harvester-listen-card .sh-listen-meta {
-      flex: 1;
-      min-width: 0;
-      overflow: hidden;
-      white-space: nowrap;
-      text-overflow: ellipsis;
-      font-variant-numeric: tabular-nums;
-    }
-    #study-harvester-listen-card .sh-listen-off {
-      height: 26px;
-      padding: 0 10px;
-      border: none;
-      border-radius: 8px;
-      background: transparent;
+      margin-left: auto;
+      font-size: 12px;
       color: rgba(241, 241, 239, 0.6);
-      font: 500 12px "YouTube Sans", Roboto, Arial, sans-serif;
-      cursor: pointer;
-    }
-    #study-harvester-listen-card .sh-listen-off:hover {
-      background-color: rgba(255, 255, 255, 0.08);
-      color: #f1f1ef;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
     }
     #study-harvester-listen-card .sh-listen-prompt,
     #study-harvester-listen-card .sh-listen-text {
@@ -651,27 +639,9 @@ export function injectImmersionStyles(): void {
     #study-harvester-listen-card .sh-listen-btn.is-accent:hover {
       filter: brightness(1.06);
     }
-    #study-harvester-listen-card .sh-listen-btn:focus-visible,
-    #study-harvester-listen-card .sh-listen-off:focus-visible {
+    #study-harvester-listen-card .sh-listen-btn:focus-visible {
       outline: 2px solid #62c3a8;
       outline-offset: 2px;
-    }
-    #study-harvester-listen-card .sh-listen-kbd {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 20px;
-      height: 20px;
-      padding: 0 5px;
-      box-sizing: border-box;
-      border-radius: 6px;
-      background-color: rgba(255, 255, 255, 0.1);
-      color: inherit;
-      font: 600 11px/1 "YouTube Sans", Roboto, Arial, sans-serif;
-      opacity: 0.8;
-    }
-    #study-harvester-listen-card .sh-listen-btn.is-accent .sh-listen-kbd {
-      background-color: rgba(20, 20, 20, 0.14);
     }
   `;
   document.head.appendChild(styleElement);

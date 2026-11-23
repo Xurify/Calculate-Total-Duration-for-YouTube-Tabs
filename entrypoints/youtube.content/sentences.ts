@@ -90,7 +90,6 @@ export async function replaySentence(): Promise<void> {
 
   if (!loaded) {
     playSentence({ text: "", startSeconds: Math.max(0, currentTime - 4), endSeconds: currentTime });
-    showImmersionToast("Rewound 4s");
     return;
   }
 
@@ -108,7 +107,6 @@ export async function skipToNextSentence(): Promise<void> {
 
   if (!nextSentence) {
     videoElement.currentTime = currentTime + 5;
-    showImmersionToast("Skipped 5s");
     return;
   }
   playSentence(nextSentence);
